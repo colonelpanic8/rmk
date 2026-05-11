@@ -74,6 +74,12 @@ where
     profile_manager: ProfileManager<'b, 's, C, DefaultPacketPool>,
     product_name: &'static str,
     config: BleBatteryConfig<'b>,
+    /// Optional Rynk dispatch core. When set, [`run_ble_keyboard`] joins a
+    /// [`RynkBleTransport`](crate::host::RynkBleTransport) future per
+    /// connection so wire requests from the host land in the same
+    /// `RynkService` USB uses.
+    #[cfg(feature = "rynk")]
+    rynk_service: Option<&'b crate::host::rynk::RynkService<'b>>,
 }
 
 impl<'b, 's, C> BleTransport<'b, 's, C>
@@ -126,7 +132,17 @@ where
             profile_manager,
             product_name: rmk_config.device_config.product_name,
             config: rmk_config.ble_battery_config,
+            #[cfg(feature = "rynk")]
+            rynk_service: None,
         }
+    }
+
+    /// Attach a [`RynkService`](crate::host::rynk::RynkService) so the per-connection
+    /// runner joins a Rynk dispatch future alongside the keyboard/HID/host tasks.
+    #[cfg(feature = "rynk")]
+    pub fn with_rynk_service(mut self, service: &'b crate::host::rynk::RynkService<'b>) -> Self {
+        self.rynk_service = Some(service);
+        self
     }
 }
 
@@ -174,6 +190,8 @@ where
                                 #[cfg(feature = "storage")]
                                 active_bond_info,
                                 &self.config,
+                                #[cfg(feature = "rynk")]
+                                self.rynk_service,
                             ),
                             profile_manager.update_profile(),
                         )
@@ -266,6 +284,14 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
         server.host_service.output_data,
         server.host_service.input_data,
         server.host_service.hid_control_point,
+    );
+    // `Characteristic<heapless::Vec<u8, N>>` is `Clone` but not `Copy` because
+    // `Vec` itself isn't Copy — only the handles are needed for comparisons
+    // here, so clone instead of move.
+    #[cfg(feature = "rynk")]
+    let (rynk_output, rynk_input) = (
+        server.rynk_service.output_data.clone(),
+        server.rynk_service.input_data.clone(),
     );
     let mouse = server.composite_service.mouse_report;
     let media = server.composite_service.media_report;
@@ -386,6 +412,10 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                                 }
                             }
                         } else {
+                            #[cfg(any(feature = "host", feature = "rynk"))]
+                            let mut handled = false;
+                            #[cfg(not(any(feature = "host", feature = "rynk")))]
+                            let handled = false;
                             #[cfg(feature = "host")]
                             if event.handle() == output_host.handle {
                                 debug!("Got host packet: {:?}", data);
@@ -394,13 +424,31 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                                 } else {
                                     warn!("Wrong host packet data: {:?}", data);
                                 }
+                                handled = true;
                             } else if event.handle() == input_host.cccd_handle.expect("No CCCD for input host") {
                                 cccd_updated = true;
-                            } else {
+                                handled = true;
+                            }
+                            #[cfg(feature = "rynk")]
+                            if !handled && event.handle() == rynk_output.handle {
+                                debug!("Got Rynk packet ({} bytes)", data.len());
+                                match heapless::Vec::from_slice(data) {
+                                    Ok(chunk) => crate::channel::RYNK_RX_CHANNEL.send(chunk).await,
+                                    Err(_) => {
+                                        warn!("Rynk write of {} bytes exceeds chunk capacity, dropping", data.len())
+                                    }
+                                }
+                                handled = true;
+                            } else if !handled
+                                && event.handle() == rynk_input.cccd_handle.expect("No CCCD for Rynk input")
+                            {
+                                cccd_updated = true;
+                                crate::channel::BLE_RYNK_READY.signal(());
+                                handled = true;
+                            }
+                            if !handled {
                                 debug!("Write GATT Event to Unknown: {:?}", event.handle());
                             }
-                            #[cfg(not(feature = "host"))]
-                            debug!("Write GATT Event to Unknown: {:?}", event.handle());
                         }
 
                         if conn.raw().security_level()?.encrypted() {
@@ -639,6 +687,7 @@ pub(crate) async fn set_conn_params<
 async fn run_ble_keyboard<
     'a,
     'b,
+    'r,
     C: Controller + ControllerCmdAsync<LeSetPhy> + ControllerCmdSync<LeReadLocalSupportedFeatures>,
 >(
     server: &'b Server<'_>,
@@ -646,6 +695,7 @@ async fn run_ble_keyboard<
     stack: &Stack<'_, C, DefaultPacketPool>,
     #[cfg(feature = "storage")] active_bond_info: Option<crate::ble::profile::ProfileInfo>,
     config: &BleBatteryConfig<'a>,
+    #[cfg(feature = "rynk")] rynk_service: Option<&'r crate::host::rynk::RynkService<'r>>,
 ) {
     let mut ble_hid_server = BleHidServer::new(server, conn);
     let mut ble_led_reader = BleLedReader;
@@ -695,7 +745,23 @@ async fn run_ble_keyboard<
     #[cfg(not(feature = "host"))]
     let host_task = core::future::pending::<()>();
 
-    let inner = embassy_futures::join::join3(writer_task, led_task, host_task);
+    // The Rynk per-connection runner mirrors the Vial `host_task`: it
+    // owns the input/output BLE characteristics for the duration of the
+    // connection. When `rynk_service` is `None` (Rynk feature off or no
+    // service attached), poll a pending future so the join is a no-op.
+    #[cfg(feature = "rynk")]
+    let rynk_task = async {
+        if let Some(service) = rynk_service {
+            let rynk_ble = crate::host::rynk::RynkBleTransport::new(server);
+            rynk_ble.run(conn, service).await;
+        } else {
+            core::future::pending::<()>().await;
+        }
+    };
+    #[cfg(not(feature = "rynk"))]
+    let rynk_task = core::future::pending::<()>();
+
+    let inner = embassy_futures::join::join4(writer_task, led_task, host_task, rynk_task);
     select(communication_task, inner).await;
 }
 
