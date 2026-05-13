@@ -100,14 +100,9 @@ pub(crate) fn rmk_entry_select(
         }
     };
 
-    let host_service_task = if host.vial_enabled {
-        Some(quote! { host_service.run() })
-    } else {
-        None
-    };
     let board = &hardware.board;
     let communication = &hardware.communication;
-    let (transport_prelude, transport_tasks) = transport_setup(communication);
+    let (transport_prelude, transport_tasks) = transport_setup(host, communication);
 
     let entry = match board {
         BoardConfig::Split(split_config) => {
@@ -116,9 +111,6 @@ pub(crate) fn rmk_entry_select(
             };
             let mut tasks = vec![devices_task, keyboard_task];
             tasks.extend(registered_processors);
-            if let Some(t) = host_service_task {
-                tasks.push(t);
-            }
             tasks.extend(transport_tasks);
             if let Some(t) = &watchdog_task {
                 tasks.push(t.clone());
@@ -196,7 +188,6 @@ pub(crate) fn rmk_entry_select(
             transport_prelude,
             auto_mouse_layer_prelude,
             transport_tasks,
-            host_service_task,
             devices_task,
             processors_task,
             registered_processors,
@@ -215,7 +206,6 @@ pub(crate) fn rmk_entry_unibody(
     transport_prelude: TokenStream2,
     auto_mouse_layer_prelude: Option<TokenStream2>,
     transport_tasks: Vec<TokenStream2>,
-    host_service_task: Option<TokenStream2>,
     devices_task: TokenStream2,
     processors_task: TokenStream2,
     registered_processors: Vec<TokenStream2>,
@@ -226,9 +216,6 @@ pub(crate) fn rmk_entry_unibody(
     };
 
     let mut tasks = vec![devices_task, keyboard_task];
-    if let Some(t) = host_service_task {
-        tasks.push(t);
-    }
     if !processors_task.is_empty() {
         tasks.push(processors_task);
     }
@@ -249,31 +236,55 @@ pub(crate) fn rmk_entry_unibody(
 /// active communication config. The prelude must be emitted before the join so
 /// that `transport.run()` can borrow each transport for the lifetime of the
 /// program.
-fn transport_setup(communication: &CommunicationConfig) -> (TokenStream2, Vec<TokenStream2>) {
+fn transport_setup(
+    host: &Host,
+    communication: &CommunicationConfig,
+) -> (TokenStream2, Vec<TokenStream2>) {
     let wpm_prelude = quote! {
         let mut wpm_processor = ::rmk::processor::builtin::wpm::WpmProcessor::new();
     };
     let wpm_task = quote! { wpm_processor.run() };
+
+    let host_active = host.vial_enabled || host.rynk_enabled;
+
+    let usb_prelude = if host_active {
+        quote! {
+            let mut usb_transport = ::rmk::usb::UsbTransport::new(driver, rmk_config.device_config)
+                .with_host_service(&host_service);
+        }
+    } else {
+        quote! { let mut usb_transport = ::rmk::usb::UsbTransport::new(driver, rmk_config.device_config); }
+    };
+    let ble_prelude = if host_active {
+        quote! {
+            let mut ble_transport = ::rmk::ble::BleTransport::new(&stack, rmk_config)
+                .await
+                .with_host_service(&host_service);
+        }
+    } else {
+        quote! { let mut ble_transport = ::rmk::ble::BleTransport::new(&stack, rmk_config).await; }
+    };
+
     match communication {
         CommunicationConfig::Usb(_) => {
             let prelude = quote! {
                 #wpm_prelude
-                let mut usb_transport = ::rmk::usb::UsbTransport::new(driver, rmk_config.device_config);
+                #usb_prelude
             };
             (prelude, vec![quote! { usb_transport.run() }, wpm_task])
         }
         CommunicationConfig::Ble(_) => {
             let prelude = quote! {
                 #wpm_prelude
-                let mut ble_transport = ::rmk::ble::BleTransport::new(&stack, rmk_config).await;
+                #ble_prelude
             };
             (prelude, vec![quote! { ble_transport.run() }, wpm_task])
         }
         CommunicationConfig::Both(_, _) => {
             let prelude = quote! {
                 #wpm_prelude
-                let mut usb_transport = ::rmk::usb::UsbTransport::new(driver, rmk_config.device_config);
-                let mut ble_transport = ::rmk::ble::BleTransport::new(&stack, rmk_config).await;
+                #usb_prelude
+                #ble_prelude
             };
             (
                 prelude,
