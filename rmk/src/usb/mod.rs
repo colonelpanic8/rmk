@@ -23,6 +23,8 @@ use crate::state::{current_usb_state, set_usb_state};
 
 #[cfg(feature = "rynk")]
 pub(crate) mod rynk;
+#[cfg(feature = "vial")]
+pub(crate) mod vial;
 
 pub(crate) static USB_REMOTE_WAKEUP: Signal<RawMutex, ()> = Signal::new();
 
@@ -193,8 +195,7 @@ pub(crate) fn new_usb_builder<'d, D: Driver<'d>>(driver: D, keyboard_config: Dev
 
 /// USB transport runnable. Owns the embassy-usb device + every HID
 /// reader/writer pair and runs them concurrently for the lifetime of the
-/// program. `'a` carries the optional host-service reference from
-/// [`with_host_service`](Self::with_host_service).
+/// program.
 pub struct UsbTransport<'a, D: Driver<'static>> {
     device: UsbDevice<'static, D>,
     keyboard_reader: HidReader<'static, D, 1>,
@@ -204,14 +205,12 @@ pub struct UsbTransport<'a, D: Driver<'static>> {
     steno_writer: HidWriter<'static, D, 9>,
     #[cfg(feature = "usb_log")]
     logger: Option<embassy_usb::class::cdc_acm::CdcAcmClass<'static, D>>,
-    /// Rynk USB CDC-ACM halves. Created during `Builder` time, owned for
-    /// the program's lifetime. The run loop awaits DTR on `host_sender`
-    /// and runs `RynkService::run_session(host_receiver, host_sender)`.
+    /// Host-protocol transport halves: CDC-ACM under `rynk`, 32-byte HID
+    /// reports under `vial`.
     #[cfg(feature = "rynk")]
-    host_sender: embassy_usb::class::cdc_acm::Sender<'static, D>,
+    host_reader: embassy_usb::class::cdc_acm::BufferedReceiver<'static, D>,
     #[cfg(feature = "rynk")]
-    host_receiver: embassy_usb::class::cdc_acm::BufferedReceiver<'static, D>,
-    /// Vial HID 32-byte report halves.
+    host_writer: embassy_usb::class::cdc_acm::Sender<'static, D>,
     #[cfg(feature = "vial")]
     host_reader: HidReader<'static, D, 32>,
     #[cfg(feature = "vial")]
@@ -260,15 +259,8 @@ impl<'a, D: Driver<'static>> UsbTransport<'a, D> {
             }
         }
 
-        // Register the host endpoints regardless of whether a service is
-        // attached — the alternative would require deferring the
-        // embassy_usb builder finalization until [`with_host_service`].
-        // The endpoints idle until the run loop has a service to drive
-        // them with.
-        #[cfg(feature = "rynk")]
-        let (host_sender, host_receiver) = crate::usb::rynk::build_rynk_cdc(&mut builder);
-        #[cfg(feature = "vial")]
-        let (host_reader, host_writer) = crate::host::usb::build_vial_hid(&mut builder);
+        #[cfg(any(feature = "rynk", feature = "vial"))]
+        let (host_reader, host_writer) = crate::host::build_host_usb(&mut builder);
 
         let (keyboard_reader, keyboard_writer) = keyboard_rw.split();
         let device = builder.build();
@@ -282,13 +274,9 @@ impl<'a, D: Driver<'static>> UsbTransport<'a, D> {
             steno_writer,
             #[cfg(feature = "usb_log")]
             logger,
-            #[cfg(feature = "rynk")]
-            host_sender,
-            #[cfg(feature = "rynk")]
-            host_receiver,
-            #[cfg(feature = "vial")]
+            #[cfg(any(feature = "rynk", feature = "vial"))]
             host_reader,
-            #[cfg(feature = "vial")]
+            #[cfg(any(feature = "rynk", feature = "vial"))]
             host_writer,
             #[cfg(feature = "host")]
             host_service: None,
@@ -297,10 +285,7 @@ impl<'a, D: Driver<'static>> UsbTransport<'a, D> {
         }
     }
 
-    /// Attach the host-protocol service ([`crate::host::HostService`], Vial
-    /// or Rynk per feature). Borrowed (not a top-level [`Runnable`]) so
-    /// `run_session` executes inside this transport's task — avoids
-    /// routing every request/reply through a global channel.
+    /// Attach the host-protocol service
     #[cfg(feature = "host")]
     pub fn with_host_service(mut self, service: &'a crate::host::HostService<'a>) -> Self {
         self.host_service = Some(service);
@@ -319,13 +304,9 @@ impl<D: Driver<'static>> Runnable for UsbTransport<'_, D> {
             steno_writer,
             #[cfg(feature = "usb_log")]
             logger,
-            #[cfg(feature = "rynk")]
-            host_sender,
-            #[cfg(feature = "rynk")]
-            host_receiver,
-            #[cfg(feature = "vial")]
+            #[cfg(any(feature = "rynk", feature = "vial"))]
             host_reader,
-            #[cfg(feature = "vial")]
+            #[cfg(any(feature = "rynk", feature = "vial"))]
             host_writer,
             #[cfg(feature = "host")]
             host_service,
@@ -361,18 +342,10 @@ impl<D: Driver<'static>> Runnable for UsbTransport<'_, D> {
         let led_task = run_led_reader(&mut led_reader, ConnectionType::Usb);
 
         let host_and_extras = async {
-            #[cfg(feature = "rynk")]
+            #[cfg(any(feature = "rynk", feature = "vial"))]
             let host_task = async {
                 if let Some(service) = *host_service {
-                    crate::usb::rynk::run_rynk_cdc(host_sender, host_receiver, service).await
-                } else {
-                    core::future::pending::<()>().await
-                }
-            };
-            #[cfg(feature = "vial")]
-            let host_task = async {
-                if let Some(service) = *host_service {
-                    crate::host::usb::run_vial_hid(host_reader, host_writer, service).await
+                    crate::host::run_host_usb(host_reader, host_writer, service).await
                 } else {
                     core::future::pending::<()>().await
                 }
