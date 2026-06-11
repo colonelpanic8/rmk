@@ -62,6 +62,9 @@ for crate in rmk rmk-config rmk-macro rmk-types; do
     cargo +nightly fmt --manifest-path "$crate/Cargo.toml"
 done
 
+log_section "Formatting host tooling"
+cargo +nightly fmt --manifest-path rynk/Cargo.toml --all
+
 log_section "Formatting examples"
 while IFS= read -r manifest; do
     cargo +nightly fmt --manifest-path "$manifest"
