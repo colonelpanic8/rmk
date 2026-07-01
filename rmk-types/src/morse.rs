@@ -20,6 +20,8 @@ use crate::constants::MORSE_SIZE;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(u8)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub enum MorseMode {
     /// Same as QMK's permissive hold: <https://docs.qmk.fm/tap_hold#tap-or-hold-decision-modes>
     /// When another key is pressed and released during the current morse key is held,
@@ -46,7 +48,7 @@ pub enum MorseMode {
 /// - `gap_timeout` (bits 29-17): gap timeout in ms (0 = None, max 8191)
 /// - `uni_tap` (bits 16-15): `00`/`01` = None, `10` = Some(false), `11` = Some(true)
 /// - `hold_timeout` (bits 12-0): hold timeout in ms (0 = None, max 8191)
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize, MaxSize)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct MorseProfile(u32);
 
@@ -219,6 +221,68 @@ impl From<MorseProfile> for u32 {
     }
 }
 
+// Wire (postcard): the packed `u32`. Human-readable (serde_wasm_bindgen / JSON): a
+// named object of the decoded fields, so TS gets a real object while the RAM-tight
+// `u32` stays on the wire. `mode` reuses the `MorseMode` enum.
+impl Serialize for MorseProfile {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if serializer.is_human_readable() {
+            #[derive(Serialize)]
+            struct Repr {
+                unilateral_tap: Option<bool>,
+                enable_flow_tap: Option<bool>,
+                mode: Option<MorseMode>,
+                hold_timeout_ms: Option<u16>,
+                gap_timeout_ms: Option<u16>,
+            }
+            Repr {
+                unilateral_tap: self.unilateral_tap(),
+                enable_flow_tap: self.enable_flow_tap(),
+                mode: self.mode(),
+                hold_timeout_ms: self.hold_timeout_ms(),
+                gap_timeout_ms: self.gap_timeout_ms(),
+            }
+            .serialize(serializer)
+        } else {
+            serializer.serialize_u32(self.0)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MorseProfile {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        if deserializer.is_human_readable() {
+            #[derive(Deserialize)]
+            struct Repr {
+                unilateral_tap: Option<bool>,
+                enable_flow_tap: Option<bool>,
+                mode: Option<MorseMode>,
+                hold_timeout_ms: Option<u16>,
+                gap_timeout_ms: Option<u16>,
+            }
+            let r = Repr::deserialize(deserializer)?;
+            let profile = MorseProfile::new(
+                r.unilateral_tap,
+                r.mode,
+                r.hold_timeout_ms,
+                r.gap_timeout_ms,
+            )
+            .with_enable_flow_tap(r.enable_flow_tap);
+            Ok(profile)
+        } else {
+            Ok(MorseProfile(u32::deserialize(deserializer)?))
+        }
+    }
+}
+
+// TS shape mirrors the `Repr` above; `Option<T>` renders as `T | undefined`.
+#[cfg(feature = "wasm")]
+const _: () = {
+    #[::wasm_bindgen::prelude::wasm_bindgen(typescript_custom_section)]
+    const TS_APPEND_CONTENT: &'static str = "export type MorseProfile = { unilateral_tap: boolean | undefined; enable_flow_tap: boolean | undefined; mode: MorseMode | undefined; hold_timeout_ms: number | undefined; gap_timeout_ms: number | undefined; };";
+};
+crate::wasm_object_abi!(MorseProfile);
+
 // ---------------------------------------------------------------------------
 // MorsePattern & Morse — pattern encoding and key definition
 // ---------------------------------------------------------------------------
@@ -227,6 +291,8 @@ impl From<MorseProfile> for u32 {
 /// 0x1 when empty, then 0 for tap or 1 for hold shifted from the right
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct MorsePattern(u16);
 
 pub const TAP: MorsePattern = MorsePattern(0b10);
@@ -307,12 +373,15 @@ impl MorsePattern {
 /// Note: `MORSE_SIZE` is a **wire-format** capacity — on firmware it equals
 /// `MAX_PATTERNS_PER_KEY` (from `keyboard.toml`), on host it's a fixed upper bound.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct Morse {
     /// The profile of this morse key, which defines the timing parameters, etc.
     /// If some of its fields are filled with None, the global default value will be used.
     pub profile: MorseProfile,
     /// The list of pattern -> action pairs, which can be triggered
     #[serde(with = "morse_actions_serde")]
+    #[cfg_attr(feature = "wasm", tsify(type = "[number, Action][]"))]
     pub actions: LinearMap<MorsePattern, Action, MORSE_SIZE>,
 }
 
@@ -706,6 +775,23 @@ mod tests {
         assert_eq!(profile.gap_timeout_ms(), Some(2000));
         assert_eq!(profile.unilateral_tap(), Some(true));
         assert_eq!(profile.mode(), Some(MorseMode::PermissiveHold));
+    }
+
+    /// The human-readable serde goes `MorseProfile` -> decoded parts -> `new()`.
+    /// All 32 bits are covered by the five fields, so that path must be lossless.
+    #[test]
+    fn morse_profile_parts_roundtrip() {
+        for p in [
+            MorseProfile::new(Some(false), Some(MorseMode::HoldOnOtherPress), Some(TIMEOUT_MAX_MS), Some(1))
+                .with_enable_flow_tap(Some(false)),
+            MorseProfile::new(Some(true), Some(MorseMode::Normal), Some(200), Some(150))
+                .with_enable_flow_tap(Some(true)),
+            MorseProfile::const_default(),
+        ] {
+            let parts = MorseProfile::new(p.unilateral_tap(), p.mode(), p.hold_timeout_ms(), p.gap_timeout_ms())
+                .with_enable_flow_tap(p.enable_flow_tap());
+            assert_eq!(p, parts);
+        }
     }
 
     /// Pins the on-wire shape of `Morse`:
