@@ -7,6 +7,7 @@ authors.workspace = true
 description = "USB CDC-ACM serial transport for the Rynk host library"
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
 keywords = ["keyboard", "firmware", "rmk", "protocol", "serial"]
 
 [dependencies]

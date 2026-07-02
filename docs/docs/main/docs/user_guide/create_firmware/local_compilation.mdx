@@ -114,6 +114,9 @@ The next step is to add your own keymap layout for your firmware. RMK supports [
 
 Fortunately, RMK does most of the heavy things for you, all you need to do is to create your own keymap definition and convert it to `vial.json` following **[vial's doc here](https://get.vial.today/docs/porting-to-via.html)**, and place it at the root of the firmware project, replacing the default one. RMK will do all the rest for you.
 
+If you use the default [Rynk](../../features/rynk) protocol instead of Vial, you don't need a
+`vial.json` — skip this step.
+
 ### (Optional) Update compilation target
 
 For STM32 microcontrollers, the compilation target varies according to the series. If there's no project template for your specific STM32 model, a common template will be used. An extra step for the common template is to update `.cargo/config.toml`, change the project's default target:

@@ -6,7 +6,8 @@ PMW3360 / PMW3389 are optical mouse sensors.
 
 - PMW33xx uses full-duplex SPI. (MISO/ MOSI) Please note that because of the special requirements those sensors have for the switching of their chip select pin, they can not share an SPI bus with each other or any other SPI device. For each SPI peripheral (SPI0, SPI1 etc.) there can only be one sensor connected.
 - Set `motion` pin for better power efficiency. If omitted, the sensor is polled.
-- By default, report rate is limited to 125 Hz to prevent flooding the event channel, which causes latency issues especially over BLE.
+- By default, report rate is limited to 125 Hz to prevent flooding the event channel, which causes
+  latency issues especially over BLE.
 - Only Nrf, RP2040 and STM32 are supported now.
 
 :::
@@ -138,10 +139,10 @@ bind_interrupts!(struct Irqs {
 
     // Create the sensor device
     // for PMW3360
-    const POINTING_DEV_ID: u8 = 0 // this ID can be anything form 0-255. Just make sure you don't use the same number twice for different sensors to avoid confusion.
-    let mut PointingDevice::<Pmw33xx<_, _, _, Pmw3360Spec>>::new(POINTING_DEV_ID, spi_bus, cs, Some(motion), sensor_config);
+    const POINTING_DEV_ID: u8 = 0; // this ID can be anything form 0-255. Just make sure you don't use the same number twice for different sensors to avoid confusion.
+    let mut device = PointingDevice::<Pmw33xx<_, _, _, Pmw3360Spec>>::new(POINTING_DEV_ID, spi_bus, cs, Some(motion), sensor_config);
     // for PMW3389
-    let mut PointingDevice::<Pmw33xx<_, _, _, Pmw3389Spec>>::new(POINTING_DEV_ID, spi_bus, cs, Some(motion), sensor_config);
+    let mut device = PointingDevice::<Pmw33xx<_, _, _, Pmw3389Spec>>::new(POINTING_DEV_ID, spi_bus, cs, Some(motion), sensor_config);
 
 // There are several other initializers available to set polling and report rate.
 // For example if you have an SROM for the sensor, you can upload it at startup using this:

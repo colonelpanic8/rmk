@@ -26,7 +26,7 @@ protocol validation stay in Rust.
 - Wasm target: `rustup target add wasm32-unknown-unknown`
 - Packager: `cargo install wasm-pack`
 
-## Build & Serve
+## Build and serve
 
 ```bash
 cd rynk/rynk-wasm
@@ -41,7 +41,7 @@ reference shell.
 the `wasm-pack` output. Build through `scripts/gen-types.sh` so it stays current;
 CI regenerates it and fails if the committed copy is stale.
 
-## Minimal Usage
+## Minimal usage
 
 Import the generated wasm package, create a JS byte link, connect it, then call
 typed client methods.
@@ -54,8 +54,8 @@ await init();
 const link = await openSerialByteLink();
 const client = await connect(link);
 
-console.log("protocol", client.protocol_version());
-console.log("capabilities", client.capabilities());
+console.log("protocol", await client.get_version());
+console.log("capabilities", await client.get_capabilities());
 console.log("current layer", await client.get_current_layer());
 
 // Pull topic pushes (layer changes, WPM, …) until the link closes.
@@ -89,7 +89,7 @@ The object passed to `connect(link)` only needs this shape:
 shows the optional version-probe flow used before dynamically loading a protocol
 major-specific wasm package.
 
-## JsByteLink Contract
+## JsByteLink contract
 
 `JsByteLink` is a byte-stream boundary, not a high-level Rynk API.
 
@@ -108,7 +108,7 @@ major-specific wasm package.
   WebHID report padding must be stripped so wasm sees the same clean Rynk byte
   stream that Web Serial exposes.
 
-## Minimal Web Serial Link
+## Minimal Web Serial link
 
 This is the smallest useful shape. The demo has a more complete buffered version
 that supports the pre-load version probe.
@@ -188,10 +188,10 @@ Getter results and topic values are plain JS values produced through
 serde shape for the corresponding `rmk-types` type.
 
 Errors are thrown as JS `Error` objects with stable `name` values such as
-`Disconnected`, `Transport`, `Rejected`, `Unsupported`, `Protocol`, and
+`Disconnected`, `TransportError`, `Rejected`, `Unsupported`, and
 `VersionMismatch`.
 
-## Browser Transports
+## Browser transports
 
 Both built-in demo links present the same `JsByteLink` shape to wasm. Only the
 JS code that opens and normalizes the browser transport differs.
@@ -213,7 +213,7 @@ native-only path, for example:
 cargo run -p rynk --example hw_test -- ble
 ```
 
-## Versioned Loading
+## Versioned loading
 
 The Rynk frame envelope and `GetVersion` request are intended to stay stable
 across protocol majors. `index.html` uses that to probe the device first, then

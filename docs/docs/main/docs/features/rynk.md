@@ -134,7 +134,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("no Rynk keyboard found")?;
 
     let mut client = device.connect().await?;
-    let caps = client.capabilities();
+    let caps = client.get_capabilities().await?;
     println!("{}x{}x{} keymap", caps.num_layers, caps.num_rows, caps.num_cols);
 
     let key = client.get_key(0, 0, 0).await?;

@@ -6,7 +6,8 @@ PMW3610 is a low‑power optical mouse sensor.
 
 - Currently, only implemented for nRF52 and RP2040 with a single-wire (SDIO) half-duplex SPI.
 - Set `motion` pin for better power efficiency. If omitted, the sensor is polled.
-- By default, report rate is limited to 125 Hz to prevent flooding the event channel, which causes latency issues especially over BLE.
+- By default, report rate is limited to 125 Hz to prevent flooding the event channel, which causes
+  latency issues especially over BLE.
 
 :::
 
@@ -115,7 +116,7 @@ let pmw3610_spi = BitBangSpiBus::new(pmw3610_sck, pmw3610_sdio);
 
 const POINTING_DEV_ID: u8 = 0; // this ID can be anything from 0-255. Just make sure you don't use the same number twice for different sensors to avoid confusion.
 let mut pmw3610_device = PointingDevice::<Pmw3610<_, _, _>>::new(
-    POINTING_DEV_ID
+    POINTING_DEV_ID,
     pmw3610_spi,
     pmw3610_cs,
     pmw3610_motion,
@@ -123,7 +124,7 @@ let mut pmw3610_device = PointingDevice::<Pmw3610<_, _, _>>::new(
 );
 
 // If you want to customize the report rate (Hz):
-// let mut pmw3610_device = Pmw3610Device::with_report_hz(
+// let mut pmw3610_device = PointingDevice::<Pmw3610<_, _, _>>::with_report_hz(
 //     POINTING_DEV_ID,
 //     pmw3610_spi,
 //     pmw3610_cs,
