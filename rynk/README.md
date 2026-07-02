@@ -27,8 +27,11 @@ and byte I/O live in separate transport crates such as `rynk-serial` and
 ```rust,no_run
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 // Discover marked Rynk keyboards, pick one, and open it (the handshake runs
-// inside `connect`). `rynk-ble` mirrors this flow with `discover().await`.
-let device = rynk_serial::discover()?
+// inside `connect`). `rynk-ble` mirrors this flow.
+use rynk::RynkDevice;
+use rynk_serial::SerialDevice;
+let device = SerialDevice::discover()
+    .await?
     .into_iter()
     .next()
     .ok_or("no Rynk keyboard found")?;

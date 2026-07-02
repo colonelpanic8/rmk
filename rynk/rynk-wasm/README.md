@@ -54,8 +54,8 @@ await init();
 const link = await openSerialByteLink();
 const client = await connect(link);
 
-console.log("protocol", client.protocol_version());
-console.log("capabilities", client.capabilities());
+console.log("protocol", await client.get_version());
+console.log("capabilities", await client.get_capabilities());
 console.log("current layer", await client.get_current_layer());
 
 // Pull topic pushes (layer changes, WPM, …) until the link closes.
