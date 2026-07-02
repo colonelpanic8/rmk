@@ -293,6 +293,13 @@ split_peripherals_num = 0
 ble_profiles_num = 3
 # BLE Split Central sleep timeout in seconds (0 = disabled)
 split_central_sleep_timeout_seconds = 0
+# Maximum number of keymap/combo/morse items in one Rynk bulk transfer
+protocol_max_bulk_size = 8
+# Maximum macro data bytes in one Rynk macro request or response
+protocol_macro_chunk_size = 64
+# Optional Rynk RX/TX buffer size override in bytes.
+# Omit to use the minimum required by the current command table.
+# rynk_buffer_size = 512
 
 # Split configuration
 # This section conflicts with the [matrix] section. You can only have either [matrix] or [split], but NOT BOTH
@@ -393,11 +400,16 @@ defmt_log = true
 
 # Host-side tools configuration
 [host]
-# Whether Vial is enabled (default: true)
+# Whether Vial is enabled (default: true in keyboard.toml config)
 vial_enabled = true
+# Whether Rynk is enabled (default: false in keyboard.toml config)
+# Rynk and Vial are mutually exclusive and must match Cargo features.
+rynk_enabled = false
 # The unlock keys are the combo of the row 0, col 0 key and
-# the row 0, col 1 key
+# the row 0, col 1 key. Used only by Vial.
 unlock_keys = [[0, 0], [0, 1]]
+# Start Vial unlocked. Used only by Vial with the `vial_lock` feature.
+vial_insecure = false
 
 # Chip-specific configuration
 # To use the default configuration, ignore this section completely

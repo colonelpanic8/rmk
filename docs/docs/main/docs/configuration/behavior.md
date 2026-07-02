@@ -236,10 +236,14 @@ Mixing fields from different methods in the same definition is not allowed.
 
 The `profile` of a morse key contains all tunable configurations of this morse key, such as behavior mode, timing configurations, etc.
 
-A profile contains the following fields:
+::: tip
+`enable_flow_tap` and `prior_idle_time` are **global** settings configured once in the `[behavior.morse]` sub-table; they are not per-profile fields and cannot be overridden inside an individual profile:
 
 - `enable_flow_tap`: Enables HRM (Home Row Mod) mode. When enabled, the `prior_idle_time` setting becomes functional. Defaults to `false`.
-- `prior_idle_time`: If the previous non-modifier key is released within this period before pressing the current tap-hold key, the tap action for the tap-hold behavior will be triggered. This parameter is effective only when enable_flow_tap is set to `true`. Defaults to 120ms.
+- `prior_idle_time`: If the previous non-modifier key is released within this period before pressing the current tap-hold key, the tap action for the tap-hold behavior will be triggered. This parameter is effective only when `enable_flow_tap` is set to `true`. Defaults to 120ms.
+  :::
+
+A profile contains the following fields:
 
 - `unilateral_tap`: (Experimental) Enables unilateral tap mode. When enabled, tap action will be triggered when a key from "same" hand is pressed. In current experimental version, the "same" hand is calculated using the `<hand>`, which can be given in `matrix_map`. This option is recommended to set to true when `enable_flow_tap` is set to true.
 
