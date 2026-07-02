@@ -105,11 +105,17 @@ impl Runnable for AutoMouseLayerRunner<'_, '_> {
             match next {
                 Tick::Timeout => {
                     let now = Instant::now();
-                    for entry in entries.iter_mut() {
-                        if entry.self_activated && entry.deadline.is_some_and(|d| d <= now) {
-                            keymap.deactivate_layer_if_active(entry.config.target_layer);
-                            entry.self_activated = false;
-                            entry.deadline = None;
+                    // Only release the layer once no other entry still holds it.
+                    for i in 0..entries.len() {
+                        let expired = entries[i].self_activated && entries[i].deadline.is_some_and(|d| d <= now);
+                        if !expired {
+                            continue;
+                        }
+                        entries[i].self_activated = false;
+                        entries[i].deadline = None;
+                        let layer = entries[i].config.target_layer;
+                        if !layer_still_held(&entries, layer) {
+                            keymap.deactivate_layer_if_active(layer);
                         }
                     }
                 }
@@ -117,11 +123,17 @@ impl Runnable for AutoMouseLayerRunner<'_, '_> {
                     let Some(idx) = match_entry(&entries, event.device_id) else {
                         continue;
                     };
-                    let entry = &mut entries[idx];
-                    if !is_cursor_motion(&event, entry.config.threshold) {
+                    if !is_cursor_motion(&event, entries[idx].config.threshold) {
                         continue;
                     }
-                    if keymap.activate_layer_if_inactive(entry.config.target_layer) {
+                    // Read shared state before the mutable borrow below.
+                    let target_layer = entries[idx].config.target_layer;
+                    let shared_with_other = layer_shared_with_other(&entries, idx, target_layer);
+                    let entry = &mut entries[idx];
+                    if keymap.activate_layer_if_inactive(target_layer) {
+                        entry.self_activated = true;
+                        entry.overlap_warned = false;
+                    } else if shared_with_other {
                         entry.self_activated = true;
                         entry.overlap_warned = false;
                     } else if !entry.self_activated && !entry.overlap_warned {
@@ -129,7 +141,7 @@ impl Runnable for AutoMouseLayerRunner<'_, '_> {
                             "auto_mouse_layer: layer {} is already active when motion was detected; \
                              the layer is likely driven by another key (MO/TG). The auto mouse layer \
                              will not be deactivated on timeout while overlap holds.",
-                            entry.config.target_layer
+                            target_layer
                         );
                         entry.overlap_warned = true;
                     }
@@ -176,6 +188,19 @@ fn match_entry(entries: &[EntryState], device_id: u8) -> Option<usize> {
         return Some(i);
     }
     entries.iter().position(|e| e.config.device_id.is_none())
+}
+
+fn layer_still_held(entries: &[EntryState], layer: u8) -> bool {
+    entries
+        .iter()
+        .any(|e| e.self_activated && e.config.target_layer == layer)
+}
+
+fn layer_shared_with_other(entries: &[EntryState], idx: usize, layer: u8) -> bool {
+    entries
+        .iter()
+        .enumerate()
+        .any(|(i, e)| i != idx && e.self_activated && e.config.target_layer == layer)
 }
 
 /// Only relative X/Y axis deltas count as cursor motion. Scroll-only events
@@ -328,6 +353,50 @@ mod tests {
     fn match_entry_returns_none_when_no_match_and_no_fallback() {
         let entries = [entry(Some(1)), entry(Some(2))];
         assert_eq!(match_entry(&entries, 7), None);
+    }
+
+    fn active_entry(device_id: Option<u8>, target_layer: u8) -> EntryState {
+        let mut e = entry(device_id);
+        e.config.target_layer = target_layer;
+        e.self_activated = true;
+        e
+    }
+
+    #[test]
+    fn layer_still_held_true_when_any_entry_self_holds_the_layer() {
+        let entries = [active_entry(Some(1), 3), entry(Some(2))];
+        assert!(layer_still_held(&entries, 3));
+    }
+
+    #[test]
+    fn layer_still_held_false_when_no_entry_active_on_that_layer() {
+        let entries = [entry(Some(1)), active_entry(Some(2), 5)];
+        assert!(!layer_still_held(&entries, 3));
+    }
+
+    #[test]
+    fn layer_still_held_ignores_entries_not_self_activated() {
+        let mut e = entry(Some(1));
+        e.config.target_layer = 2;
+        assert!(!layer_still_held(&[e], 2));
+    }
+
+    #[test]
+    fn layer_shared_with_other_true_when_another_entry_holds_same_layer() {
+        let entries = [active_entry(Some(1), 2), active_entry(Some(2), 2)];
+        assert!(layer_shared_with_other(&entries, 0, 2));
+    }
+
+    #[test]
+    fn layer_shared_with_other_excludes_self_index() {
+        let entries = [active_entry(Some(1), 2), entry(Some(2))];
+        assert!(!layer_shared_with_other(&entries, 0, 2));
+    }
+
+    #[test]
+    fn layer_shared_with_other_ignores_other_layers() {
+        let entries = [active_entry(Some(1), 2), active_entry(Some(2), 5)];
+        assert!(!layer_shared_with_other(&entries, 0, 2));
     }
 
     #[test]

@@ -549,7 +549,7 @@ Up to `AUTO_MOUSE_LAYER_MAX_NUM` (4) entries are supported. With `keyboard.toml`
 
 Prefer a dedicated layer that is not bound to any manual keys (like `MO` or `TG`). The auto-mouse task releases its ownership when keyboard-driven changes deactivate the layer, so transient overlap is handled cleanly. Layer state is still a single boolean, however, so pressing `TG(target_layer)` while auto-mouse is active toggles the layer off instead of pinning it on.
 
-Also give each entry its own `target_layer`. Layer state is a single boolean shared by all entries, so if two entries point at the same `target_layer`, the first entry's `timeout` can deactivate it while the other device is still moving.
+Entries that share the same `target_layer` cooperate: the layer stays active until the last device stops moving, so per-device `timeout`/`threshold` differences on a shared layer are safe.
 
 :::
 
