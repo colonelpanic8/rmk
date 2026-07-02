@@ -77,7 +77,7 @@ async fn client_against_run_session() {
     let positional: PositionalConfig<2, 2> = PositionalConfig::default();
     let mut data: KeymapData<2, 2, 2, 0> = KeymapData::new([[[KeyAction::No; 2]; 2]; 2]);
     let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-    let config: RmkConfig<'static> = RmkConfig::default();
+    let mut config: RmkConfig<'static> = RmkConfig::default();
 
     // ── built-in physical-layout blob ──
     // Build a known LayoutInfo and compress it exactly as rmk-config does
@@ -111,7 +111,8 @@ async fn client_against_run_session() {
     };
     let raw = postcard::to_allocvec(&layout_info).unwrap();
     let blob: &'static [u8] = Box::leak(miniz_oxide::deflate::compress_to_vec(&raw, 6).into_boxed_slice());
-    let service = RynkService::new(&keymap, &config).with_layout_blob(blob);
+    config.layout_blob = blob;
+    let service = RynkService::new(&keymap, &config);
 
     // ── in-memory duplex: h2d carries requests, d2h carries responses + topics ──
     let h2d = Link::new();

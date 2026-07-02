@@ -23,6 +23,10 @@ pub struct RmkConfig<'a> {
     pub device_config: DeviceConfig<'a>,
     #[cfg(feature = "vial")]
     pub vial_config: VialConfig<'a>,
+    /// Opaque, compressed physical-layout blob served over rynk's `GetLayout`.
+    /// Baked at build time from `[layout].map`; empty when there's no layout.
+    #[cfg(feature = "rynk")]
+    pub layout_blob: &'a [u8],
     #[cfg(feature = "storage")]
     pub storage_config: StorageConfig,
     #[cfg(feature = "_ble")]
