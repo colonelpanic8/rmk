@@ -124,7 +124,7 @@ impl<P: PacketPool> Write for RynkBleTx<'_, '_, '_, P> {
                 for chunk in buf.chunks(RYNK_HID_REPORT_SIZE) {
                     let mut report = [0u8; RYNK_HID_REPORT_SIZE];
                     report[..chunk.len()].copy_from_slice(chunk);
-                    if let Err(e) = self.hid_input.notify(self.conn, &report).await {
+                    if let Err(e) = self.hid_input.notify(self.conn, &report, true).await {
                         error!("Failed to notify Rynk HID reply: {:?}", e);
                         return Err(HostTransportError);
                     }
@@ -138,7 +138,7 @@ impl<P: PacketPool> Write for RynkBleTx<'_, '_, '_, P> {
                 for chunk in buf.chunks(chunk_size) {
                     let payload =
                         Vec::<u8, RYNK_BLE_CHUNK_SIZE>::from_slice(chunk).expect("chunk size <= RYNK_BLE_CHUNK_SIZE");
-                    if let Err(e) = self.custom_input.notify(self.conn, &payload).await {
+                    if let Err(e) = self.custom_input.notify(self.conn, &payload, true).await {
                         error!("Failed to notify Rynk reply: {:?}", e);
                         return Err(HostTransportError);
                     }

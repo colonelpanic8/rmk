@@ -70,7 +70,7 @@ impl<P: PacketPool> Write for VialBleTx<'_, '_, '_, P> {
             error!("Vial reply must be exactly 32 bytes, got {}", buf.len());
             HostTransportError
         })?;
-        if let Err(e) = self.input_data.notify(self.conn, arr).await {
+        if let Err(e) = self.input_data.notify(self.conn, arr, true).await {
             error!("Failed to notify Vial reply: {:?}", e);
             return Err(HostTransportError);
         }

@@ -5,7 +5,6 @@ use bt_hci::controller::{ControllerCmdAsync, ControllerCmdSync};
 use embassy_futures::join::join;
 use embassy_futures::select::{Either, Either3, select, select3};
 use embassy_time::{Duration, Timer, with_timeout};
-use rand_core::{CryptoRng, RngCore};
 use rmk_types::ble::BleState;
 use rmk_types::connection::ConnectionType;
 use rmk_types::led_indicator::LedIndicator;
@@ -25,7 +24,7 @@ use crate::ble::profile::{ProfileInfo, ProfileManager, UPDATED_CCCD_TABLE, UPDAT
 #[cfg(feature = "rynk")]
 use crate::ble::rynk::{RynkBleSource, RynkHidFrameTracker};
 use crate::channel::{BLE_REPORT_CHANNEL, LED_SIGNAL};
-use crate::config::RmkConfig;
+use crate::config::{BleBatteryConfig, RmkConfig};
 use crate::core_traits::Runnable;
 use crate::event::SubscribableEvent;
 use crate::hid::{HidWriterTrait, run_led_reader};
@@ -58,21 +57,14 @@ pub(crate) const CONNECTIONS_MAX: usize = crate::SPLIT_PERIPHERALS_NUM + 1;
 pub(crate) const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX * 4; // Signal + att + smp + hid
 
 /// Build the BLE stack.
-pub async fn build_ble_stack<
-    'a,
-    C: Controller + ControllerCmdAsync<LeSetPhy>,
-    P: PacketPool,
-    RNG: RngCore + CryptoRng,
->(
+pub async fn build_ble_stack<'a, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool>(
     controller: C,
     host_address: [u8; 6],
-    random_generator: &mut RNG,
     resources: &'a mut HostResources<C, P, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>,
 ) -> Stack<'a, C, P> {
     // Initialize trouble host stack
     trouble_host::new(controller, resources)
         .set_random_address(Address::random(host_address))
-        .set_random_generator_seed(random_generator)
         .build()
 }
 
@@ -93,6 +85,7 @@ where
     // Keeps `'a` in the type's parameter list across all feature configurations.
     #[cfg(not(feature = "host"))]
     _phantom: core::marker::PhantomData<&'a ()>,
+    config: BleBatteryConfig<'b>,
 }
 
 impl<'a, 'b, 's, C> BleTransport<'a, 'b, 's, C>
@@ -148,6 +141,7 @@ where
             host_service: None,
             #[cfg(not(feature = "host"))]
             _phantom: core::marker::PhantomData,
+            config: rmk_config.ble_battery_config,
         }
     }
 
@@ -206,6 +200,7 @@ where
                                 active_bond_info,
                                 #[cfg(feature = "host")]
                                 self.host_service,
+                                &self.config,
                             ),
                             profile_manager.update_profile(),
                         )
@@ -358,7 +353,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                 passkey_state.clear();
                 error!("[gatt] pairing error: {:?}", err);
             }
-            GattConnectionEvent::Encrypted { security_level } => {
+            GattConnectionEvent::Encrypted { security_level, .. } => {
                 info!("[gatt] encrypted: {:?}", security_level);
                 set_ble_state(BleState::Connected);
             }
@@ -389,13 +384,28 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                         #[cfg(not(feature = "vial"))]
                         let host_control_point_match = false;
 
+                        // trouble-host 0.7 exposes written bytes via a closure; copy them out
+                        // once so the dispatch below (which awaits) can use them freely.
+                        // Sized for the largest single write: a Rynk custom-characteristic frame
+                        // (RYNK_BLE_CHUNK_SIZE) when Rynk is enabled, else a 32-byte Vial/HID packet.
+                        #[cfg(feature = "rynk")]
+                        let mut data_buf = [0u8; rmk_types::protocol::rynk::RYNK_BLE_CHUNK_SIZE];
+                        #[cfg(not(feature = "rynk"))]
+                        let mut data_buf = [0u8; 32];
+                        let data_len = event.with_data(|_, data| {
+                            let n = data.len().min(data_buf.len());
+                            data_buf[..n].copy_from_slice(&data[..n]);
+                            data.len()
+                        });
+                        let data = &data_buf[..data_len.min(data_buf.len())];
+
                         if event.handle() == output_keyboard.handle {
-                            if event.data().len() == 1 {
-                                let led_indicator = LedIndicator::from_bits(event.data()[0]);
+                            if data_len == 1 {
+                                let led_indicator = LedIndicator::from_bits(data[0]);
                                 debug!("Got keyboard state: {:?}", led_indicator);
                                 LED_SIGNAL.signal(led_indicator);
                             } else {
-                                warn!("Wrong keyboard state data: {:?}", event.data());
+                                warn!("Wrong keyboard state data: {:?}", data);
                             }
                         } else if event.handle() == input_keyboard.cccd_handle.expect("No CCCD for input keyboard")
                             || event.handle() == mouse.cccd_handle.expect("No CCCD for mouse report")
@@ -415,8 +425,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                                 // HID Class spec opcodes for the HID Control Point characteristic:
                                 //   - 0: HID_CTRL_SUSPEND
                                 //   - 1: HID_CTRL_EXIT_SUSPEND
-                                let data = event.data();
-                                if data.len() == 1 {
+                                if data_len == 1 {
                                     match data[0] {
                                         0 => CENTRAL_SLEEP.signal(true),
                                         1 => CENTRAL_SLEEP.signal(false),
@@ -431,7 +440,6 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                             let handled = false;
                             #[cfg(feature = "host")]
                             if event.handle() == output_host.handle {
-                                let data = event.data();
                                 #[cfg(feature = "vial")]
                                 if data.len() == 32 {
                                     debug!("Got Vial packet: {:?}", data);
@@ -467,7 +475,6 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                             // De-frame (drop padding via the header LEN) into the pipe.
                             #[cfg(feature = "rynk")]
                             if !handled && event.handle() == output_hid.handle {
-                                let data = event.data();
                                 if encrypted {
                                     if data.len() == RYNK_HID_REPORT_SIZE {
                                         let bytes = hid_frame_tracker.take(data);
@@ -736,10 +743,11 @@ async fn run_ble_keyboard<
     stack: &Stack<'_, C, DefaultPacketPool>,
     #[cfg(feature = "storage")] active_bond_info: Option<crate::ble::profile::ProfileInfo>,
     #[cfg(feature = "host")] host_service: Option<&'r crate::host::HostService<'r>>,
+    config: &BleBatteryConfig<'a>,
 ) {
     let mut ble_hid_server = BleHidServer::new(server, conn);
-    let mut ble_led_reader = BleLedReader {};
-    let mut ble_battery_server = BleBatteryServer::new(server, conn);
+    let mut ble_led_reader = BleLedReader;
+    let mut ble_battery_server = config.enabled.then(|| BleBatteryServer::new(server, conn));
 
     // CCCD lookup uses cached bond info to avoid a cancellable flash read while
     // this future is racing other arms of an outer `select`.
