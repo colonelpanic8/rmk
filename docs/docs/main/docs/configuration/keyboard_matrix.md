@@ -146,7 +146,7 @@ If no `debouncer` is set, the matrix will default to `default` mode.
 
 ## Vial Unlock Keys - `[host]` Section
 
-For enhanced security, Vial locks certain functions (like matrix testing) by default. You can set a key combination to unlock it. This configuration is part of the `[host]` section which controls host-side tools and features.
+`unlock_keys` applies **only when using Vial**. For enhanced security, Vial locks certain functions (like matrix testing) by default. You can set a key combination to unlock it. This configuration is part of the `[host]` section which controls host-side tools and features. (The default [Rynk](../features/rynk) protocol does not use unlock keys.)
 
 ```toml
 [host]

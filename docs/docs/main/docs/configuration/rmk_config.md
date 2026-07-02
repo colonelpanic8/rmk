@@ -36,6 +36,13 @@ split_peripherals_num = 0
 ble_profiles_num = 3
 # BLE Split Central sleep timeout in seconds (0 = disabled)
 split_central_sleep_timeout_seconds = 0
+# Maximum number of keymap/combo/morse items in one Rynk bulk transfer
+protocol_max_bulk_size = 8
+# Maximum macro data bytes in one Rynk macro request or response
+protocol_macro_chunk_size = 64
+# Optional Rynk RX/TX buffer size override in bytes.
+# Omit this to use the minimum required by the current command table.
+# rynk_buffer_size = 512
 ```
 
 ## Parameter Details
@@ -69,8 +76,16 @@ Increasing the number of combos, forks, morses (tap dances), and macros will inc
 In RMK there are several channels used for communication between tasks. The length of the channel can be adjusted. Larger channel size means more events can be buffered, but it will increase memory usage.
 
 - `report_channel_size`: The length of report channel, default value is 16. Used for buffering HID reports to be sent to the host.
-- `vial_channel_size`: The length of vial channel, default value is 4. Used for communication with Vial protocol.
+- `vial_channel_size`: The length of the legacy Vial channel, default value is 4. Used only by Vial builds.
 - `flash_channel_size`: The length of flash channel, default value is 4. Used for buffering flash storage operations.
+
+### Rynk Protocol Configuration
+
+These tune the [Rynk](../features/rynk) protocol and rarely need changing.
+
+- `protocol_max_bulk_size`: How many keymap, combo, or morse entries a single bulk transfer can carry, default value is 8. Only used when the `bulk` feature is enabled.
+- `protocol_macro_chunk_size`: How many macro bytes a single macro transfer can carry, default value is 64. Smaller chunks use less firmware RAM but need more back-and-forth with the host.
+- `rynk_buffer_size`: Optional size, in bytes, of Rynk's send/receive buffer. Leave it unset and RMK picks the smallest size that fits your configuration; only set it if you have a specific reason to, and it must be at least that automatic minimum.
 
 ### Split Keyboard Configuration
 
