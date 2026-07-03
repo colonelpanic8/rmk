@@ -10,8 +10,7 @@
 //! `device_id == None` (if any) is used as a fallback. Events that match
 //! neither are ignored.
 
-use embassy_futures::select::{Either, select};
-use embassy_time::{Instant, Timer};
+use embassy_time::Instant;
 use heapless::Vec;
 use rmk_macro::processor;
 
@@ -20,7 +19,7 @@ use crate::config::AutoMouseLayerConfig;
 use crate::core_traits::Runnable;
 use crate::event::{Axis, AxisValType, LayerChangeEvent, PointingEvent};
 use crate::keymap::KeyMap;
-use crate::processor::Processor;
+use crate::processor::DeadlineProcessor;
 
 /// [`Runnable`] for the auto mouse layer task.
 ///
@@ -122,33 +121,24 @@ enum PointingOutcome {
     Idle,
 }
 
+impl DeadlineProcessor for AutoMouseLayerRunner<'_, '_> {
+    fn deadline(&self) -> Option<Instant> {
+        earliest_deadline(&self.entries)
+    }
+
+    async fn on_deadline(&mut self) {
+        for layer in timeout_step(&mut self.entries, Instant::now()) {
+            self.keymap.deactivate_layer_if_active(layer);
+        }
+    }
+}
+
 impl Runnable for AutoMouseLayerRunner<'_, '_> {
     async fn run(&mut self) -> ! {
         if self.entries.is_empty() {
             core::future::pending().await
         }
-
-        use crate::event::EventSubscriber;
-        let mut sub = <Self as Processor>::subscriber();
-
-        loop {
-            let earliest = earliest_deadline(&self.entries);
-            match earliest {
-                Some(deadline) => match select(Timer::at(deadline), sub.next_event()).await {
-                    Either::First(_) => {
-                        let now = Instant::now();
-                        for layer in timeout_step(&mut self.entries, now) {
-                            self.keymap.deactivate_layer_if_active(layer);
-                        }
-                    }
-                    Either::Second(event) => self.process(event).await,
-                },
-                None => {
-                    let event = sub.next_event().await;
-                    self.process(event).await;
-                }
-            }
-        }
+        self.deadline_loop().await
     }
 }
 
