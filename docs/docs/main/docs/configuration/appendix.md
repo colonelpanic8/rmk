@@ -133,7 +133,7 @@ one_shot_modifiers = {
 enable_flow_tap = true
 prior_idle_time = "120ms"
 hold_on_other_press = true
-unilateral_false = false
+unilateral_tap = false
 hold_timeout = "250ms"
 gap_timeout = "250ms"
 

@@ -1,4 +1,5 @@
 [keyboard]
+# Example identity — replace name, vendor_id and product_id with your keyboard's own
 name = "RMK Keyboard"
 product_name = "RMK Keyboard"
 vendor_id = 0x4c4b
@@ -26,7 +27,7 @@ map = """
 """
 
 [keymap]
-layers = 2
+layers = 3
 
 [[keymap.layer]]
 keys = """
@@ -46,12 +47,12 @@ _ _     _
 
 [light]
 # All light pins are high-active by default, uncomment if you want it to be low-active
-# capslock.pin = "PB2"
+# capslock.pin = "GPIO8"
 # capslock.low_active = true
-# scrolllock.pin = "PA3"
+# scrolllock.pin = "GPIO9"
 # scrolllock.low_active = true
 # Just ignore if no light pin is used for it
-# numslock.pin = "PA5"
+# numslock.pin = "GPIO10"
 # numslock.low_active = true
 
 [storage]

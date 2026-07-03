@@ -1,4 +1,5 @@
 [keyboard]
+# Example identity — replace name, vendor_id and product_id with your keyboard's own
 name = "RMK Keyboard"
 product_name = "RMK Keyboard"
 vendor_id = 0x4c4b
@@ -20,8 +21,7 @@ col_pins = ["PIN_19", "PIN_20", "PIN_21"]
 # row2col = true
 
 [layout]
-# The physical key layout. For Rynk this is also compiled into the opaque,
-# compressed blob served over `GetLayout` — see docs/rynk-layout-geometry.md.
+# The physical key layout.
 rows = 4
 cols = 3
 map = """
@@ -32,9 +32,9 @@ map = """
 """
 
 [keymap]
-layers = 2
+layers = 3
 
-[[keymap.layer]]
+[[keymap.layer]] # layer 0
 keys = """
 A B C
 Kc1 Kc2 Kc3
@@ -42,7 +42,7 @@ LCtrl MO(1) LShift
 OSL(1) LT(2, Kc9) LM(1, LShift | LGui)
 """
 
-[[keymap.layer]]
+[[keymap.layer]] # layer 1
 keys = """
 _ TT(1) TG(2)
 _ _ _

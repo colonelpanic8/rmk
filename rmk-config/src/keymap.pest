@@ -134,7 +134,7 @@ right_hand = { ^"R" | ^"RH" | ^"Right" }
 bilateral_hand = { "*" | ^"Bilateral" }
 hand = _{ left_hand | right_hand | bilateral_hand }
 
-// Geometry tokens (all local to layout_map).
+// Layout-map tokens (positions, shapes, gaps).
 unit = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }                 // non-negative float, for [n]
 signed_unit = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }   // may be negative, for [y=n]
 shape_name = @{ (ASCII_ALPHANUMERIC | "_" | ".")+ }              // stock (2u/1.5u) or custom (iso_enter)
@@ -146,8 +146,8 @@ vertical = ${ "[" ~ hws? ~ "y" ~ hws? ~ "=" ~ hws? ~ signed_unit ~ hws? ~ "]" } 
 
 // A key: (row, col[, hand][, @shape]). `hws?` between fields so `(0, 1)` parses too.
 keypos_info = ${ "(" ~ hws? ~ number ~ hws? ~ "," ~ hws? ~ number ~ (hws? ~ "," ~ hws? ~ hand)? ~ (hws? ~ "," ~ hws? ~ shape_ref)? ~ hws? ~ ")" }
-// An encoder: (e, id[, @shape]).
-encoder_info = ${ "(" ~ hws? ~ "e" ~ hws? ~ "," ~ hws? ~ number ~ (hws? ~ "," ~ hws? ~ shape_ref)? ~ hws? ~ ")" }
+// An encoder: (e, id). A fixed 1u knob — no shape, so no `@shape`.
+encoder_info = ${ "(" ~ hws? ~ "e" ~ hws? ~ "," ~ hws? ~ number ~ hws? ~ ")" }
 
 // The whole string: significant newlines, explicit hws. Order matters:
 // vertical before spacer (both start `[`), encoder before keypos (both start `(`).

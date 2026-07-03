@@ -48,7 +48,7 @@ pub(crate) fn expand_chip_init(
 pub(crate) fn chip_init_default(hardware: &Hardware, peripheral_id: Option<usize>) -> TokenStream2 {
     let chip = &hardware.chip;
     let communication = &hardware.communication;
-    let peri_num = hardware.board.get_num_periphreal();
+    let peri_num = hardware.board.get_num_peripheral();
     let set_io_capabilities = if peripheral_id.is_none() {
         quote! {
             if ::rmk::ble::passkey::passkey_entry_enabled() {

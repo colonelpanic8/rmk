@@ -177,7 +177,7 @@ impl ShapeRegistry {
                 }
             }
             if approx(d.w, 1.0) && approx(d.h, 2.0) {
-                return "2uv".to_string();
+                return "2u_tall".to_string();
             }
         }
         let key = d.key();
@@ -228,7 +228,7 @@ fn display_top_left(k: &SerialKey<f64>) -> (f64, f64) {
     (rcx - k.width / 2.0, rcy - k.height / 2.0)
 }
 
-/// KLE geometry of one key → an RMK shape (relative to its row's baseline `y`).
+/// KLE position of one key → an RMK shape (relative to its row's baseline `y`).
 /// `x_nudge` carries any horizontal offset the row's `[gap]` tokens can't (a
 /// backward shift, e.g. between two rotated keys whose caps overlap in x).
 /// Returns `None` for a plain 1u key that needs no shape at all.
@@ -300,7 +300,7 @@ fn variant_name(labels: Option<&Value>, g: u32, c: u32, used: &mut HashSet<Strin
     name
 }
 
-struct EncoderGeom {
+struct EncoderRender {
     id: u32,
     key: SerialKey<f64>,
     row_index: usize,
@@ -399,7 +399,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
             }
         }
     }
-    let mut encoders: Vec<EncoderGeom> = Vec::new();
+    let mut encoders: Vec<EncoderRender> = Vec::new();
     for (i, sw) in enc_switches.iter().enumerate() {
         let id = enc_order[i];
         if sw.iter().any(|&si| !approx(input.keys[si].rotation, 0.0)) {
@@ -420,7 +420,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
         } else {
             (input.keys[sw[0]].width, input.keys[sw[0]].height)
         };
-        encoders.push(EncoderGeom {
+        encoders.push(EncoderRender {
             id,
             key: synthetic_key((min_x + max_x) / 2.0 - w / 2.0, (min_y + max_y) / 2.0 - h / 2.0, w, h),
             row_index: annotation(sw[0]).row_index,
@@ -480,21 +480,21 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
             }
         }
     }
-    struct UnitGeom<'a> {
+    struct UnitRender<'a> {
         key: &'a SerialKey<f64>,
         row_index: usize,
         option: Option<(u32, u32)>,
     }
-    let unit_geom = |u: &Unit| match u {
+    let unit_render = |u: &Unit| match u {
         Unit::Key(ci) => {
             let ki = canonical(&cells[*ci]);
-            UnitGeom {
+            UnitRender {
                 key: &input.keys[ki],
                 row_index: annotation(ki).row_index,
                 option: annotation(ki).option,
             }
         }
-        Unit::Enc(ei) => UnitGeom {
+        Unit::Enc(ei) => UnitRender {
             key: &encoders[*ei].key,
             row_index: encoders[*ei].row_index,
             option: None,
@@ -502,7 +502,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
     };
     let mut buckets: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
-        buckets.entry(unit_geom(u).row_index).or_default().push(ui);
+        buckets.entry(unit_render(u).row_index).or_default().push(ui);
     }
 
     let mut reg = ShapeRegistry::new();
@@ -512,7 +512,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
     let mut prev_baseline: Option<f64> = None;
 
     for unit_idxs in buckets.values() {
-        let baseline = display_top_left(unit_geom(&units[unit_idxs[0]]).key).1;
+        let baseline = display_top_left(unit_render(&units[unit_idxs[0]]).key).1;
         if let Some(pb) = prev_baseline {
             let vstep = baseline - pb - 1.0;
             if !approx(vstep, 0.0) {
@@ -526,7 +526,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
             // forward gap is a `[gap]` token; a backward one (overlapping caps, e.g.
             // adjacent rotated keys) rides `x_nudge` — except layout-option
             // alternates, which the variant re-walk reflows instead.
-            let g = unit_geom(&units[ui]);
+            let g = unit_render(&units[ui]);
             let ex = display_top_left(g.key).0;
             let gap = ex - cursor_x;
             let mut x_nudge = 0.0;
@@ -551,12 +551,8 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
                     row_tokens.push(token);
                 }
                 Unit::Enc(ei) => {
-                    let id = encoders[*ei].id;
-                    let token = match shape_desc(g.key, baseline, x_nudge) {
-                        None => format!("(e,{id})"),
-                        Some(d) => format!("(e,{id},@{})", reg.name_for(&d)),
-                    };
-                    row_tokens.push(token);
+                    // Encoders are a fixed 1u knob: no shape, ever — just `(e,id)`.
+                    row_tokens.push(format!("(e,{})", encoders[*ei].id));
                 }
             }
             // Mirror rmk-config's walk: a shape's `x` shifts only the center,
@@ -783,7 +779,7 @@ mod tests {
         assert!(g.display_toml.contains("cols = 3"));
         assert!(g.display_toml.contains("(0,0) (0,1) (0,2)"));
         assert!(g.display_toml.contains("(1,0) (1,1) (1,2)"));
-        // KLE carries no keycodes — the output is geometry only, no [keymap].
+        // KLE carries no keycodes — the output is render-only, no [keymap].
         assert!(!g.display_toml.contains("[keymap]"));
         assert!(!g.display_toml.contains("[layout.shapes]")); // all 1u
         assert_valid(&g);
@@ -800,9 +796,9 @@ mod tests {
     }
 
     #[test]
-    fn tall_key_uses_2uv() {
+    fn tall_key_uses_2u_tall() {
         let g = gen_layout(json!([[{"h": 2.0}, "0,0"]]), 1, 1);
-        assert!(g.display_toml.contains("(0,0,@2uv)"));
+        assert!(g.display_toml.contains("(0,0,@2u_tall)"));
         assert_valid(&g);
     }
 
@@ -921,7 +917,7 @@ mod tests {
     // ── Faithfulness: convert → blob → decode → compare back to kle-serial ──────
     // `assert_valid` only proves the map parses. These decode the built blob the
     // exact way the host does (inflate + postcard into rynk's wire types) and
-    // check each key's center/size/rotation actually matches the input geometry.
+    // check each key's center/size/rotation actually matches the input positions.
 
     /// The canonical (default-shown) instance of a cell — mirrors `generate`.
     fn canon(insts: &[usize], parsed: &ParsedKeymap) -> usize {
@@ -937,10 +933,10 @@ mod tests {
     }
 
     /// (row,col) → (center_x, center_y, w, h, r) as kle-serial sees it.
-    type ExpectedGeom = HashMap<(u32, u32), (f64, f64, f64, f64, f64)>;
+    type ExpectedRender = HashMap<(u32, u32), (f64, f64, f64, f64, f64)>;
 
     /// What kle-serial says each default-shown key's center/size/rotation is.
-    fn expected_default(parsed: &ParsedKeymap) -> ExpectedGeom {
+    fn expected_default(parsed: &ParsedKeymap) -> ExpectedRender {
         let mut idx: HashMap<(u32, u32), usize> = HashMap::new();
         let mut cells: Vec<Vec<usize>> = Vec::new();
         for (ki, key) in parsed.keys.iter().enumerate() {
@@ -989,35 +985,35 @@ mod tests {
             .keys
     }
 
-    /// The decoded default variant reproduces kle-serial's geometry, up to one
+    /// The decoded default variant reproduces kle-serial's rendering, up to one
     /// whole-board translation (the display frame's origin is free).
-    fn assert_faithful(decoded: &[rynk::layout::Key], expected: &ExpectedGeom, ctx: &str) {
+    fn assert_faithful(decoded: &[rynk::layout::Key], expected: &ExpectedRender, ctx: &str) {
         assert_eq!(decoded.len(), expected.len(), "{ctx}: key count");
         let close = |a: f64, b: f64| (a - b).abs() < 5e-3;
         let k0 = &decoded[0];
         let e0 = expected[&(k0.row as u32, k0.col as u32)];
-        let (ox, oy) = (k0.x as f64 - e0.0, k0.y as f64 - e0.1);
+        let (ox, oy) = (k0.rect.x as f64 - e0.0, k0.rect.y as f64 - e0.1);
         for k in decoded {
             let e = expected
                 .get(&(k.row as u32, k.col as u32))
                 .unwrap_or_else(|| panic!("{ctx}: decoded ({},{}) absent from kle set", k.row, k.col));
             assert!(
-                close(k.x as f64 - e.0, ox) && close(k.y as f64 - e.1, oy),
+                close(k.rect.x as f64 - e.0, ox) && close(k.rect.y as f64 - e.1, oy),
                 "{ctx}: center ({},{}) decoded ({:.4},{:.4}) vs kle ({:.4},{:.4}), frame off ({ox:.4},{oy:.4})",
                 k.row,
                 k.col,
-                k.x,
-                k.y,
+                k.rect.x,
+                k.rect.y,
                 e.0,
                 e.1
             );
             assert!(
-                close(k.w as f64, e.2) && close(k.h as f64, e.3) && close(k.r as f64, e.4),
+                close(k.rect.w as f64, e.2) && close(k.rect.h as f64, e.3) && close(k.r as f64, e.4),
                 "{ctx}: size/rot ({},{}) decoded (w{},h{},r{}) vs kle (w{},h{},r{})",
                 k.row,
                 k.col,
-                k.w,
-                k.h,
+                k.rect.w,
+                k.rect.h,
                 k.r,
                 e.2,
                 e.3,
@@ -1079,10 +1075,10 @@ mod tests {
         // non-default one.
         let split = info.variants.iter().find(|v| v.name != "default").unwrap();
         let at = |r, c| split.keys.iter().find(|k| k.row == r && k.col == c).unwrap();
-        assert!((at(0, 13).w - 1.0).abs() < 5e-3, "split (0,13) shrank to 1u");
-        assert!((at(0, 14).w - 1.0).abs() < 5e-3, "split (0,14) present");
+        assert!((at(0, 13).rect.w - 1.0).abs() < 5e-3, "split (0,13) shrank to 1u");
+        assert!((at(0, 14).rect.w - 1.0).abs() < 5e-3, "split (0,14) present");
         assert!(
-            (at(0, 14).x - at(0, 13).x - 1.0).abs() < 5e-3,
+            (at(0, 14).rect.x - at(0, 13).rect.x - 1.0).abs() < 5e-3,
             "split key reflowed adjacent"
         );
     }
@@ -1109,7 +1105,6 @@ mod tests {
         // centered at (1, 1.5), knob 1 a 0.5u gap further right.
         assert_eq!(dv.encoders.len(), 2);
         let e = |id| dv.encoders.iter().find(|e| e.id == id).unwrap();
-        assert!((e(0).w - 1.0).abs() < 5e-3 && (e(0).h - 1.0).abs() < 5e-3);
         assert!(
             (e(0).x - 1.0).abs() < 5e-3 && (e(0).y - 1.5).abs() < 5e-3,
             "e0 at ({},{})",
@@ -1232,7 +1227,7 @@ mod tests {
     }
 
     /// Full `vial.json → keyboard.toml → vial.json`: forward to the RMK layout,
-    /// reverse it back to KLE, re-parse, and require the geometry to match the
+    /// reverse it back to KLE, re-parse, and require the render to match the
     /// original (up to one whole-board translation — the display frame is free).
     fn assert_vial_roundtrip(parsed0: &ParsedKeymap, rows: u32, cols: u32, ctx: &str) {
         let info = decode_info(parsed0, rows, cols);
@@ -1335,7 +1330,7 @@ mod tests {
                 .filter_map(|annotation| annotation.encoder.map(|(id, _)| id))
                 .collect();
             assert_eq!(dv.encoders.len(), enc_ids.len(), "{ctx}: encoder count");
-            // Full round-trip: vial.json → toml → vial.json preserves the geometry.
+            // Full round-trip: vial.json → toml → vial.json preserves the rendered layout.
             assert_vial_roundtrip(&parsed, dim("rows"), dim("cols"), &ctx);
         }
     }

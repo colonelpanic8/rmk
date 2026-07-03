@@ -1,4 +1,5 @@
 [keyboard]
+# Example identity — replace name, vendor_id and product_id with your keyboard's own
 name = "RMK Keyboard"
 product_name = "RMK Keyboard"
 vendor_id = 0x4c4b
@@ -17,7 +18,7 @@ map = """
 """
 
 [keymap]
-layers = 2
+layers = 3
 
 [[keymap.layer]]
 keys = """

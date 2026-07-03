@@ -1,4 +1,5 @@
 [keyboard]
+# Example identity — replace name, vendor_id and product_id with your keyboard's own
 name = "RMK Keyboard"
 product_name = "RMK Keyboard"
 vendor_id = 0x4c4b
@@ -17,7 +18,7 @@ map = """
 """
 
 [keymap]
-layers = 2
+layers = 3
 
 [[keymap.layer]]
 keys = """
@@ -105,11 +106,12 @@ matrix_type = "normal"
 row_pins = ["P1_11", "P1_10"]
 col_pins = ["P0_30"]
 
+# Each peripheral must own a distinct region of the unified matrix
 [[split.peripheral]]
 rows = 2
 cols = 1
 row_offset = 2
-col_offset = 2
+col_offset = 0
 [split.peripheral.matrix]
 matrix_type = "normal"
 row_pins = ["P1_11", "P1_10"]
