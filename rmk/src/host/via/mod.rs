@@ -29,11 +29,7 @@ impl<'a> VialService<'a> {
             ctx: KeyboardContext::new(keymap),
             vial_config: config.vial_config,
             #[cfg(feature = "vial_lock")]
-            locker: vial_lock::VialLock::new(
-                config.vial_config.unlock_keys,
-                keymap,
-                config.vial_config.vial_insecure,
-            ),
+            locker: vial_lock::VialLock::new(config.vial_config.unlock_keys, keymap, config.vial_config.vial_insecure),
         }
     }
 
