@@ -123,6 +123,8 @@ the firmware project, replacing the default one. RMK will do all the rest for yo
 If you use the default [Rynk](../../features/rynk) protocol instead of Vial, you don't need a
 `vial.json` — skip this step.
 
+If your `keyboard.toml` already defines the `[layout]` section, you can also generate a matching `vial.json` from it with `rmkit layout convert --to-vial` — see [Vial support](../../features/vial_support).
+
 ### (Optional) Update compilation target
 
 For STM32 microcontrollers, the compilation target varies according to the series. If there's no
