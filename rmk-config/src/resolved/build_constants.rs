@@ -187,8 +187,10 @@ impl crate::KeyboardTomlConfig {
 ///
 /// `active_features` contains lowercase feature names (e.g. `"split"`, `"_ble"`).
 fn apply_feature_subscriber_bumps(events: &mut [EventChannel], active_features: &[&str]) {
-    let sub_config: SubscriberConfig =
-        toml::from_str(SUBSCRIBER_DEFAULT_CONFIG).expect("Failed to parse subscriber_default.toml");
+    static SUBSCRIBER_CONFIG: std::sync::LazyLock<SubscriberConfig> = std::sync::LazyLock::new(|| {
+        toml::from_str(SUBSCRIBER_DEFAULT_CONFIG).expect("Failed to parse subscriber_default.toml")
+    });
+    let sub_config: &SubscriberConfig = &SUBSCRIBER_CONFIG;
 
     for entry in &sub_config.subscriber {
         let all_enabled = entry.features.iter().all(|f| active_features.contains(&f.as_str()));

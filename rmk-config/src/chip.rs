@@ -18,24 +18,58 @@ pub struct ChipModel {
     pub board: Option<String>,
 }
 
+/// A supported dev board: accepted names → chip + default-config layer.
+struct BoardDef {
+    names: &'static [&'static str],
+    chip: &'static str,
+    series: ChipSeries,
+    default_config: &'static str,
+}
+
+/// Single source of board knowledge for both chip-model resolution and
+/// default-config lookup — adding a board means adding one entry here.
+const SUPPORTED_BOARDS: &[BoardDef] = &[
+    BoardDef {
+        names: &["nice!nano", "nice!nano_v1", "nicenano"],
+        chip: "nrf52840",
+        series: ChipSeries::Nrf52,
+        default_config: include_str!("default_config/nice_nano.toml"),
+    },
+    BoardDef {
+        names: &["nice!nano_v2", "nice!nano v2"],
+        chip: "nrf52840",
+        series: ChipSeries::Nrf52,
+        default_config: include_str!("default_config/nice_nano_v2.toml"),
+    },
+    BoardDef {
+        names: &["XIAO BLE", "nrfmicro", "bluemicro840", "puchi_ble"],
+        chip: "nrf52840",
+        series: ChipSeries::Nrf52,
+        default_config: include_str!("default_config/nrf52840.toml"),
+    },
+    BoardDef {
+        names: &["Pi Pico W", "Pico W", "pi_pico_w", "pico_w"],
+        chip: "rp2040",
+        series: ChipSeries::Rp2040,
+        default_config: include_str!("default_config/pi_pico_w.toml"),
+    },
+];
+
+fn find_board(name: &str) -> Option<&'static BoardDef> {
+    SUPPORTED_BOARDS.iter().find(|def| def.names.contains(&name))
+}
+
 impl ChipModel {
     pub fn get_default_config_str(&self) -> Result<&'static str, String> {
-        if let Some(board) = self.board.clone() {
-            match board.as_str() {
-                "nice!nano_v2" | "nice!nano v2" => Ok(include_str!("default_config/nice_nano_v2.toml")),
-                "nice!nano" | "nice!nano_v1" | "nicenano" => Ok(include_str!("default_config/nice_nano.toml")),
-                "XIAO BLE" | "nrfmicro" | "bluemicro840" | "puchi_ble" => {
-                    Ok(include_str!("default_config/nrf52840.toml"))
-                }
-                "Pi Pico W" | "Pico W" | "pi_pico_w" | "pico_w" => Ok(include_str!("default_config/pi_pico_w.toml")),
-                _ => {
-                    eprintln!("Fallback to use chip config for board: {}", board);
-                    self.get_default_config_str_from_chip(&self.chip)
-                }
+        if let Some(board) = &self.board {
+            if let Some(def) = find_board(board) {
+                return Ok(def.default_config);
             }
-        } else {
-            self.get_default_config_str_from_chip(&self.chip)
+            // ChipModel is only built via get_chip_model, which rejects unknown
+            // boards — this fallback is a safety net, not a real path.
+            eprintln!("Fallback to use chip config for board: {}", board);
         }
+        self.get_default_config_str_from_chip(&self.chip)
     }
 
     fn get_default_config_str_from_chip(&self, chip: &str) -> Result<&'static str, String> {
@@ -76,21 +110,22 @@ impl KeyboardTomlConfig {
 
         // Check board type
         if let Some(board) = keyboard.board.clone() {
-            match board.as_str() {
-                "nice!nano" | "nice!nano_v1" | "nicenano" | "nice!nano_v2" | "nice!nano v2" | "XIAO BLE"
-                | "nrfmicro" | "bluemicro840" | "puchi_ble" => Ok(ChipModel {
-                    series: ChipSeries::Nrf52,
-                    chip: "nrf52840".to_string(),
+            match find_board(&board) {
+                Some(def) => Ok(ChipModel {
+                    series: def.series.clone(),
+                    chip: def.chip.to_string(),
                     board: Some(board),
                 }),
-                "Pi Pico W" | "Pico W" | "pi_pico_w" | "pico_w" => Ok(ChipModel {
-                    series: ChipSeries::Rp2040,
-                    chip: "rp2040".to_string(),
-                    board: Some(board),
-                }),
-                _ => Err(format!(
-                    "Unsupported board \"{board}\" — supported boards are nice!nano, nice!nano_v2, XIAO BLE, nrfmicro, bluemicro840, puchi_ble and Pi Pico W; for other hardware set `chip` instead"
-                )),
+                None => {
+                    let supported = SUPPORTED_BOARDS
+                        .iter()
+                        .flat_map(|def| def.names.iter().copied())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    Err(format!(
+                        "Unsupported board \"{board}\" — supported boards are {supported}; for other hardware set `chip` instead"
+                    ))
+                }
             }
         } else if let Some(chip) = keyboard.chip.clone() {
             if chip.to_lowercase().starts_with("stm32") {
