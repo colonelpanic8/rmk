@@ -2,6 +2,8 @@
 
 The `[rmk]` section defines configuration parameters used inside RMK. These parameters affect the firmware's behavior, memory usage, and performance. If you don't need to change these parameters, you can ignore this section.
 
+Every time-valued field in `keyboard.toml` accepts either a bare integer in the field's native unit (documented per field) or a duration string like `"20ms"` or `"1s"` — for example `debounce_time = 20` and `debounce_time = "20ms"` are equivalent.
+
 ## Configuration Example
 
 ```toml

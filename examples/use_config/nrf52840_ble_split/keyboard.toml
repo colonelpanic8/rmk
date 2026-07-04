@@ -18,7 +18,9 @@ map = """
 """
 
 [keymap]
-layers = 3
+# Layers 1-4 are referenced by the morse hold_actions below — reserve them
+# (they start all-transparent)
+layers = 5
 
 [[keymap.layer]]
 keys = """

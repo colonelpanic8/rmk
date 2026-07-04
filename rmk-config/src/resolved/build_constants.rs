@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
+use crate::communication::{DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
 
 const SUBSCRIBER_DEFAULT_CONFIG: &str = include_str!("../default_config/subscriber_default.toml");
 
@@ -222,7 +222,7 @@ fn resolve_passkey_enabled(ble: &crate::BleConfig) -> Result<Passkey, String> {
 #[cfg(test)]
 mod tests {
     use super::resolve_passkey_enabled;
-    use crate::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
+    use crate::communication::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
 
     #[test]
     fn validates_passkey_timeout() {

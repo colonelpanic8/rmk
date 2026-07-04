@@ -216,7 +216,9 @@ The `layer.keys` string follows several rules:
 
 1. For a simple keycode (i.e., keys in RMK's [`HidKeyCode`](https://docs.rs/rmk/latest/rmk/keycode/enum.HidKeyCode.html) enum), just fill in its name.
 
-   For example, `Backspace` is turned into the corresponding HID keycode. The keycode string must be valid, or RMK won't compile. To make things easier, a number of alternative key names were added (see the alias column in the [KeyCode table](./keymap_configuration/keycodes)), and lookup is case-insensitive.
+   For example, `Backspace` is turned into the corresponding HID keycode. The keycode string must be valid, or RMK won't compile (unknown keycodes report a "did you mean …?" suggestion). To make things easier, a number of alternative key names were added (see the alias column in the [KeyCode table](./keymap_configuration/keycodes)), and lookup is case-insensitive.
+
+   Coming from QMK? `KC_`-prefixed names are accepted too: `KC_LSFT`, `KC_BSPC` and friends resolve to the same keycodes as their unprefixed spellings, so you can paste a QMK keymap and fix it up incrementally.
 
    For a simple keycode with modifiers held, use `WM(key, modifier)` to create a keypress-with-modifier action. Modifiers can be chained like `LShift | RGui` to hold several at once.
 

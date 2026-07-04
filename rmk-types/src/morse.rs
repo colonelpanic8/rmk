@@ -262,8 +262,10 @@ impl<'de> Deserialize<'de> for MorseProfile {
                 enable_flow_tap: Option<bool>,
             }
             let r = Repr::deserialize(deserializer)?;
-            Ok(MorseProfile::new(r.unilateral_tap, r.mode, r.hold_timeout_ms, r.gap_timeout_ms)
-                .with_enable_flow_tap(r.enable_flow_tap))
+            Ok(
+                MorseProfile::new(r.unilateral_tap, r.mode, r.hold_timeout_ms, r.gap_timeout_ms)
+                    .with_enable_flow_tap(r.enable_flow_tap),
+            )
         } else {
             Ok(MorseProfile(u32::deserialize(deserializer)?))
         }

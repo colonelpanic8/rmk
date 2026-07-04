@@ -1,6 +1,10 @@
+use serde::Deserialize;
+
+use crate::KeyboardTomlConfig;
 use crate::chip::{ChipModel, ChipSeries};
+use crate::duration::de_opt_secs;
+use crate::light::PinConfig;
 use crate::usb_interrupt_map::get_usb_info;
-use crate::{BleConfig, KeyboardTomlConfig};
 
 /// Information about USB interface
 #[derive(Clone, Debug, Default)]
@@ -110,4 +114,67 @@ impl KeyboardTomlConfig {
             ),
         }
     }
+}
+
+#[derive(Clone, Default, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BleConfig {
+    /// Defaulted (not required) so a bare `[ble]` section parses without the
+    /// chip-default layer; BLE-capable chip defaults set it to `true`.
+    #[serde(default)]
+    pub enabled: bool,
+    pub battery_adc_pin: Option<String>,
+    pub charge_state: Option<PinConfig>,
+    pub charge_led: Option<PinConfig>,
+    pub adc_divider_measured: Option<u32>,
+    pub adc_divider_total: Option<u32>,
+    pub default_tx_power: Option<i8>,
+    pub use_2m_phy: Option<bool>,
+    pub passkey_entry: Option<bool>,
+    /// Passkey entry timeout (integer seconds or a "120s" string)
+    #[serde(default, deserialize_with = "de_opt_secs")]
+    pub passkey_entry_timeout: Option<u32>,
+}
+
+/// Default passkey entry timeout in seconds.
+pub const DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS: u32 = 120;
+
+/// Minimum passkey entry timeout in seconds.
+pub const MIN_PASSKEY_ENTRY_TIMEOUT_SECS: u32 = 30;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommunicationProtocol {
+    I2c(I2cConfig),
+    Spi(SpiConfig),
+}
+
+/// SPI config
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpiConfig {
+    pub instance: String,
+    pub sck: String,
+    pub mosi: String,
+    pub miso: String,
+    pub cs: Option<String>,
+    pub cpi: Option<u32>,
+    pub tx_dma: Option<String>,
+    pub rx_dma: Option<String>,
+}
+
+/// I2C config
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct I2cConfig {
+    pub instance: String,
+    pub sda: String,
+    pub scl: String,
+    /// 7-bit I2C address. Defaults to 0x3C when omitted.
+    #[serde(default = "default_i2c_address")]
+    pub address: u8,
+}
+
+const fn default_i2c_address() -> u8 {
+    0x3C
 }

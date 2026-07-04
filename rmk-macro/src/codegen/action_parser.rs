@@ -115,7 +115,7 @@ pub(crate) fn expand_profile(profile: &MorseProfile) -> proc_macro2::TokenStream
 
     let hold_timeout_ms = match &profile.hold_timeout_ms {
         Some(t) => {
-            let timeout = *t as u16;
+            let timeout = checked_timeout_ms(*t, "hold_timeout");
             quote! { ::core::option::Option::Some(#timeout) }
         }
         None => quote! { ::core::option::Option::None },
@@ -123,7 +123,7 @@ pub(crate) fn expand_profile(profile: &MorseProfile) -> proc_macro2::TokenStream
 
     let gap_timeout_ms = match &profile.gap_timeout_ms {
         Some(t) => {
-            let timeout = *t as u16;
+            let timeout = checked_timeout_ms(*t, "gap_timeout");
             quote! { ::core::option::Option::Some(#timeout) }
         }
         None => quote! { ::core::option::Option::None },
@@ -452,11 +452,55 @@ fn parse_layer(key: &str) -> u8 {
 }
 
 pub(crate) fn get_key_with_alias(key: String) -> Ident {
-    let key = match KEYCODE_ALIAS.get(key.to_lowercase().as_str()) {
-        Some(k) => *k,
-        None => key.as_str(),
-    };
-    format_ident!("{}", key)
+    // Accept QMK-style `KC_` prefixes for muscle memory: `KC_LSFT` == `lsft`.
+    let lower = key.to_lowercase();
+    let lookup = lower.strip_prefix("kc_").unwrap_or(&lower);
+    let canonical = KEYCODE_ALIAS.get(lookup).copied().or_else(|| {
+        rmk_types::keycode::HidKeyCode::VARIANTS
+            .iter()
+            .copied()
+            .find(|variant| variant.to_lowercase() == lookup)
+    });
+    match canonical {
+        Some(keycode) => format_ident!("{}", keycode),
+        None => {
+            // An unchecked fallthrough would surface as a rustc error on
+            // `HidKeyCode::<typo>` inside generated code, far from keyboard.toml.
+            let suggestion = rmk_types::keycode::HidKeyCode::VARIANTS
+                .iter()
+                .map(|variant| (variant, levenshtein(lookup, &variant.to_lowercase())))
+                .filter(|(_, distance)| *distance <= 2)
+                .min_by_key(|(_, distance)| *distance)
+                .map(|(variant, _)| format!(", did you mean `{variant}`?"))
+                .unwrap_or_default();
+            panic!(
+                "\n❌ keyboard.toml: unknown keycode `{key}`{suggestion} Please check the documentation: https://rmk.rs/docs/features/configuration/layout.html"
+            );
+        }
+    }
+}
+
+/// Morse timeouts are stored as u16 milliseconds in the firmware profile; a
+/// silent `as u16` would wrap e.g. "70s" to ~4.5s.
+fn checked_timeout_ms(ms: u64, field: &str) -> u16 {
+    u16::try_from(ms).unwrap_or_else(|_| {
+        panic!("\n❌ keyboard.toml: morse `{field}` of {ms}ms exceeds the maximum 65535ms (u16)")
+    })
+}
+
+/// Edit distance for keycode suggestions; inputs are short key names.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let b_len = b.chars().count();
+    let mut prev: Vec<usize> = (0..=b_len).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut current = vec![i + 1];
+        for (j, cb) in b.chars().enumerate() {
+            let cost = usize::from(ca != cb);
+            current.push((prev[j] + cost).min(prev[j + 1] + 1).min(current[j] + 1));
+        }
+        prev = current;
+    }
+    prev[b_len]
 }
 
 #[cfg(test)]
@@ -466,6 +510,19 @@ mod tests {
 
     fn expand(key: &str) -> String {
         parse_key(key.to_string(), &None).to_string()
+    }
+
+    #[test]
+    fn kc_prefix_and_case_insensitive_keycodes_resolve() {
+        // QMK-style KC_ prefix and arbitrary casing both canonicalize
+        assert_eq!(expand("KC_A"), expand("A"));
+        assert_eq!(expand("BACKSPACE"), expand("Backspace"));
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown keycode `LShfit`")]
+    fn unknown_keycode_is_rejected_with_suggestion() {
+        expand("LShfit");
     }
 
     fn profile(enable_flow_tap: Option<bool>) -> MorseProfile {

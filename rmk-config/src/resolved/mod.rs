@@ -42,4 +42,5 @@ pub use keymap::Keymap;
 pub use layout::Layout;
 
 // Re-export constants used by codegen
+pub use crate::communication::{DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
 pub use crate::keycode_alias::KEYCODE_ALIAS;

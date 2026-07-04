@@ -12,16 +12,39 @@ use syn::parse_macro_input;
 
 use crate::codegen::parse_keyboard_mod;
 
+/// Run a keyboard expansion, presenting any panic as a `compile_error!` at the
+/// macro's span instead of "proc macro panicked" — keyboard.toml problems are
+/// user errors, not macro bugs.
+fn expand_or_error(expand: impl FnOnce() -> proc_macro2::TokenStream) -> TokenStream {
+    let prev_hook = std::panic::take_hook();
+    // The default hook prints a "thread panicked" backtrace note to stderr;
+    // suppress it for the duration of the guarded expansion.
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(expand));
+    std::panic::set_hook(prev_hook);
+    match result {
+        Ok(tokens) => tokens.into(),
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("keyboard macro expansion failed");
+            quote::quote! { ::core::compile_error!(#msg); }.into()
+        }
+    }
+}
+
 #[proc_macro_attribute]
 pub fn rmk_keyboard(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_mod = parse_macro_input!(item as syn::ItemMod);
-    parse_keyboard_mod(item_mod).into()
+    expand_or_error(move || parse_keyboard_mod(item_mod))
 }
 
 #[proc_macro_attribute]
 pub fn rmk_central(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_mod = parse_macro_input!(item as syn::ItemMod);
-    parse_keyboard_mod(item_mod).into()
+    expand_or_error(move || parse_keyboard_mod(item_mod))
 }
 
 /// Attribute for `rmk_peripheral` macro
@@ -48,7 +71,7 @@ pub fn rmk_peripheral(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    parse_split_peripheral_mod(peripheral_id, attr, item_mod).into()
+    expand_or_error(move || parse_split_peripheral_mod(peripheral_id, attr, item_mod))
 }
 
 /// Marker attribute for coordinating Runnable generation between macros.

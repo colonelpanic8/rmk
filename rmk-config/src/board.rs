@@ -1,6 +1,9 @@
-use crate::{
-    InputDeviceConfig, KeyboardTomlConfig, LayoutTomlConfig, MatrixConfig, MatrixType, SplitConfig, SplitConnection,
-};
+use serde::Deserialize;
+
+use crate::display::DisplayConfig;
+use crate::input_device::InputDeviceConfig;
+use crate::layout::LayoutTomlConfig;
+use crate::{KeyboardTomlConfig, default_false, default_true};
 
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -236,10 +239,11 @@ impl KeyboardTomlConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_matrix_dims, validate_split_config};
-    use crate::{
-        LayoutTomlConfig, MatrixConfig, MatrixType, SerialConfig, SplitBoardConfig, SplitConfig, SplitConnection,
+    use super::{
+        MatrixConfig, MatrixType, SerialConfig, SplitBoardConfig, SplitConfig, SplitConnection, validate_matrix_dims,
+        validate_split_config,
     };
+    use crate::layout::LayoutTomlConfig;
 
     fn normal(rows: &[&str], cols: &[&str]) -> MatrixConfig {
         MatrixConfig {
@@ -371,4 +375,112 @@ mod tests {
         let err = validate_split_config(&split, Some(&layout_4x3())).unwrap_err();
         assert!(err.contains("overlap"), "{err}");
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub enum MatrixType {
+    #[default]
+    #[serde(rename = "normal")]
+    Normal,
+    #[serde(rename = "direct_pin")]
+    DirectPin,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DebouncerType {
+    #[default]
+    Default,
+    Fast,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MatrixConfig {
+    #[serde(default)]
+    pub matrix_type: MatrixType,
+    pub row_pins: Option<Vec<String>>,
+    pub col_pins: Option<Vec<String>>,
+    pub direct_pins: Option<Vec<Vec<String>>>,
+    #[serde(default = "default_true")]
+    pub direct_pin_low_active: bool,
+    #[serde(default = "default_false")]
+    pub row2col: bool,
+    #[serde(default)]
+    pub debouncer: DebouncerType,
+    pub bootmagic: Option<(u8, u8)>,
+}
+
+/// Split connection transport
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitConnection {
+    #[default]
+    Ble,
+    Serial,
+}
+
+/// Configurations for split keyboards
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplitConfig {
+    pub connection: SplitConnection,
+    pub central: SplitBoardConfig,
+    pub peripheral: Vec<SplitBoardConfig>,
+}
+
+/// Configurations for each split board
+///
+/// The transport field must match `split.connection`: `serial` is required for
+/// serial splits and forbidden for BLE splits; `ble_addr` is optional for BLE
+/// splits (dongle setups omit it) and forbidden for serial splits.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplitBoardConfig {
+    /// Row number of the split board
+    pub rows: usize,
+    /// Col number of the split board
+    pub cols: usize,
+    /// Row offset of the split board
+    pub row_offset: usize,
+    /// Col offset of the split board
+    pub col_offset: usize,
+    /// Ble address
+    pub ble_addr: Option<[u8; 6]>,
+    /// Serial config, the vector length should be 1 for peripheral
+    pub serial: Option<Vec<SerialConfig>>,
+    /// Matrix config for the split
+    pub matrix: MatrixConfig,
+    /// Input device config for the split
+    pub input_device: Option<InputDeviceConfig>,
+    /// Display config for the split board
+    pub display: Option<DisplayConfig>,
+    /// Battery ADC pin for this split board
+    pub battery_adc_pin: Option<String>,
+    /// ADC divider measured value for battery
+    pub adc_divider_measured: Option<u32>,
+    /// ADC divider total value for battery
+    pub adc_divider_total: Option<u32>,
+    /// Output Pin config for the split
+    pub output: Option<Vec<OutputConfig>>,
+}
+
+/// Serial port config
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SerialConfig {
+    pub instance: String,
+    pub tx_pin: String,
+    pub rx_pin: String,
+}
+
+/// Configuration for an output pin
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutputConfig {
+    pub pin: String,
+    #[serde(default)]
+    pub low_active: bool,
+    #[serde(default)]
+    pub initial_state_active: bool,
 }

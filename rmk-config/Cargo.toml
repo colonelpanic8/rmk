@@ -10,7 +10,6 @@ license = "MIT OR Apache-2.0"
 resolver = "2"
 
 [dependencies]
-config = "0.15"
 toml = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde-inline-default = "1.0.0"

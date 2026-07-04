@@ -1,18 +1,27 @@
 //! Resolved hardware types for the public API of `rmk-config`.
 //!
-//! Leaf types are re-exported directly from the TOML configuration types
-//! Only types with genuine structural transformation are defined here.
+//! This module is the deliberate boundary between the TOML schema and codegen:
+//! leaf types whose TOML shape is already what codegen needs (pins, sensor
+//! configs, split boards) are re-exported 1:1, while types that require real
+//! transformation (`Storage`, `Hardware`, chip/communication resolution) are
+//! defined here. Consumers import everything through this module, so schema
+//! types can move between rmk-config's internal modules without touching them.
 
-// Re-export leaf types from TOML config (now properly named and `pub`)
-pub use crate::board::{BoardConfig, UniBodyConfig};
-pub use crate::chip::{ChipModel, ChipSeries};
-pub use crate::communication::{CommunicationConfig, UsbInfo};
-pub use crate::{
-    BleConfig, ChipConfig, CommunicationProtocol, DependencyConfig, DisplayConfig, DisplayDriver, EncoderConfig,
-    EncoderResolution, I2cConfig, InputDeviceConfig, Iqs5xxConfig, Iqs5xxI2cConfig, JoystickConfig, KeyInfo,
-    LightConfig, MatrixConfig, MatrixType, OutputConfig, PinConfig, Pmw33xxConfig, Pmw33xxType, Pmw3610Config,
-    PointingDeviceConfig, SerialConfig, SpiConfig, SplitBoardConfig, SplitConfig,
+// Re-export leaf types from the TOML schema modules
+pub use crate::DependencyConfig;
+pub use crate::board::{
+    BoardConfig, DebouncerType, MatrixConfig, MatrixType, OutputConfig, SerialConfig, SplitBoardConfig, SplitConfig,
+    SplitConnection, UniBodyConfig,
 };
+pub use crate::chip::{ChipConfig, ChipModel, ChipSeries, DcdcReg0Voltage};
+pub use crate::communication::{BleConfig, CommunicationConfig, CommunicationProtocol, I2cConfig, SpiConfig, UsbInfo};
+pub use crate::display::{DisplayConfig, DisplayDriver};
+pub use crate::input_device::{
+    EncoderConfig, EncoderPhase, EncoderResolution, InputDeviceConfig, Iqs5xxConfig, Iqs5xxI2cConfig, JoystickConfig,
+    Pmw33xxConfig, Pmw33xxType, Pmw3610Config, PointingDeviceConfig,
+};
+pub use crate::keymap::KeyInfo;
+pub use crate::light::{LightConfig, PinConfig};
 
 /// Resolved storage hardware config
 pub struct Storage {

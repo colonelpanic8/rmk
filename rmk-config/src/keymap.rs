@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use pest::Parser;
 use pest_derive::Parser;
+use serde::Deserialize;
 
+use crate::KeyboardTomlConfig;
 use crate::layout::{MapToken, parse_map};
-use crate::{KeyInfo, KeyboardTomlConfig, KeymapConfig, LayerTomlConfig};
 
 #[derive(Parser)]
 #[grammar = "keymap.pest"]
@@ -56,11 +57,11 @@ impl KeyboardTomlConfig {
 
         // `[layout].map` is the sole source for placing keys, so it's required whenever a
         // layer is defined; with no layers the default keymap is simply transparent.
+        let layer_names = Self::collect_layer_names(layers)?;
         let mut keymap = Vec::with_capacity(num_layers as usize);
         let key_info = match layout.map.as_deref() {
             Some(map) => {
                 let (sequence_to_grid, key_info) = Self::build_key_grid(map, layout.rows, layout.cols)?;
-                let layer_names = Self::collect_layer_names(layers)?;
                 for (index, layer) in layers.iter().enumerate() {
                     keymap.push(Self::build_layer_grid(
                         index,
@@ -88,7 +89,7 @@ impl KeyboardTomlConfig {
             keymap.push(vec![vec!["_".to_string(); layout.cols as usize]; layout.rows as usize]);
         }
 
-        let encoder_map = Self::resolve_encoders(layers, &aliases)?;
+        let encoder_map = Self::resolve_encoders(layers, &aliases, &layer_names, num_layers)?;
 
         Ok((
             KeymapConfig {
@@ -118,7 +119,7 @@ impl KeyboardTomlConfig {
     }
 
     /// Map each named layer to its index, rejecting duplicate names.
-    fn collect_layer_names(layers: &[LayerTomlConfig]) -> Result<HashMap<String, u32>, String> {
+    pub(crate) fn collect_layer_names(layers: &[LayerTomlConfig]) -> Result<HashMap<String, u32>, String> {
         let mut layer_names = HashMap::new();
         for (index, layer) in layers.iter().enumerate() {
             if let Some(name) = &layer.name {
@@ -168,21 +169,42 @@ impl KeyboardTomlConfig {
         Ok(grid)
     }
 
-    /// Resolve `[[keymap.layer]].encoders` (alias-expanded), one entry per layer.
+    /// Resolve `[[keymap.layer]].encoders`, one entry per layer. Encoder actions
+    /// get the same alias/layer-name/range resolution as keymap keys.
     fn resolve_encoders(
         layers: &[LayerTomlConfig],
         aliases: &HashMap<String, String>,
+        layer_names: &HashMap<String, u32>,
+        num_layers: u8,
     ) -> Result<Vec<Vec<[String; 2]>>, String> {
         let mut encoder_map = Vec::with_capacity(layers.len());
         for layer in layers {
             let mut encoders = layer.encoders.clone().unwrap_or_default();
             for [cw, ccw] in &mut encoders {
-                *cw = Self::alias_resolver(cw, aliases)?;
-                *ccw = Self::alias_resolver(ccw, aliases)?;
+                *cw = Self::resolve_single_action(cw, aliases, layer_names, num_layers)
+                    .map_err(|e| format!("keyboard.toml: encoder action: {e}"))?;
+                *ccw = Self::resolve_single_action(ccw, aliases, layer_names, num_layers)
+                    .map_err(|e| format!("keyboard.toml: encoder action: {e}"))?;
             }
             encoder_map.push(encoders);
         }
         Ok(encoder_map)
+    }
+
+    /// Resolve one behavior/encoder action string: aliases expanded, named layer
+    /// references resolved to indices, numeric ones range-checked — the same
+    /// rules `[[keymap.layer]].keys` get.
+    pub(crate) fn resolve_single_action(
+        action: &str,
+        aliases: &HashMap<String, String>,
+        layer_names: &HashMap<String, u32>,
+        num_layers: u8,
+    ) -> Result<String, String> {
+        let mut actions = Self::keymap_parser(action, aliases, layer_names, num_layers)?;
+        if actions.len() != 1 {
+            return Err(format!("expected a single key action, got `{action}`"));
+        }
+        Ok(actions.pop().unwrap())
     }
 
     fn alias_resolver(keys: &str, aliases: &HashMap<String, String>) -> Result<String, String> {
@@ -307,8 +329,7 @@ impl KeyboardTomlConfig {
                     .map_err(|_| format!("Invalid layer number: {}", pair.as_str()))?;
                 if n >= num_layers as u32 {
                     return Err(format!(
-                        "layer {n} in `{}` is out of range — the keymap defines {num_layers} layer(s), valid indices are 0..={}",
-                        pair.as_str(),
+                        "layer index {n} is out of range — the keymap defines {num_layers} layer(s), valid indices are 0..={}",
                         num_layers.saturating_sub(1)
                     ));
                 }
@@ -692,6 +713,36 @@ mod tests {
     }
 
     #[test]
+    fn encoder_and_behavior_actions_get_layer_validation() {
+        // Encoder action referencing a named layer resolves like keymap keys do
+        let cfg = config(
+            "[layout]\nrows = 1\ncols = 1\nmap = \"(0,0)\"\n\
+             [keymap]\n[[keymap.layer]]\nname = \"base\"\nkeys = \"A\"\nencoders = [[\"TG(base)\", \"No\"]]\n\
+             [[input_device.encoder]]\npin_a = \"a0\"\npin_b = \"b0\"\n",
+        );
+        let (keymap, _) = cfg.get_keymap_config().unwrap();
+        assert_eq!(keymap.encoder_map[0][0][0], "TG(0)");
+
+        // Encoder action with an out-of-range layer index is rejected
+        let cfg = config(
+            "[layout]\nrows = 1\ncols = 1\nmap = \"(0,0)\"\n\
+             [keymap]\n[[keymap.layer]]\nkeys = \"A\"\nencoders = [[\"MO(9)\", \"No\"]]\n\
+             [[input_device.encoder]]\npin_a = \"a0\"\npin_b = \"b0\"\n",
+        );
+        let err = cfg.get_keymap_config().unwrap_err();
+        assert!(err.contains("out of range"), "{err}");
+
+        // Behavior actions (here: a morse hold) get the same range check
+        let cfg = config(
+            "[layout]\nrows = 1\ncols = 1\nmap = \"(0,0)\"\n\
+             [keymap]\n[[keymap.layer]]\nkeys = \"A\"\n\
+             [behavior.morse]\nmorses = [{ tap = \"B\", hold = \"MO(9)\" }]\n",
+        );
+        let err = cfg.get_behavior_config().unwrap_err();
+        assert!(err.contains("out of range"), "{err}");
+    }
+
+    #[test]
     fn layers_defaults_to_block_count() {
         let cfg = config(
             "[layout]\nrows = 1\ncols = 2\nmap = \"(0,0) (0,1)\"\n\
@@ -790,4 +841,43 @@ mod tests {
         let err = KeyboardTomlConfig::build_layer_grid(0, &layer, &seq, &aliases, &layer_names, 1, 1, 3).unwrap_err();
         assert!(err.contains("has 2 keys but `layout.map` defines 3 positions"), "{err}");
     }
+}
+
+/// The `[keymap]` section: layer count plus the per-layer key actions.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(unused)]
+pub(crate) struct KeymapTomlConfig {
+    /// Total layer count. Optional — defaults to the number of `[[keymap.layer]]`
+    /// blocks; set it larger to reserve extra empty layers (e.g. for Vial/Rynk).
+    pub layers: Option<u8>,
+    /// Per-layer key actions: `[[keymap.layer]]`.
+    #[serde(default)]
+    pub layer: Vec<LayerTomlConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(unused)]
+pub(crate) struct LayerTomlConfig {
+    pub name: Option<String>,
+    pub keys: String,
+    pub encoders: Option<Vec<[String; 2]>>,
+}
+
+/// Intermediate resolved keymap grid (rows/cols/layers + per-layer actions).
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct KeymapConfig {
+    pub rows: u8,
+    pub cols: u8,
+    pub layers: u8,
+    pub keymap: Vec<Vec<Vec<String>>>,
+    pub encoder_map: Vec<Vec<[String; 2]>>, // Empty if there are no encoders or not configured
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeyInfo {
+    pub hand: char, // 'L' or 'R' or other chars
 }

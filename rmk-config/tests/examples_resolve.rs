@@ -85,6 +85,11 @@ fn unknown_keys_are_rejected() {
             msg.contains("unknown field") && msg.contains(typo),
             "{case}: error should name `{typo}`, got: {msg}"
         );
+        // Errors from the user's own file must carry toml's line/column caret
+        assert!(
+            msg.contains("TOML parse error at line"),
+            "{case}: error should point at a line in the user file, got: {msg}"
+        );
     }
     let _ = std::panic::take_hook();
 }

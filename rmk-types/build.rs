@@ -207,7 +207,7 @@ fn generate_constants(bc: &BuildConstants) -> String {
             lines.push("pub const PASSKEY_ENTRY_ENABLED: bool = false;".to_string());
             lines.push(format!(
                 "pub const PASSKEY_ENTRY_TIMEOUT_SECS: u32 = {};",
-                rmk_config::DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS
+                rmk_config::resolved::DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS
             ));
         }
     }

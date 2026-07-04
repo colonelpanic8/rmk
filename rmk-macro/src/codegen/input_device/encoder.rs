@@ -1,5 +1,5 @@
 use quote::{format_ident, quote};
-use rmk_config::resolved::hardware::{ChipModel, EncoderConfig, EncoderResolution};
+use rmk_config::resolved::hardware::{ChipModel, EncoderConfig, EncoderPhase, EncoderResolution};
 
 use super::Initializer;
 use crate::codegen::chip::gpio::convert_gpio_str_to_input_pin;
@@ -41,8 +41,8 @@ pub(crate) fn expand_encoder_device(
         };
 
         // Create different types of encoders based on the phase field
-        let encoder_device = match encoder.phase.as_deref() {
-            Some("e8h7") => {
+        let encoder_device = match encoder.phase {
+            EncoderPhase::E8h7 => {
                 quote! {
                     let mut #encoder_name = ::rmk::input_device::rotary_encoder::RotaryEncoder::with_phase(
                         #pin_a,
@@ -52,13 +52,24 @@ pub(crate) fn expand_encoder_device(
                     )#debounce_chain;
                 }
             }
-            Some("resolution") => {
+            EncoderPhase::Resolution => {
                 // When phase is "resolution", ensure resolution and reverse are set
                 let resolution = match encoder.resolution.clone().expect(
                     "`resolution` field needs to be set when the encoder's mode is 'resolution'",
                 ) {
                     EncoderResolution::Value(r) => r,
-                    EncoderResolution::Derived { detent, pulse } => pulse * 4 / detent,
+                    EncoderResolution::Derived { detent, pulse } => {
+                        if detent == 0 {
+                            panic!("\n❌ keyboard.toml: encoder `detent` must be non-zero");
+                        }
+                        // Widen before multiplying: `pulse * 4` overflows u8 for pulse > 63
+                        u8::try_from(u16::from(pulse) * 4 / u16::from(detent)).unwrap_or_else(|_| {
+                            panic!(
+                                "\n❌ keyboard.toml: encoder resolution pulse*4/detent = {} exceeds 255",
+                                u16::from(pulse) * 4 / u16::from(detent)
+                            )
+                        })
+                    }
                 };
                 let reverse = encoder.reverse.unwrap_or(false);
 
@@ -72,7 +83,7 @@ pub(crate) fn expand_encoder_device(
                     )#debounce_chain;
                 }
             }
-            Some("default") => {
+            EncoderPhase::Default => {
                 // Default phase
                 quote! {
                     let mut #encoder_name = ::rmk::input_device::rotary_encoder::RotaryEncoder::with_phase(
@@ -82,9 +93,6 @@ pub(crate) fn expand_encoder_device(
                         #encoder_id
                     )#debounce_chain;
                 }
-            }
-            _ => {
-                panic!("Invalid rotary encoder phase, available phase: default, resolution, e8h7");
             }
         };
 

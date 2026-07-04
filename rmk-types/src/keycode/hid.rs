@@ -14,6 +14,7 @@ use crate::modifier::ModifierCombination;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+#[cfg_attr(feature = "_codegen", derive(strum::VariantNames))]
 pub enum HidKeyCode {
     /// Reserved, no-key.
     No = 0x0000,

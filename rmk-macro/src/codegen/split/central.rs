@@ -4,7 +4,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use rmk_config::resolved::Hardware;
 use rmk_config::resolved::hardware::{
-    BoardConfig, ChipModel, ChipSeries, SerialConfig, SplitConfig,
+    BoardConfig, ChipModel, ChipSeries, SerialConfig, SplitConfig, SplitConnection,
 };
 
 pub(crate) fn expand_split_central_config(hardware: &Hardware) -> proc_macro2::TokenStream {
@@ -16,8 +16,8 @@ pub(crate) fn expand_split_central_config(hardware: &Hardware) -> proc_macro2::T
 }
 
 fn expand_split_communication_config(chip: &ChipModel, split_config: &SplitConfig) -> TokenStream2 {
-    match &split_config.connection[..] {
-        "ble" => {
+    match split_config.connection {
+        SplitConnection::Ble => {
             // We need to create addrs for BLE
             let num_peripheral = split_config.peripheral.len();
             quote! {
@@ -25,7 +25,7 @@ fn expand_split_communication_config(chip: &ChipModel, split_config: &SplitConfi
                 let peripheral_addrs = storage.read_peripheral_addresses::<#num_peripheral>().await;
             }
         }
-        "serial" => {
+        SplitConnection::Serial => {
             // We need to initialize serial instance for serial
             let serial_config: Vec<SerialConfig> = split_config
                 .central
@@ -34,7 +34,6 @@ fn expand_split_communication_config(chip: &ChipModel, split_config: &SplitConfi
                 .expect("central.serial is required");
             expand_serial_init(chip, serial_config)
         }
-        _ => panic!("Invalid connection type for split"),
     }
 }
 

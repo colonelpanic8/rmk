@@ -215,19 +215,19 @@ impl crate::KeyboardTomlConfig {
     }
 }
 
-fn resolve_macro_operation(op: crate::MacroOperation) -> MacroOperation {
+fn resolve_macro_operation(op: crate::behavior::MacroOperation) -> MacroOperation {
     match op {
-        crate::MacroOperation::Tap { keycode } => MacroOperation::Tap { keycode },
-        crate::MacroOperation::Down { keycode } => MacroOperation::Down { keycode },
-        crate::MacroOperation::Up { keycode } => MacroOperation::Up { keycode },
-        crate::MacroOperation::Delay { duration } => MacroOperation::Delay {
+        crate::behavior::MacroOperation::Tap { keycode } => MacroOperation::Tap { keycode },
+        crate::behavior::MacroOperation::Down { keycode } => MacroOperation::Down { keycode },
+        crate::behavior::MacroOperation::Up { keycode } => MacroOperation::Up { keycode },
+        crate::behavior::MacroOperation::Delay { duration } => MacroOperation::Delay {
             duration_ms: duration.0,
         },
-        crate::MacroOperation::Text { text } => MacroOperation::Text { text },
+        crate::behavior::MacroOperation::Text { text } => MacroOperation::Text { text },
     }
 }
 
-fn resolve_morse_profile(p: &crate::MorseProfile) -> MorseProfile {
+fn resolve_morse_profile(p: &crate::behavior::MorseProfile) -> MorseProfile {
     MorseProfile {
         enable_flow_tap: p.enable_flow_tap,
         unilateral_tap: p.unilateral_tap,

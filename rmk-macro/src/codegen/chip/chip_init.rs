@@ -2,7 +2,9 @@ use darling::FromMeta;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{ToTokens, quote};
 use rmk_config::resolved::Hardware;
-use rmk_config::resolved::hardware::{BoardConfig, ChipModel, ChipSeries, CommunicationConfig};
+use rmk_config::resolved::hardware::{
+    BoardConfig, ChipModel, ChipSeries, CommunicationConfig, DcdcReg0Voltage,
+};
 use syn::{ItemFn, ItemMod};
 
 use crate::codegen::override_helper::Overwritten;
@@ -68,17 +70,15 @@ pub(crate) fn chip_init_default(hardware: &Hardware, peripheral_id: Option<usize
             let dcdc_config = if chip.chip == "nrf52840" {
                 let reg0_enabled = chip_cfg.dcdc_reg0.unwrap_or(true);
                 let reg1_enabled = chip_cfg.dcdc_reg1.unwrap_or(true);
-                let reg0_voltage_str = chip_cfg.dcdc_reg0_voltage.as_deref().unwrap_or("3V3");
-                let reg0_voltage = match reg0_voltage_str {
-                    "3V3" => quote! { ::embassy_nrf::config::Reg0Voltage::_3V3 },
-                    "1V8" => quote! { ::embassy_nrf::config::Reg0Voltage::_1V8 },
-                    _ => {
-                        panic!(
-                            "Invalid dcdc_reg0_voltage: {}. Must be \"3V3\" or \"1V8\"",
-                            reg0_voltage_str
-                        );
-                    }
-                };
+                let (reg0_voltage, reg0_voltage_str) =
+                    match chip_cfg.dcdc_reg0_voltage.unwrap_or(DcdcReg0Voltage::V3_3) {
+                        DcdcReg0Voltage::V3_3 => {
+                            (quote! { ::embassy_nrf::config::Reg0Voltage::_3V3 }, "3V3")
+                        }
+                        DcdcReg0Voltage::V1_8 => {
+                            (quote! { ::embassy_nrf::config::Reg0Voltage::_1V8 }, "1V8")
+                        }
+                    };
                 quote! {
                     config.dcdc.reg0_voltage = Some(#reg0_voltage);
                     config.dcdc.reg0 = #reg0_enabled;

@@ -1,7 +1,7 @@
 use darling::FromMeta;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use rmk_config::resolved::hardware::{BoardConfig, CommunicationConfig};
+use rmk_config::resolved::hardware::{BoardConfig, CommunicationConfig, SplitConnection};
 use rmk_config::resolved::{Hardware, Host};
 use syn::{ItemFn, ItemMod};
 
@@ -101,7 +101,7 @@ pub(crate) fn rmk_entry_select(
             if let Some(t) = &watchdog_task {
                 tasks.push(t.clone());
             }
-            if split_config.connection == "ble" {
+            if split_config.connection == SplitConnection::Ble {
                 if !processors.is_empty() {
                     tasks.push(processors_task);
                 };
@@ -127,7 +127,7 @@ pub(crate) fn rmk_entry_select(
                     #transport_prelude
                     #joined
                 }
-            } else if split_config.connection == "serial" {
+            } else {
                 if !processors.is_empty() {
                     tasks.push(processors_task);
                 };
@@ -161,11 +161,6 @@ pub(crate) fn rmk_entry_select(
                     #transport_prelude
                     #joined
                 }
-            } else {
-                panic!(
-                    "Invalid split connection type: {}, only \"ble\" and \"serial\" are supported",
-                    split_config.connection
-                );
             }
         }
         BoardConfig::UniBody(_) => rmk_entry_unibody(

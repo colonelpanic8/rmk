@@ -29,7 +29,8 @@ map = """
 """
 
 [keymap]
-layers = 2
+# Layer 2 is referenced by the forks below — reserve it (starts all-transparent)
+layers = 3
 
 [[keymap.layer]]
 name = "base_layer"

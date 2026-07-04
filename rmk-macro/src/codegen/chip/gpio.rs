@@ -109,11 +109,56 @@ pub(crate) fn convert_direct_pins_to_initializers(
     initializers
 }
 
+/// Cheap per-series shape check so a mistyped pin fails here, naming the
+/// keyboard.toml value, instead of inside generated HAL code ("no field
+/// `PA99` on type `Peripherals`").
+pub(crate) fn validate_pin_name(chip: &ChipModel, gpio_name: &str) {
+    let valid = match chip.series {
+        // PA0..PK15
+        ChipSeries::Stm32 => {
+            let bytes = gpio_name.as_bytes();
+            bytes.len() >= 3
+                && bytes[0] == b'P'
+                && bytes[1].is_ascii_uppercase()
+                && bytes[2..].iter().all(|c| c.is_ascii_digit())
+        }
+        // P0_00..P1_15 (zero-padded, as embassy-nrf names them)
+        ChipSeries::Nrf52 => {
+            let bytes = gpio_name.as_bytes();
+            bytes.len() == 5
+                && (bytes.starts_with(b"P0_") || bytes.starts_with(b"P1_"))
+                && bytes[3..].iter().all(|c| c.is_ascii_digit())
+        }
+        // PIN_0..PIN_29, plus the QSPI pins embassy-rp exposes as gpio
+        ChipSeries::Rp2040 => gpio_name.strip_prefix("PIN_").is_some_and(|rest| {
+            !rest.is_empty()
+                && (rest.bytes().all(|c| c.is_ascii_digit()) || rest.starts_with("QSPI_"))
+        }),
+        // GPIO0..
+        ChipSeries::Esp32 => gpio_name
+            .strip_prefix("GPIO")
+            .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|c| c.is_ascii_digit())),
+    };
+    if !valid {
+        let expected = match chip.series {
+            ChipSeries::Stm32 => "\"PA0\"",
+            ChipSeries::Nrf52 => "\"P0_04\" or \"P1_11\"",
+            ChipSeries::Rp2040 => "\"PIN_6\"",
+            ChipSeries::Esp32 => "\"GPIO6\"",
+        };
+        panic!(
+            "\n❌ keyboard.toml: invalid pin name \"{gpio_name}\" for chip {} — expected a name like {expected}",
+            chip.chip
+        );
+    }
+}
+
 pub(crate) fn convert_gpio_str_to_output_pin(
     chip: &ChipModel,
     gpio_name: String,
     initial_level_high: bool,
 ) -> proc_macro2::TokenStream {
+    validate_pin_name(chip, &gpio_name);
     let gpio_ident = format_ident!("{}", gpio_name);
     let default_level_ident = if initial_level_high {
         format_ident!("High")
@@ -166,6 +211,7 @@ pub(crate) fn convert_gpio_str_to_input_pin(
     async_matrix: bool,
     pull: Option<bool>,
 ) -> proc_macro2::TokenStream {
+    validate_pin_name(chip, &gpio_name);
     let gpio_ident = format_ident!("{}", gpio_name);
     let default_pull_ident = match pull {
         Some(true) => format_ident!("Up"),

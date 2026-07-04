@@ -1,4 +1,6 @@
-use crate::{ChipConfig, KeyboardTomlConfig};
+use serde::Deserialize;
+
+use crate::KeyboardTomlConfig;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ChipSeries {
@@ -64,7 +66,10 @@ impl KeyboardTomlConfig {
         let keyboard = self
             .keyboard
             .as_ref()
-            .ok_or_else(|| "[keyboard] section is required in keyboard.toml".to_string())?;
+            .ok_or_else(|| {
+                "[keyboard] section is required — add `[keyboard]` with `name`, `vendor_id`, `product_id` and `chip` (or `board`)"
+                    .to_string()
+            })?;
         if keyboard.board.is_none() == keyboard.chip.is_none() {
             return Err("Either \"board\" or \"chip\" should be set in keyboard.toml, but not both".to_string());
         }
@@ -134,4 +139,49 @@ impl KeyboardTomlConfig {
             .cloned()
             .unwrap_or_default()
     }
+}
+
+/// Configurations for keyboard info
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct KeyboardInfo {
+    /// Keyboard name
+    pub name: String,
+    /// Vender id
+    pub vendor_id: u16,
+    /// Product id
+    pub product_id: u16,
+    /// Manufacturer
+    pub manufacturer: Option<String>,
+    /// Product name, if not set, it will use `name` as default
+    pub product_name: Option<String>,
+    /// Serial number
+    pub serial_number: Option<String>,
+    /// Board name(if a supported board is used)
+    pub board: Option<String>,
+    /// Chip model
+    pub chip: Option<String>,
+    /// enable usb
+    pub usb_enable: Option<bool>,
+}
+
+/// nRF52840 DCDC REG0 output voltage
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+pub enum DcdcReg0Voltage {
+    #[serde(rename = "3V3")]
+    V3_3,
+    #[serde(rename = "1V8")]
+    V1_8,
+}
+
+/// Config for chip-specific settings
+#[derive(Clone, Default, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChipConfig {
+    /// DCDC regulator 0 enabled (for nrf52840)
+    pub dcdc_reg0: Option<bool>,
+    /// DCDC regulator 1 enabled (for nrf52840, nrf52833)
+    pub dcdc_reg1: Option<bool>,
+    /// DCDC regulator 0 voltage (for nrf52840)
+    pub dcdc_reg0_voltage: Option<DcdcReg0Voltage>,
 }

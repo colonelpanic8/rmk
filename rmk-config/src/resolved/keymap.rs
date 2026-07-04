@@ -1,4 +1,4 @@
-use crate::KeyInfo;
+use crate::keymap::KeyInfo;
 
 /// Resolved keymap for keymap generation: layer count, per-layer actions,
 /// encoder map, plus the matrix-derived per-key info and grid dimensions.

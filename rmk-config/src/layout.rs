@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 use pest::Parser;
 use serde::{Deserialize, Serialize};
 
-use crate::LayoutTomlConfig;
 use crate::keymap::{ConfigParser, Rule};
 
 // ── Wire mirror types (must match the host decoder in `rynk::layout::*`) ─────
@@ -89,8 +88,8 @@ impl Default for Shape {
     }
 }
 
-impl From<&crate::ShapeToml> for Shape {
-    fn from(t: &crate::ShapeToml) -> Self {
+impl From<&ShapeToml> for Shape {
+    fn from(t: &ShapeToml) -> Self {
         let rect2 = t.w2.map(|w2| Rect {
             w: w2,
             h: t.h2.unwrap_or(1.0),
@@ -1062,4 +1061,47 @@ map = """
         // in the 36 view (the ring column is now the leftmost).
         assert!(approx(key(full, 0, 1).rect.x - key(mini, 0, 1).rect.x, 1.0));
     }
+}
+
+/// The `[layout]` section: the physical key arrangement plus the rendered layout.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(unused)]
+pub(crate) struct LayoutTomlConfig {
+    pub rows: u8,
+    pub cols: u8,
+    /// The physical arrangement: an ordered map of `(row,col)` positions with
+    /// optional hand, shape (`@2u`), gaps (`[1.5]`), row-steps (`[y=]`), and
+    /// encoders (`(e,0)`). Its order also defines the order of `[[keymap.layer]]`.
+    pub map: Option<String>,
+    // Rendered-layout fields.
+    pub default_variant: Option<String>,
+    pub shapes: Option<HashMap<String, ShapeToml>>,
+    pub variant: Option<Vec<VariantToml>>,
+}
+
+/// A named shape from `[layout.shapes]`. Every field optional; widths/
+/// heights default to 1u, nudges/rotation to 0, and `w2/h2/x2/y2` are an
+/// optional second rectangle for L-shaped caps.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ShapeToml {
+    pub w: Option<f32>,
+    pub h: Option<f32>,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    pub r: Option<f32>,
+    pub w2: Option<f32>,
+    pub h2: Option<f32>,
+    pub x2: Option<f32>,
+    pub y2: Option<f32>,
+}
+
+/// One `[[layout.variant]]` render overlay: reshape some keys, hide others.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct VariantToml {
+    pub name: String,
+    pub shapes: Option<HashMap<String, String>>,
+    pub hidden: Option<Vec<String>>,
 }

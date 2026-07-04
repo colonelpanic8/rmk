@@ -3,7 +3,7 @@ use quote::{format_ident, quote};
 use rmk_config::resolved::Hardware;
 use rmk_config::resolved::hardware::{
     BleConfig, BoardConfig, ChipModel, ChipSeries, CommunicationConfig, InputDeviceConfig,
-    MatrixType, SplitBoardConfig, SplitConfig,
+    MatrixType, SplitBoardConfig, SplitConfig, SplitConnection,
 };
 use syn::ItemMod;
 
@@ -259,7 +259,7 @@ fn expand_split_peripheral(
 
     let imports = expand_custom_imports(&item_mod);
     let mut chip_init = expand_chip_init(hardware, Some(id), &item_mod);
-    if split_config.connection == "ble" {
+    if split_config.connection == SplitConnection::Ble {
         // Add storage when using BLE split
         let flash_init = expand_flash_init(hardware);
         chip_init.extend(quote! {
@@ -426,7 +426,7 @@ fn expand_split_peripheral_entry(
     // Add matrix to devices, and run all devices
     let mut devs = devices.clone();
     devs.push(quote! {matrix});
-    if split_config.connection == "ble" {
+    if split_config.connection == SplitConnection::Ble {
         devs.push(quote! {storage});
     }
     let device_task = quote! {
@@ -446,7 +446,7 @@ fn expand_split_peripheral_entry(
         quote! {}
     };
 
-    if split_config.connection == "ble" {
+    if split_config.connection == SplitConnection::Ble {
         let peripheral_run = quote! {
             ::rmk::split::peripheral::run_rmk_split_peripheral(
                 #id,
@@ -467,7 +467,7 @@ fn expand_split_peripheral_entry(
         quote! {
             #run_rmk_peripheral
         }
-    } else if split_config.connection == "serial" {
+    } else {
         let peripheral_serial = peripheral_config
             .serial
             .clone()
@@ -501,8 +501,6 @@ fn expand_split_peripheral_entry(
             #serial_init
             #run_rmk_peripheral
         }
-    } else {
-        panic!("Invalid split connection type: {}", split_config.connection);
     }
 }
 
