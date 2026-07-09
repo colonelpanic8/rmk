@@ -13,6 +13,18 @@ pub(crate) struct ConfigParser;
 // Max alias resolution depth to prevent infinite loops
 const MAX_ALIAS_RESOLUTION_DEPTH: usize = 10;
 
+type GridCoordinate = (u8, u8);
+type KeyGrid = Vec<Vec<KeyInfo>>;
+
+struct LayerBuildContext<'a> {
+    sequence_to_grid: &'a [GridCoordinate],
+    aliases: &'a HashMap<String, String>,
+    layer_names: &'a HashMap<String, u32>,
+    num_layers: u8,
+    rows: u8,
+    cols: u8,
+}
+
 impl KeyboardTomlConfig {
     /// The resolved layer count: explicit `[keymap].layers`, else the number of
     /// `[[keymap.layer]]` blocks (0 when there's no `[keymap]`). The check that an
@@ -72,17 +84,16 @@ impl KeyboardTomlConfig {
             Some(map) => {
                 let (sequence_to_grid, key_info) = Self::build_key_grid(map, layout.rows, layout.cols)?;
                 let layer_names = Self::collect_layer_names(layers)?;
+                let context = LayerBuildContext {
+                    sequence_to_grid: &sequence_to_grid,
+                    aliases: &aliases,
+                    layer_names: &layer_names,
+                    num_layers,
+                    rows: layout.rows,
+                    cols: layout.cols,
+                };
                 for (index, layer) in layers.iter().enumerate() {
-                    keymap.push(Self::build_layer_grid(
-                        index,
-                        layer,
-                        &sequence_to_grid,
-                        &aliases,
-                        &layer_names,
-                        num_layers,
-                        layout.rows,
-                        layout.cols,
-                    )?);
+                    keymap.push(Self::build_layer_grid(index, layer, &context)?);
                 }
                 key_info
             }
@@ -116,7 +127,7 @@ impl KeyboardTomlConfig {
     /// Build the write-order → grid-coordinate sequence and per-key info (hand) from
     /// `[layout].map`. `parse_map` (shared with the layout blob) already bounds-checks
     /// and de-dupes the coordinates, so here we just keep the `Key` tokens in order.
-    fn build_key_grid(map: &str, rows: u8, cols: u8) -> Result<(Vec<(u8, u8)>, Vec<Vec<KeyInfo>>), String> {
+    fn build_key_grid(map: &str, rows: u8, cols: u8) -> Result<(Vec<GridCoordinate>, KeyGrid), String> {
         let mut key_info = vec![vec![KeyInfo::default(); cols as usize]; rows as usize];
         let mut sequence_to_grid = Vec::new();
         for token in parse_map(map, rows, cols)? {
@@ -132,13 +143,13 @@ impl KeyboardTomlConfig {
     fn collect_layer_names(layers: &[LayerTomlConfig]) -> Result<HashMap<String, u32>, String> {
         let mut layer_names = HashMap::new();
         for (index, layer) in layers.iter().enumerate() {
-            if let Some(name) = &layer.name {
-                if layer_names.insert(name.clone(), index as u32).is_some() {
-                    return Err(format!(
-                        "keyboard.toml: Duplicate layer name '{}' found in `[[keymap.layer]]`",
-                        name
-                    ));
-                }
+            if let Some(name) = &layer.name
+                && layer_names.insert(name.clone(), index as u32).is_some()
+            {
+                return Err(format!(
+                    "keyboard.toml: Duplicate layer name '{}' found in `[[keymap.layer]]`",
+                    name
+                ));
             }
         }
         Ok(layer_names)
@@ -151,29 +162,24 @@ impl KeyboardTomlConfig {
     fn build_layer_grid(
         index: usize,
         layer: &LayerTomlConfig,
-        sequence_to_grid: &[(u8, u8)],
-        aliases: &HashMap<String, String>,
-        layer_names: &HashMap<String, u32>,
-        num_layers: u8,
-        rows: u8,
-        cols: u8,
+        context: &LayerBuildContext<'_>,
     ) -> Result<Vec<Vec<String>>, String> {
         let layer_display = match &layer.name {
             Some(name) => format!("layer {index} ('{name}')"),
             None => format!("layer {index}"),
         };
-        let key_actions = Self::keymap_parser(&layer.keys, aliases, layer_names, num_layers)
+        let key_actions = Self::keymap_parser(&layer.keys, context.aliases, context.layer_names, context.num_layers)
             .map_err(|e| format!("keyboard.toml: Error in `[[keymap.layer]]` {layer_display}: {e}"))?;
-        if key_actions.len() != sequence_to_grid.len() {
+        if key_actions.len() != context.sequence_to_grid.len() {
             return Err(format!(
                 "keyboard.toml: {layer_display} has {} keys but `layout.map` defines {} positions — every mapped position needs an action (use `_` for transparent)",
                 key_actions.len(),
-                sequence_to_grid.len()
+                context.sequence_to_grid.len()
             ));
         }
 
-        let mut grid = vec![vec!["No".to_string(); cols as usize]; rows as usize];
-        for ((row, col), action) in sequence_to_grid.iter().zip(key_actions) {
+        let mut grid = vec![vec!["No".to_string(); context.cols as usize]; context.rows as usize];
+        for ((row, col), action) in context.sequence_to_grid.iter().zip(key_actions) {
             grid[*row as usize][*col as usize] = action;
         }
         Ok(grid)
@@ -580,11 +586,8 @@ mod tests {
             for pair in result.unwrap() {
                 if pair.as_rule() == Rule::key_map {
                     for inner_pair in pair.into_inner() {
-                        match inner_pair.as_rule() {
-                            Rule::morse_action => {
-                                found_rule = Some(inner_pair.as_rule());
-                            }
-                            _ => {}
+                        if inner_pair.as_rule() == Rule::morse_action {
+                            found_rule = Some(inner_pair.as_rule());
                         }
                     }
                 }
@@ -622,11 +625,8 @@ mod tests {
             for pair in result.unwrap() {
                 if pair.as_rule() == Rule::key_map {
                     for inner_pair in pair.into_inner() {
-                        match inner_pair.as_rule() {
-                            Rule::trigger_macro_action => {
-                                found_rule = Some(inner_pair.as_rule());
-                            }
-                            _ => {}
+                        if inner_pair.as_rule() == Rule::trigger_macro_action {
+                            found_rule = Some(inner_pair.as_rule());
                         }
                     }
                 }
@@ -798,7 +798,15 @@ mod tests {
             encoders: None,
         };
         let seq = vec![(0u8, 0u8), (0, 1), (0, 2)];
-        let err = KeyboardTomlConfig::build_layer_grid(0, &layer, &seq, &aliases, &layer_names, 1, 1, 3).unwrap_err();
+        let context = LayerBuildContext {
+            sequence_to_grid: &seq,
+            aliases: &aliases,
+            layer_names: &layer_names,
+            num_layers: 1,
+            rows: 1,
+            cols: 3,
+        };
+        let err = KeyboardTomlConfig::build_layer_grid(0, &layer, &context).unwrap_err();
         assert!(err.contains("has 2 keys but `layout.map` defines 3 positions"), "{err}");
     }
 }

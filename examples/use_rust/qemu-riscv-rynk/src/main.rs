@@ -8,7 +8,7 @@ use embassy_executor::Spawner;
 use embassy_futures::yield_now;
 use embedded_io_async::{Read, Write};
 use panic_halt as _;
-use rmk::config::{BehaviorConfig, PositionalConfig, RmkConfig};
+use rmk::config::{BehaviorConfig, LockConfig, PositionalConfig, RmkConfig};
 use rmk::host::run_rynk_uart;
 use rmk::keymap::KeymapData;
 use rmk::types::action::{EncoderAction, KeyAction};
@@ -120,7 +120,13 @@ async fn main(_spawner: Spawner) {
     let keymap = initialize_keymap(&mut keymap_data, &mut behavior_config, &positional_config).await;
 
     static RMK_CONFIG: StaticCell<RmkConfig<'static>> = StaticCell::new();
-    let rmk_config = RMK_CONFIG.init(RmkConfig::default());
+    let rmk_config = RMK_CONFIG.init(RmkConfig {
+        lock_config: LockConfig {
+            insecure: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
 
     let service = rmk::host::HostService::new(&keymap, rmk_config);
     run_rynk_uart(rx, tx, &service).await;

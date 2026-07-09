@@ -201,7 +201,7 @@ fn has_rect2(k: &SerialKey<f64>) -> bool {
 /// the key is unrotated (an angle of 0 makes any stale KLE `rx`/`ry` moot).
 /// Maps one-to-one onto an RMK `[r=angle@(px,py)]` region.
 fn rot_of(k: &SerialKey<f64>) -> Option<(f64, f64, f64)> {
-    (!approx(k.rotation, 0.0)).then(|| (k.rotation, k.rx, k.ry))
+    (!approx(k.rotation, 0.0)).then_some((k.rotation, k.rx, k.ry))
 }
 
 /// Rotate `(x, y)` about `(px, py)` by `deg` — KLE/CSS convention: positive is

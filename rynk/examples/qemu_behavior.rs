@@ -140,7 +140,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(!caps.storage_enabled);
     assert!(!caps.ble_enabled);
     assert!(!caps.is_split);
-    assert!(!caps.bulk_transfer_supported);
+    assert!(caps.bulk_transfer_supported);
+    assert!(caps.max_bulk_keys > 0);
+    assert!(caps.max_bulk_configs > 0);
 
     assert_eq!(client.get_version().await?, ProtocolVersion::CURRENT);
     assert_eq!(client.get_capabilities().await?, caps);
@@ -289,80 +291,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "storage_reset",
         client.storage_reset(StorageResetMode::LayoutOnly).await,
     );
-    expect_unsupported("typed get_keymap_bulk", client.get_keymap_bulk(0, 0, 0).await);
+    let keymap_bulk = client.get_keymap_bulk(0, 0, 0).await?;
+    assert_eq!(keymap_bulk.actions.first(), Some(&key(HidKeyCode::Kp1)));
 
-    expect_rejected(
-        "raw get_keymap_bulk",
-        client
-            .request_raw::<_, GetKeymapBulkResponse>(
-                Cmd::GetKeymapBulk,
-                &GetKeymapBulkRequest {
-                    layer: 0,
-                    start_row: 0,
-                    start_col: 0,
-                },
-            )
-            .await,
-        RynkError::Unimplemented,
+    let raw_keymap_bulk = client
+        .request_raw::<_, GetKeymapBulkResponse>(
+            Cmd::GetKeymapBulk,
+            &GetKeymapBulkRequest {
+                layer: 0,
+                start_row: 0,
+                start_col: 0,
+            },
+        )
+        .await?;
+    assert_eq!(raw_keymap_bulk.actions.first(), Some(&key(HidKeyCode::Kp1)));
+    client
+        .request_raw::<_, ()>(
+            Cmd::SetKeymapBulk,
+            &SetKeymapBulkRequest {
+                layer: 0,
+                start_row: 0,
+                start_col: 0,
+                actions: vec![key(HidKeyCode::Kp1)],
+            },
+        )
+        .await?;
+
+    let raw_combo_bulk = client
+        .request_raw::<_, GetComboBulkResponse>(Cmd::GetComboBulk, &GetComboBulkRequest { start_index: 0 })
+        .await?;
+    assert_eq!(raw_combo_bulk.configs.first(), Some(&Combo::empty()));
+    client
+        .request_raw::<_, ()>(
+            Cmd::SetComboBulk,
+            &SetComboBulkRequest {
+                start_index: 0,
+                configs: vec![Combo::empty()],
+            },
+        )
+        .await?;
+
+    let raw_morse_bulk = client
+        .request_raw::<_, GetMorseBulkResponse>(Cmd::GetMorseBulk, &GetMorseBulkRequest { start_index: 0 })
+        .await?;
+    assert_eq!(
+        raw_morse_bulk.configs.first(),
+        Some(&empty_morse(MorseProfile::const_default()))
     );
-    let bulk_actions = vec![key(HidKeyCode::A)];
-    expect_rejected(
-        "raw set_keymap_bulk",
-        client
-            .request_raw::<_, ()>(
-                Cmd::SetKeymapBulk,
-                &SetKeymapBulkRequest {
-                    layer: 0,
-                    start_row: 0,
-                    start_col: 0,
-                    actions: bulk_actions,
-                },
-            )
-            .await,
-        RynkError::Unimplemented,
-    );
-    expect_rejected(
-        "raw get_combo_bulk",
-        client
-            .request_raw::<_, GetComboBulkResponse>(Cmd::GetComboBulk, &GetComboBulkRequest { start_index: 0 })
-            .await,
-        RynkError::Unimplemented,
-    );
-    let bulk_combos = vec![Combo::empty()];
-    expect_rejected(
-        "raw set_combo_bulk",
-        client
-            .request_raw::<_, ()>(
-                Cmd::SetComboBulk,
-                &SetComboBulkRequest {
-                    start_index: 0,
-                    configs: bulk_combos,
-                },
-            )
-            .await,
-        RynkError::Unimplemented,
-    );
-    expect_rejected(
-        "raw get_morse_bulk",
-        client
-            .request_raw::<_, GetMorseBulkResponse>(Cmd::GetMorseBulk, &GetMorseBulkRequest { start_index: 0 })
-            .await,
-        RynkError::Unimplemented,
-    );
-    let bulk_morses = vec![empty_morse(MorseProfile::const_default())];
-    expect_rejected(
-        "raw set_morse_bulk",
-        client
-            .request_raw::<_, ()>(
-                Cmd::SetMorseBulk,
-                &SetMorseBulkRequest {
-                    start_index: 0,
-                    configs: bulk_morses,
-                },
-            )
-            .await,
-        RynkError::Unimplemented,
-    );
+    client
+        .request_raw::<_, ()>(
+            Cmd::SetMorseBulk,
+            &SetMorseBulkRequest {
+                start_index: 0,
+                configs: vec![empty_morse(MorseProfile::const_default())],
+            },
+        )
+        .await?;
 
     println!("QEMU Rynk behavior verification passed.");
     Ok(())

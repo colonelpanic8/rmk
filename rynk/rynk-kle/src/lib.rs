@@ -25,7 +25,6 @@ pub mod to_layout;
 /// The decoded host-side layout types (`LayoutInfo`, `Variant`, `Key`, …),
 /// re-exported from `rynk` so consumers don't need it as a direct dependency.
 pub use rynk::layout;
-
 use serde_json::Value;
 
 use crate::to_layout::{GenInput, Generated, generate};
@@ -138,8 +137,9 @@ mod wasm {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn convert_kle_accepts_vial_and_raw_kle() {

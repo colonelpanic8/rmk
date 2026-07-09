@@ -483,7 +483,7 @@ fn parse_hidden(hidden: &Option<Vec<String>>) -> Result<HashSet<(u8, u8)>, Strin
 fn shape_is_finite(s: &Shape) -> bool {
     [s.w, s.h, s.x, s.y, s.r].iter().all(|v| v.is_finite())
         && s.rect2
-            .map_or(true, |r| [r.x, r.y, r.w, r.h].iter().all(|v| v.is_finite()))
+            .is_none_or(|r| [r.x, r.y, r.w, r.h].iter().all(|v| v.is_finite()))
 }
 
 /// `expected_encoders` is the board's physical encoder count (`Some` from the
@@ -587,13 +587,14 @@ fn build_layout_info(
             ));
         }
     }
-    if let Some(n) = expected_encoders {
-        if !encoders.is_empty() && encoders.len() != n {
-            return Err(format!(
-                "keyboard.toml: layout.map has {} encoder (e,id) tokens but the board declares {n}",
-                encoders.len()
-            ));
-        }
+    if let Some(n) = expected_encoders
+        && !encoders.is_empty()
+        && encoders.len() != n
+    {
+        return Err(format!(
+            "keyboard.toml: layout.map has {} encoder (e,id) tokens but the board declares {n}",
+            encoders.len()
+        ));
     }
 
     let variants = walked
@@ -645,7 +646,7 @@ mod tests {
         build_layout_info(&cfg, None).unwrap().unwrap()
     }
 
-    fn key<'a>(v: &'a Variant, row: u8, col: u8) -> &'a Key {
+    fn key(v: &Variant, row: u8, col: u8) -> &Key {
         v.keys
             .iter()
             .find(|k| k.row == row && k.col == col)
