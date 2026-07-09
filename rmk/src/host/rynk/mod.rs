@@ -1,15 +1,8 @@
 //! Rynk host service — RMK-native protocol server.
 //!
-//! `RynkService` is the transport-agnostic core. It holds a
-//! [`KeyboardContext`](super::context::KeyboardContext) and exposes:
-//!
-//! - [`dispatch`](RynkService::dispatch) — process inbound message in-place.
-//! - [`run_session`](RynkService::run_session) — drive one rynk session
-//!   against a wire transport until it closes; emits topic frames between
-//!   request/response turns.
-//!
-//! Topic handling lives in [`topics::TopicSubscribers`], which the session
-//! drains and emits on the wire between request/response turns.
+//! `RynkService` dispatches requests over a [`KeyboardContext`](super::context::KeyboardContext)
+//! and runs one transport session at a time. Topic handling lives in
+//! [`topics::TopicSubscribers`].
 
 mod handlers;
 pub(crate) mod topics;
@@ -30,13 +23,10 @@ use super::lock::HostLock;
 use crate::config::{DeviceConfig, RmkConfig};
 use crate::keymap::KeyMap;
 
-/// How long an armed Rynk unlock attempt survives without a refreshing
-/// `UnlockPoll`. Longer than Vial's 100 ms because a BLE WebHID round trip can
-/// exceed that; still relocks promptly when the host stops polling.
+/// Unlock attempts live long enough for BLE WebHID round trips.
 const RYNK_UNLOCK_WINDOW: embassy_time::Duration = embassy_time::Duration::from_millis(500);
 
-/// Relocks the device when the session ends by any of `run_session`'s exits —
-/// the single-exit hook it otherwise lacks.
+/// Relocks the device on every `run_session` exit.
 struct RelockGuard<'a, 'b>(&'b HostLock<'a>);
 
 impl Drop for RelockGuard<'_, '_> {
@@ -88,13 +78,12 @@ pub struct RynkService<'a> {
 impl<'a> RynkService<'a> {
     pub fn new(keymap: &'a KeyMap<'a>, config: &RmkConfig<'static>) -> Self {
         let mut ctx = KeyboardContext::new(keymap);
-        // The layout blob is a fixed compile-time const, baked into `RmkConfig`
-        // by the macro (like Vial's keyboard-def) — not a runtime knob.
+        // Layout is fixed at macro expansion time, like Vial's keyboard-def.
         ctx.layout_blob = config.layout_blob;
         Self {
             ctx,
             device: config.device_config,
-            // `unlock_keys` is `&'static`, so the `HostLock<'a>` borrow holds via `'static: 'a`.
+            // `unlock_keys` is `&'static`, so it can back the shorter lock lifetime.
             locker: HostLock::new(
                 config.lock_config.unlock_keys,
                 keymap,
@@ -105,11 +94,7 @@ impl<'a> RynkService<'a> {
         }
     }
 
-    /// Whether `cmd` needs an unlocked device. One classification for the whole
-    /// gate: the hard-locked tier (firmware replacement, storage/bond
-    /// destruction, keystroke exfiltration) is always gated; the config-write
-    /// tier is gated only under `write_requires_unlock`; everything else —
-    /// handshake, reads, the three lock endpoints — is open.
+    /// Whether `cmd` needs an unlocked device.
     fn requires_unlock(&self, cmd: Cmd) -> bool {
         match cmd {
             Cmd::BootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => true,
@@ -136,16 +121,13 @@ impl<'a> RynkService<'a> {
     pub async fn dispatch(&self, msg: &mut RynkMessage<'_>) {
         let cmd = msg.header().cmd;
 
-        // Lock gate: one classification before the handler match, so every
-        // transport inherits it. The three lock endpoints are never gated (they
-        // must work while locked); an unlocked (or `insecure`) device passes.
+        // Classify once before dispatch so every transport gets the same gate.
         if self.requires_unlock(cmd) && !self.locker.is_unlocked() {
             msg.encode_error(RynkError::Locked);
             return;
         }
 
         if let Err(e) = match cmd {
-            // System
             Cmd::GetVersion => Handle::<command::GetVersion>::handle_message(self, msg).await,
             Cmd::GetCapabilities => Handle::<command::GetCapabilities>::handle_message(self, msg).await,
             Cmd::Reboot => Handle::<command::Reboot>::handle_message(self, msg).await,
@@ -156,7 +138,6 @@ impl<'a> RynkService<'a> {
             Cmd::Lock => Handle::<command::Lock>::handle_message(self, msg).await,
             Cmd::GetDeviceInfo => Handle::<command::GetDeviceInfo>::handle_message(self, msg).await,
 
-            // Keymap (incl. encoder)
             Cmd::GetKeyAction => Handle::<command::GetKeyAction>::handle_message(self, msg).await,
             Cmd::SetKeyAction => Handle::<command::SetKeyAction>::handle_message(self, msg).await,
             Cmd::GetDefaultLayer => Handle::<command::GetDefaultLayer>::handle_message(self, msg).await,
@@ -168,11 +149,9 @@ impl<'a> RynkService<'a> {
             #[cfg(feature = "bulk")]
             Cmd::SetKeymapBulk => Handle::<command::SetKeymapBulk>::handle_message(self, msg).await,
 
-            // Macro
             Cmd::GetMacro => Handle::<command::GetMacro>::handle_message(self, msg).await,
             Cmd::SetMacro => Handle::<command::SetMacro>::handle_message(self, msg).await,
 
-            // Combo
             Cmd::GetCombo => Handle::<command::GetCombo>::handle_message(self, msg).await,
             Cmd::SetCombo => Handle::<command::SetCombo>::handle_message(self, msg).await,
             #[cfg(feature = "bulk")]
@@ -180,7 +159,6 @@ impl<'a> RynkService<'a> {
             #[cfg(feature = "bulk")]
             Cmd::SetComboBulk => Handle::<command::SetComboBulk>::handle_message(self, msg).await,
 
-            // Morse
             Cmd::GetMorse => Handle::<command::GetMorse>::handle_message(self, msg).await,
             Cmd::SetMorse => Handle::<command::SetMorse>::handle_message(self, msg).await,
             #[cfg(feature = "bulk")]
@@ -188,15 +166,12 @@ impl<'a> RynkService<'a> {
             #[cfg(feature = "bulk")]
             Cmd::SetMorseBulk => Handle::<command::SetMorseBulk>::handle_message(self, msg).await,
 
-            // Fork
             Cmd::GetFork => Handle::<command::GetFork>::handle_message(self, msg).await,
             Cmd::SetFork => Handle::<command::SetFork>::handle_message(self, msg).await,
 
-            // Behavior
             Cmd::GetBehaviorConfig => Handle::<command::GetBehaviorConfig>::handle_message(self, msg).await,
             Cmd::SetBehaviorConfig => Handle::<command::SetBehaviorConfig>::handle_message(self, msg).await,
 
-            // Connection
             Cmd::GetConnectionType => Handle::<command::GetConnectionType>::handle_message(self, msg).await,
             Cmd::GetConnectionStatus => Handle::<command::GetConnectionStatus>::handle_message(self, msg).await,
             #[cfg(feature = "_ble")]
@@ -206,7 +181,6 @@ impl<'a> RynkService<'a> {
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => Handle::<command::ClearBleProfile>::handle_message(self, msg).await,
 
-            // Status
             Cmd::GetCurrentLayer => Handle::<command::GetCurrentLayer>::handle_message(self, msg).await,
             Cmd::GetMatrixState => Handle::<command::GetMatrixState>::handle_message(self, msg).await,
             #[cfg(feature = "_ble")]
@@ -217,12 +191,9 @@ impl<'a> RynkService<'a> {
             Cmd::GetSleepState => Handle::<command::GetSleepState>::handle_message(self, msg).await,
             Cmd::GetLedIndicator => Handle::<command::GetLedIndicator>::handle_message(self, msg).await,
 
-            // Layout
             Cmd::GetLayout => Handle::<command::GetLayout>::handle_message(self, msg).await,
 
-            // Topic CMDs are server→host push only. `run_session` drops
-            // topic-range frames before dispatch; this arm is defense for
-            // direct `dispatch` callers and unknown future topics.
+            // Direct `dispatch` callers should not turn topics into replies.
             cmd if cmd.is_topic() => Err(RynkError::Invalid),
             _ => Err(RynkError::UnknownCmd),
         } {
@@ -234,29 +205,20 @@ impl<'a> RynkService<'a> {
 impl RynkService<'_> {
     /// Drive one rynk session based on embedded-io `rx`/`tx`.
     ///
-    /// Owns the reassembly/dispatch buffer, parses frames as `5 + LEN`
-    /// headers, dispatches each frame in place via
-    /// [`dispatch`](RynkService::dispatch), and emits topic frames between
-    /// request/response turns.
-    ///
-    /// Transport-specific setup and reconnect both stay in the caller.
+    /// Owns frame reassembly/dispatch; transport setup and reconnect stay outside.
     pub async fn run_session<R: Read, T: Write>(&self, rx: &mut R, tx: &mut T) {
-        // Relock on every session exit (this fn has six `return`s and no single
-        // exit). Physical unlock authorizes a present operator, not the
-        // transport — a later drive-by page with a stale port grant must not
-        // inherit it.
+        // Physical unlock must not outlive this transport session.
         let _relock = RelockGuard(&self.locker);
         let mut buf = [0u8; RYNK_BUFFER_SIZE];
         let mut topics = topics::TopicSubscribers::new();
 
         loop {
-            // 1. Read the fixed header or a topic
+            // Read either a request header or the next outgoing topic.
             match select(rx.read(&mut buf[..RYNK_HEADER_SIZE]), topics.next_event()).await {
                 Either::First(r) => match r {
                     Ok(0) => return, // EOF
                     Ok(n) => {
                         if n < RYNK_HEADER_SIZE && rx.read_exact(&mut buf[n..RYNK_HEADER_SIZE]).await.is_err() {
-                            // Error when reading header
                             return;
                         }
                     }
@@ -276,25 +238,19 @@ impl RynkService<'_> {
                 }
             };
 
-            // 2. Decode the header just read into buf[..RYNK_HEADER_SIZE].
             let Some(head) = buf.first_chunk() else { return };
             let header = RynkHeader::parse(head);
             let payload_n = header.payload_len as usize;
             let frame_len = header.frame_len();
 
-            // 3. Drop non-dispatchable frames, draining the payload to resync
-            // onto the next frame. Topic CMDs are push-only — a reply would be
-            // re-queued by the host as a phantom topic — so drop them silently,
-            // checked first so an oversized topic still draws no error.
+            // Drain non-dispatchable payloads to resync. Topics get no reply.
             let is_topic = header.cmd.is_topic();
             if is_topic || frame_len > buf.len() {
                 if is_topic {
                     warn!("Rynk: dropping topic-range request {:?}", header.cmd);
                 } else {
                     warn!("Rynk: frame_len {} exceeds buffer {}", frame_len, buf.len());
-                    // The declared payload is undeliverable; reply with a header-only
-                    // error frame. `cmd`/`seq` in buf[..3] are preserved from the
-                    // parsed header.
+                    // Preserve cmd/seq while returning a header-only error.
                     let n = postcard::to_slice(
                         &Err::<(), RynkError>(RynkError::Malformed),
                         &mut buf[RYNK_HEADER_SIZE..],
@@ -318,15 +274,11 @@ impl RynkService<'_> {
                 continue;
             }
 
-            // 4. Read exactly the payload.
             if rx.read_exact(&mut buf[RYNK_HEADER_SIZE..frame_len]).await.is_err() {
                 return;
             }
 
-            // 5. Dispatch in place over the full buffer. `try_from` checks
-            // only structural bounds (buffer covers header + declared LEN),
-            // which steps 1–4 guarantee; whether the payload *decodes* is
-            // dispatch's job and draws a Malformed reply, not a session end.
+            // Payload decode errors are handler errors, not session exits.
             let Ok(mut msg) = RynkMessage::try_from(&mut buf[..]) else {
                 return;
             };
@@ -404,8 +356,7 @@ mod tests {
         }
     }
 
-    /// A bare 5-byte header with `cmd`, `seq`, and a declared `payload_len`.
-    /// A `payload_len` of 0 is a complete empty-payload request (e.g. `GetVersion`).
+    /// Bare 5-byte header; `payload_len = 0` is a complete empty request.
     fn header(cmd_raw: u16, seq: u8, payload_len: u16) -> Vec<u8> {
         let mut v = vec![0u8; RYNK_HEADER_SIZE];
         v[0..2].copy_from_slice(&cmd_raw.to_le_bytes());
@@ -428,10 +379,7 @@ mod tests {
         out
     }
 
-    /// The lock gate end-to-end over `run_session`: a locked device refuses
-    /// `GetMatrixState`, advertises its challenge, unlocks when the challenge
-    /// key is held during `UnlockPoll`, then serves the gated command — and a
-    /// fresh session starts locked again (relock-on-disconnect).
+    /// Lock gate over `run_session`, including relock on disconnect.
     #[test]
     fn run_session_lock_gate_and_relock() {
         let mut behavior = BehaviorConfig::default();
@@ -449,10 +397,10 @@ mod tests {
         };
         let service = RynkService::new(&keymap, &config);
 
-        // The owner holds the challenge key for the whole session.
+        // Hold the challenge key for the whole session.
         keymap.update_matrix_state(&KeyboardEvent::key(0, 0, true));
 
-        // Session 1: gated probe → status → one unlock poll → gated probe again.
+        // Locked probe, status, unlock poll, unlocked probe.
         let mut stream = header(Cmd::GetMatrixState.raw(), 0, 0);
         stream.extend_from_slice(&header(Cmd::GetLockStatus.raw(), 1, 0));
         stream.extend_from_slice(&header(Cmd::UnlockPoll.raw(), 2, 0));
@@ -466,7 +414,7 @@ mod tests {
         let resp = decode_frames(&tx.captured);
         assert_eq!(resp.len(), 4, "one reply per request");
 
-        // #0 GetMatrixState while locked → Err(Locked), not a zero bitmap.
+        // Locked matrix reads reject instead of returning an empty bitmap.
         assert_eq!(resp[0].0, Cmd::GetMatrixState.raw());
         assert_eq!(
             postcard::from_bytes::<Result<MatrixState, RynkError>>(resp[0].1).unwrap(),
@@ -474,7 +422,7 @@ mod tests {
             "keystroke exfiltration is gated"
         );
 
-        // #1 GetLockStatus is open and advertises the challenge.
+        // Lock status is open while locked.
         let status: LockStatus = postcard::from_bytes::<Result<LockStatus, RynkError>>(resp[1].1)
             .unwrap()
             .unwrap();
@@ -485,14 +433,14 @@ mod tests {
             "challenge advertised while locked"
         );
 
-        // #2 UnlockPoll with the key held → unlocked.
+        // Held challenge key unlocks.
         let polled: LockStatus = postcard::from_bytes::<Result<LockStatus, RynkError>>(resp[2].1)
             .unwrap()
             .unwrap();
         assert!(!polled.locked, "poll with challenge key held unlocks");
         assert_eq!(polled.remaining_keys, 0);
 
-        // #3 GetMatrixState now succeeds.
+        // Gated command succeeds after unlock.
         assert!(
             postcard::from_bytes::<Result<MatrixState, RynkError>>(resp[3].1)
                 .unwrap()
@@ -500,7 +448,7 @@ mod tests {
             "gated command served once unlocked"
         );
 
-        // Session 2: the session ended, so the Drop guard relocked — the gate bites again.
+        // New session starts locked again.
         let mut chunks2 = VecDeque::new();
         chunks2.push_back(header(Cmd::GetMatrixState.raw(), 0, 0));
         let mut rx2 = ChunkRead { chunks: chunks2 };
@@ -516,11 +464,7 @@ mod tests {
         );
     }
 
-    /// Two pipelined `GetVersion` frames arriving across a split read — chunk 1
-    /// carries all of frame 1 plus the first 3 bytes of frame 2 (header only),
-    /// chunk 2 carries the rest of frame 2. Framed reads size each `read` to the
-    /// current frame, so frame 2's in-flight bytes stay in the transport between
-    /// iterations and both responses are emitted.
+    /// Pipelined frames split across reads must both be dispatched.
     #[test]
     fn run_session_preserves_pipelined_trailing_bytes() {
         let mut behavior = BehaviorConfig::default();
@@ -546,7 +490,7 @@ mod tests {
 
         block_on(service.run_session(&mut rx, &mut tx));
 
-        // Response: 5-byte header + 3-byte `Ok(ProtocolVersion)` payload.
+        // Header plus `Ok(ProtocolVersion)`.
         const RESP_PAYLOAD_LEN: usize = 3;
         const RESP_FRAME_LEN: usize = RYNK_HEADER_SIZE + RESP_PAYLOAD_LEN;
 
@@ -581,9 +525,7 @@ mod tests {
         }
     }
 
-    /// Two `GetVersion` frames delivered together in one `read` call, then EOF.
-    /// Framed reads consume frame 1 first, leaving frame 2's bytes in the
-    /// transport for the next iteration, so both are dispatched before EOF.
+    /// Coalesced frames must drain before EOF.
     #[test]
     fn run_session_drains_pipelined_frames_before_eof() {
         let mut behavior = BehaviorConfig::default();
@@ -614,12 +556,7 @@ mod tests {
         assert_eq!(tx.captured[RESP_FRAME_LEN + 2], 1, "second response seq");
     }
 
-    /// Regression: a `GetVersion` request with `payload_len = 0` (the natural
-    /// host request — `GetVersion` has no arguments) must produce a fully
-    /// decodable `Ok(ProtocolVersion)` reply. Previously the response was
-    /// squeezed into the 0-byte request slot, failed to encode, and was
-    /// silently swallowed into a header-only `[01 00 00 00 00]` frame the host
-    /// would misread as an empty success.
+    /// Zero-payload requests must still get a full response payload.
     #[test]
     fn run_session_empty_request_gets_full_response() {
         let mut behavior = BehaviorConfig::default();
@@ -658,9 +595,7 @@ mod tests {
         assert_eq!(decoded, Ok(ProtocolVersion::CURRENT));
     }
 
-    /// A topic-range CMD arriving as a request is dropped without a reply — a
-    /// high-bit error frame would be queued by the host as a phantom topic. Its
-    /// payload is drained, so the session resyncs and answers the next request.
+    /// Topic-range requests are drained without creating phantom topic replies.
     #[test]
     fn run_session_drops_topic_range_request_without_reply() {
         let mut behavior = BehaviorConfig::default();
@@ -670,8 +605,7 @@ mod tests {
         let config = RmkConfig::default();
         let service = RynkService::new(&keymap, &config);
 
-        // Topic-range request: LayerChange with a 1-byte payload, then a real
-        // GetVersion — both in one chunk.
+        // Topic-range request followed by a real request in one chunk.
         let mut combined = header(Cmd::LayerChange.raw(), 0, 1);
         combined.push(0xAB);
         combined.extend_from_slice(&header(Cmd::GetVersion.raw(), 7, 0));
@@ -694,9 +628,7 @@ mod tests {
         assert_eq!(tx.captured[2], 7, "reply is for the GetVersion that followed");
     }
 
-    /// Regression for the topic/oversize ordering: an oversized declared LEN on
-    /// a topic-range CMD must still draw no reply. Before the fix the oversize
-    /// branch ran first and echoed a high-bit error frame.
+    /// Oversized topic frames still draw no reply.
     #[test]
     fn run_session_oversized_topic_frame_draws_no_reply() {
         let mut behavior = BehaviorConfig::default();
@@ -706,8 +638,7 @@ mod tests {
         let config = RmkConfig::default();
         let service = RynkService::new(&keymap, &config);
 
-        // LayerChange topic with LEN = u16::MAX (far past the session buffer);
-        // no payload follows, so the drain hits EOF and the session ends.
+        // No payload follows, so drain hits EOF.
         let mut chunks = VecDeque::new();
         chunks.push_back(header(Cmd::LayerChange.raw(), 0, u16::MAX));
 
@@ -723,8 +654,7 @@ mod tests {
         );
     }
 
-    /// The non-topic half of the same branch: an oversized declared LEN on a
-    /// normal request still draws a `Malformed` reply with cmd/seq preserved.
+    /// Oversized normal requests reply `Malformed` with cmd/seq preserved.
     #[test]
     fn run_session_oversized_request_replies_malformed() {
         let mut behavior = BehaviorConfig::default();
@@ -734,7 +664,7 @@ mod tests {
         let config = RmkConfig::default();
         let service = RynkService::new(&keymap, &config);
 
-        // GetVersion with LEN = u16::MAX; no payload follows, drain hits EOF.
+        // No payload follows, so drain hits EOF.
         let mut chunks = VecDeque::new();
         chunks.push_back(header(Cmd::GetVersion.raw(), 0x55, u16::MAX));
 

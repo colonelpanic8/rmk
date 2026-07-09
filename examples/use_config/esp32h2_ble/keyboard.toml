@@ -8,12 +8,12 @@ chip = "esp32h2"
 usb_enable = false
 
 [matrix]
-# Row and col pins are mandatory
+# Matrix pins are required.
 # Note: esp32h2 exposes GPIO0-15 and GPIO22-27 (GPIO16-21 don't exist)
 row_pins = ["GPIO6", "GPIO7", "GPIO10", "GPIO11"]
 col_pins = ["GPIO3", "GPIO4", "GPIO5"]
 
-# RMK uses col2row as the default matrix diode direction, if you want to use a row2col matrix, add `row2col = true`
+# Default diode direction is col2row; set `row2col = true` if needed.
 # row2col = true
 
 [layout]
@@ -56,7 +56,7 @@ _  _      _
 # numslock.low_active = true
 
 [storage]
-# Storage feature is enabled by default
+# Storage is enabled by default.
 # enabled = false
 
 [ble]

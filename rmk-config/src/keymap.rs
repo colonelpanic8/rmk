@@ -10,7 +10,7 @@ use crate::{KeyInfo, KeyboardTomlConfig, KeymapConfig, LayerTomlConfig};
 #[grammar = "keymap.pest"]
 pub(crate) struct ConfigParser;
 
-// Max alias resolution depth to prevent infinite loops
+// Prevent alias cycles.
 const MAX_ALIAS_RESOLUTION_DEPTH: usize = 10;
 
 type GridCoordinate = (u8, u8);
@@ -64,8 +64,7 @@ impl KeyboardTomlConfig {
             }
         }
 
-        // `layers` defaults to the number of `[[keymap.layer]]` blocks (see `num_layers`);
-        // an explicit value may only *reserve extra* empty layers, never fewer than are defined.
+        // Explicit layer count may reserve empty layers, not hide defined ones.
         if let Some(n) = keymap_cfg.layers
             && (layers.len() as u8) > n
         {
@@ -77,8 +76,7 @@ impl KeyboardTomlConfig {
         }
         let num_layers = self.num_layers();
 
-        // `[layout].map` is the sole source for placing keys, so it's required whenever a
-        // layer is defined; with no layers the default keymap is simply transparent.
+        // Defined layers need `[layout].map`; no layers means a transparent default.
         let mut keymap = Vec::with_capacity(num_layers as usize);
         let key_info = match layout.map.as_deref() {
             Some(map) => {
@@ -217,8 +215,7 @@ impl KeyboardTomlConfig {
 
                 next_keys.push_str(&current_keys[last_index..start_index]);
 
-                // `@` starts an alias only when followed by a non-whitespace char; a bare
-                // or trailing `@` is kept literally.
+                // A bare or trailing `@` is literal, not an alias.
                 if let Some(first_char) = current_keys.as_bytes().get(start_index + 1) {
                     if !first_char.is_ascii_whitespace() {
                         let mut end_index = start_index + 2;
@@ -357,10 +354,7 @@ impl KeyboardTomlConfig {
                         for inner_pair in pair.into_inner() {
                             match inner_pair.as_rule() {
                                 Rule::EOI | Rule::WHITESPACE => {}
-                                // Every key action is forwarded as its (alias-resolved) source
-                                // text, with any named layer references resolved to indices.
-                                // This handles layer names nested at any depth, e.g. the tap
-                                // slot of `TH(MO(nav), A)`.
+                                // Resolve layer names even when nested inside an action.
                                 _ => {
                                     key_action_sequence.push(Self::resolve_layer_names(
                                         &inner_pair,
@@ -388,7 +382,6 @@ mod tests {
 
     #[test]
     fn test_no_action_parsing() {
-        // Test "No" followed by whitespace
         let test_cases = vec![
             ("No ", vec!["No"]),
             ("No\n", vec!["No"]),
@@ -423,7 +416,6 @@ mod tests {
 
     #[test]
     fn test_no_vs_no_prefixed_keycodes() {
-        // Test that "No" is parsed as no_action but "NoUsSlash" is parsed as simple_keycode
         let test_cases = vec![
             ("No", Rule::no_action),
             ("NoUsSlash", Rule::simple_keycode),
@@ -465,7 +457,6 @@ mod tests {
         let aliases = HashMap::new();
         let layer_names = HashMap::new();
 
-        // Test parsing a keymap string with "No" actions
         let keymap = "A B No C No NoUsSlash NonUsSlash D No";
         let result = KeyboardTomlConfig::keymap_parser(keymap, &aliases, &layer_names, 8);
 
@@ -539,7 +530,6 @@ mod tests {
         let aliases = HashMap::new();
         let layer_names = HashMap::new();
 
-        // Test parsing a keymap string with TD actions
         let keymap = "A TD(0) B TD(1) C TD(255)";
         let result = KeyboardTomlConfig::keymap_parser(keymap, &aliases, &layer_names, 8);
 
@@ -553,7 +543,6 @@ mod tests {
         let aliases = std::collections::HashMap::new();
         let layer_names = std::collections::HashMap::new();
 
-        // Test parsing a keymap string with macro trigger actions
         let keymap = "A Macro(0) B MACRO(1) C macro(255)";
         let result = KeyboardTomlConfig::keymap_parser(keymap, &aliases, &layer_names, 8);
 
@@ -564,7 +553,6 @@ mod tests {
 
     #[test]
     fn test_morse_action_grammar() {
-        // Test that TD actions are parsed correctly by the grammar
         let test_cases = vec![
             ("TD(0)", Rule::morse_action),
             ("TD(1)", Rule::morse_action),
@@ -605,7 +593,6 @@ mod tests {
 
     #[test]
     fn test_macro_grammar() {
-        // Test that macro actions are parsed correctly by the grammar
         let test_cases = vec![
             ("Macro(0)", Rule::trigger_macro_action),
             ("Macro(1)", Rule::trigger_macro_action),
@@ -736,7 +723,7 @@ mod tests {
 
     #[test]
     fn layer_with_more_encoders_than_hardware_is_rejected() {
-        // The board declares no encoders, but a layer lists one → rejected (not silently dropped).
+        // Reject layer encoders that exceed the board hardware.
         let cfg = config(
             "[matrix]\nrow_pins = [\"r0\"]\ncol_pins = [\"c0\"]\n\
              [layout]\nrows = 1\ncols = 1\nmap = \"(0,0)\"\n\
@@ -758,7 +745,7 @@ mod tests {
 
     #[test]
     fn layer_with_partial_encoders_is_rejected() {
-        // Board has 2 encoders; a layer listing only 1 would silently kill the second → rejected.
+        // Partial encoder maps would silently drop hardware.
         assert!(two_encoder_config("encoders = [[\"Up\", \"Down\"]]").keymap().is_err());
     }
 
@@ -773,7 +760,7 @@ mod tests {
 
     #[test]
     fn layer_with_no_encoders_is_accepted() {
-        // Omitting `encoders` on a layer means every encoder defaults to No — always allowed.
+        // Omitted encoder maps default to No.
         assert!(two_encoder_config("").keymap().is_ok());
     }
 
@@ -781,10 +768,10 @@ mod tests {
     fn numeric_layer_reference_must_be_in_range() {
         let aliases = HashMap::new();
         let layer_names = HashMap::new();
-        // MO(2) with only 2 layers (indices 0..=1) would be a dead key at runtime
+        // Out-of-range layer refs would be dead keys at runtime.
         let err = KeyboardTomlConfig::keymap_parser("MO(2)", &aliases, &layer_names, 2).unwrap_err();
         assert!(err.contains("out of range"), "{err}");
-        // In-range references pass, including nested ones
+        // In-range references pass, including nested ones.
         assert!(KeyboardTomlConfig::keymap_parser("MO(1) LT(0, A) TH(MO(1), B)", &aliases, &layer_names, 2).is_ok());
     }
 

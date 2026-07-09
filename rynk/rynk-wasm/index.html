@@ -339,9 +339,7 @@
         return hidLink(device);
       }));
 
-      // Physical-presence unlock: read the challenge, then poll while the user
-      // holds the keys (≥3 polls per 500 ms firmware window), logging progress
-      // until the device unlocks or a 30 s timeout lapses. Cancel = stop polling.
+      // Poll while the user holds the physical unlock keys.
       unlockBtn.addEventListener("click", async () => {
         if (!client) return;
         unlockBtn.disabled = true;

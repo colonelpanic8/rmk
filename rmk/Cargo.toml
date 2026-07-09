@@ -129,9 +129,8 @@ dfu_lock = ["host_lock"]
 ## lock features (`vial_lock`, `dfu_lock`, and `rynk` all imply it).
 host_lock = []
 
-## Enable Rynk protocol support (new RMK-native protocol, mutually exclusive with vial).
-## Pulls in `host_lock`: the lock gate needs matrix-state tracking, and a
-## security gate that silently compiles out is exactly the hole it removes.
+## Enable Rynk protocol support (RMK-native protocol, mutually exclusive with vial).
+## Includes `host_lock` so the lock gate always has matrix-state tracking.
 rynk = ["host", "host_lock", "rmk-types/rynk"]
 
 ## Enable bulk transfer endpoints for the Rynk protocol on MCUs with sufficient RAM
@@ -240,9 +239,7 @@ steno = ["rmk-types/steno"]
 ## Internal feature that indicates no USB is used, this feature will be auto-activated for some chips
 _no_usb = []
 
-## Internal feature marking chips whose USB peripheral enumerates at high speed
-## (480 Mbps). High-speed bulk endpoints must use a 512-byte max packet size;
-## auto-activated for the relevant chips.
+## Internal marker for 480 Mbps USB chips; activates 512-byte bulk packets.
 _usb_high_speed = []
 
 #! ### BLE feature flags

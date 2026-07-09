@@ -1,5 +1,6 @@
-//! Every bundled `use_config` example must parse and resolve through the same
-//! views `#[rmk_keyboard]` consumes. This guards the whole authoring surface:
+//! Keyboard TOML validation through the same public config views
+//! `#[rmk_keyboard]` consumes. Every bundled `use_config` example must parse
+//! and resolve, which guards the whole authoring surface:
 //! unknown keys anywhere trip `deny_unknown_fields`, a stale legacy
 //! `keymap = [[[…]]]` is rejected, and a mis-sized `map` fails keymap
 //! resolution.
@@ -7,6 +8,44 @@
 use std::path::Path;
 
 use rmk_config::KeyboardTomlConfig;
+
+const MINIMAL_KEYBOARD_TOML: &str = r#"
+[keyboard]
+name = "RMK Test"
+vendor_id = 0x4c4b
+product_id = 0x4643
+chip = "rp2040"
+
+[matrix]
+row_pins = ["PIN_0", "PIN_1"]
+col_pins = ["PIN_2", "PIN_3"]
+
+[layout]
+rows = 2
+cols = 2
+"#;
+
+fn write_temp_keyboard_toml(name: &str, extra_toml: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "rmk-{name}-{}-{}.toml",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&path, format!("{MINIMAL_KEYBOARD_TOML}\n{extra_toml}")).unwrap();
+    path
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or("<panic>")
+        .to_string()
+}
 
 #[test]
 fn all_use_config_examples_resolve() {
@@ -50,6 +89,76 @@ fn all_use_config_examples_resolve() {
         failures.is_empty(),
         "examples failed to resolve:\n{}",
         failures.join("\n")
+    );
+}
+
+#[test]
+fn host_unlock_keys_reject_too_many_entries() {
+    let path = write_temp_keyboard_toml(
+        "host-unlock-too-many",
+        r#"
+[host]
+unlock_keys = [[0, 0], [0, 1], [1, 0], [1, 1], [0, 0]]
+"#,
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = std::panic::catch_unwind(|| config.host());
+    let _ = std::panic::take_hook();
+    std::fs::remove_file(path).ok();
+
+    let Err(payload) = result else {
+        panic!("host unlock_keys over max must panic");
+    };
+    let msg = panic_message(payload);
+    assert!(
+        msg.contains("[host].unlock_keys has 5 entries") && msg.contains("max is 4"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn dfu_unlock_keys_reject_too_many_entries() {
+    let path = write_temp_keyboard_toml(
+        "dfu-unlock-too-many",
+        r#"
+[dfu]
+unlock_keys = [[0, 0], [0, 1], [1, 0], [1, 1], [0, 0]]
+"#,
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+    let result = config.hardware();
+    std::fs::remove_file(path).ok();
+
+    let Err(msg) = result else {
+        panic!("dfu unlock_keys over max must fail hardware resolution");
+    };
+    assert!(
+        msg.contains("[dfu].unlock_keys has 5 entries") && msg.contains("max is 4"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn dfu_unlock_keys_reject_positions_outside_layout() {
+    let path = write_temp_keyboard_toml(
+        "dfu-unlock-outside-layout",
+        r#"
+[dfu]
+unlock_keys = [[0, 0], [2, 0]]
+"#,
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+    let result = config.hardware();
+    std::fs::remove_file(path).ok();
+
+    let Err(msg) = result else {
+        panic!("dfu unlock_keys outside layout must fail hardware resolution");
+    };
+    assert!(
+        msg.contains("[dfu].unlock_keys position (2, 0)") && msg.contains("outside the 2x2 matrix"),
+        "unexpected error: {msg}"
     );
 }
 

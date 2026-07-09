@@ -6,9 +6,6 @@ use heapless::{String, Vec};
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
 
-/// Maximum number of key positions in an unlock challenge.
-pub const UNLOCK_KEYS_SIZE: usize = 4;
-
 /// Maximum byte length of each `DeviceInfo` string field.
 pub const DEVICE_INFO_STRING_SIZE: usize = 32;
 
@@ -130,15 +127,14 @@ pub struct LockStatus {
     /// The challenge itself: physical `(row, col)` the user must hold. Empty
     /// while `locked` ⇒ permanently locked (no `unlock_keys` configured).
     #[cfg_attr(feature = "wasm", tsify(type = "[number, number][]"))]
-    pub key_positions: Vec<(u8, u8), UNLOCK_KEYS_SIZE>,
+    pub key_positions: Vec<(u8, u8), 4>,
 }
 
 // `#[derive(MaxSize)]` doesn't support `heapless::Vec` (see `crate` root), so
 // hand-write the bound: two bools + one u8 + the key-position vec.
 impl MaxSize for LockStatus {
-    const POSTCARD_MAX_SIZE: usize = 2 * bool::POSTCARD_MAX_SIZE
-        + u8::POSTCARD_MAX_SIZE
-        + crate::heapless_vec_max_size::<(u8, u8), UNLOCK_KEYS_SIZE>();
+    const POSTCARD_MAX_SIZE: usize =
+        2 * bool::POSTCARD_MAX_SIZE + u8::POSTCARD_MAX_SIZE + crate::heapless_vec_max_size::<(u8, u8), 4>();
 }
 
 /// Storage reset mode for the `StorageReset` endpoint.
@@ -230,9 +226,7 @@ mod tests {
 
     #[test]
     fn round_trip_device_info() {
-        // Max-capacity case: each string filled to 32 bytes with 4-byte chars
-        // and both ids at u16::MAX, so every varint takes its full width and
-        // the bound is genuinely exercised.
+        // Fill strings and ids so varints take their full width.
         let full: String<DEVICE_INFO_STRING_SIZE> = String::try_from("🦀🦀🦀🦀🦀🦀🦀🦀").unwrap();
         assert_eq!(full.len(), DEVICE_INFO_STRING_SIZE);
         let info = DeviceInfo {
@@ -274,9 +268,7 @@ mod tests {
         // Max-capacity case: every (u8, u8) at u8::MAX so each varint takes its
         // full width and the hand-written `MaxSize` bound is genuinely exercised.
         let mut full = Vec::new();
-        for _ in 0..UNLOCK_KEYS_SIZE {
-            full.push((u8::MAX, u8::MAX)).unwrap();
-        }
+        while full.push((u8::MAX, u8::MAX)).is_ok() {}
         let status = LockStatus {
             locked: true,
             unlocking: true,

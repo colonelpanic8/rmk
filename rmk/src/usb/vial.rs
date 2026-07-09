@@ -69,9 +69,7 @@ impl<D: Driver<'static>> ErrorType for VialUsbTx<'_, D> {
 
 impl<D: Driver<'static>> Write for VialUsbTx<'_, D> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        // One fixed-size 32-byte HID report per write; reject any other
-        // length instead of silently truncating (which would desync the
-        // reply stream), mirroring `VialBleTx`.
+        // Reject non-32-byte HID reports instead of desyncing the reply stream.
         if buf.len() != 32 {
             error!("Vial reply must be exactly 32 bytes, got {}", buf.len());
             return Err(HostTransportError);

@@ -221,9 +221,7 @@ impl From<MorseProfile> for u32 {
     }
 }
 
-// Wire (postcard): the packed `u32`. Human-readable (serde_wasm_bindgen / JSON): a
-// named object of the decoded fields, so TS gets a real object while the RAM-tight
-// `u32` stays on the wire. `mode` reuses the `MorseMode` enum.
+// Wire stays packed; human-readable serializers expose named fields.
 impl Serialize for MorseProfile {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         if serializer.is_human_readable() {

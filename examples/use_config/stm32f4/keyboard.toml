@@ -1,5 +1,5 @@
 [keyboard]
-# Example identity — replace name, vendor_id and product_id with your keyboard's own
+# Replace with your keyboard identity.
 name = "RMK Keyboard"
 product_name = "RMK Keyboard"
 vendor_id = 0x4c4b
@@ -8,10 +8,10 @@ manufacturer = "haobo"
 chip = "stm32f411ce"
 
 [matrix]
-# Row and col pins are mandatory
+# Matrix pins are required.
 row_pins = ["PA4", "PA5", "PA6", "PA3"]
 col_pins = ["PA7", "PA8", "PA9"]
-# RMK uses col2row as the default matrix diode direction, if you want to use a row2col matrix, add `row2col = true`
+# Default diode direction is col2row; set `row2col = true` if needed.
 # row2col = true
 
 [layout]
@@ -56,5 +56,5 @@ capslock.low_active = false
 
 
 [storage]
-# Storage feature is enabled by default
+# Storage is enabled by default.
 # enabled = false

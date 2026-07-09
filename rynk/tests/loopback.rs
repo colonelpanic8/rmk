@@ -72,22 +72,16 @@ impl Write for Duplex<'_> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn client_against_run_session() {
-    // ── firmware side: a tiny 2-layer × 2-row × 2-col keymap + service ──
+    // Firmware side.
     let mut behavior = BehaviorConfig::default();
     let positional: PositionalConfig<2, 2> = PositionalConfig::default();
     let mut data: KeymapData<2, 2, 2, 0> = KeymapData::new([[[KeyAction::No; 2]; 2]; 2]);
     let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-    // `insecure` keeps the lock gate open so this case exercises protocol
-    // mechanics (incl. `StorageReset`); the gate itself is covered by
-    // `lock_gate_rejects_and_reports` and the firmware `host::lock` tests.
+    // Keep the lock gate open; lock behavior is covered elsewhere.
     let mut config: RmkConfig<'static> = RmkConfig::default();
     config.lock_config.insecure = true;
 
-    // ── built-in physical-layout blob ──
-    // Build a known LayoutInfo and compress it exactly as rmk-config does
-    // (postcard + raw DEFLATE). Round-tripping it through the real GetLayout
-    // paging + inflate + decode exercises the whole layout seam end to end.
-    // Leaked to 'static (the firmware takes `&'static [u8]`; a test leak is fine).
+    // Built-in physical-layout blob; leaked to match firmware's `'static` config.
     let k = |row: u8, col: u8, x: f32| Key {
         row,
         col,
@@ -120,7 +114,7 @@ async fn client_against_run_session() {
     config.layout_blob = blob;
     let service = RynkService::new(&keymap, &config);
 
-    // ── in-memory duplex: h2d carries requests, d2h carries responses + topics ──
+    // In-memory duplex: h2d requests, d2h responses/topics.
     let h2d = Link::new();
     let d2h = Link::new();
     let mut dev_rx: &Link = &h2d;
@@ -128,34 +122,29 @@ async fn client_against_run_session() {
 
     let transport = Duplex { rx: &d2h, tx: &h2d };
 
-    // ── host side: the real Client, exercising the full seam ──
+    // Host side.
     let script = async {
         let mut client = Client::connect(transport).await.expect("handshake should succeed");
 
-        // Handshake: both halves must agree on the protocol version.
+        // Version handshake crosses both real stacks.
         assert_eq!(client.get_version().await.unwrap(), ProtocolVersion::CURRENT);
 
-        // Capabilities reflect the live keymap …
         let caps = client.get_capabilities().await.unwrap();
         assert_eq!((caps.num_layers, caps.num_rows, caps.num_cols), (2, 2, 2));
-        // … and the negotiated payload limit the client consumes equals the
-        // firmware's own buffer floor (header + max_payload == RYNK_BUFFER_SIZE).
+        // Client consumes the firmware-advertised payload limit.
         assert_eq!(caps.max_payload_size as usize, RYNK_BUFFER_SIZE - RYNK_HEADER_SIZE);
 
-        // A Get round-trip: seq correlation + cmd echo + Ok envelope.
+        // Get round-trip: seq correlation, cmd echo, Ok envelope.
         assert_eq!(client.get_current_layer().await.unwrap(), 0);
 
-        // A Get with a request payload + typed decode of the response.
+        // Get with request payload and typed response decode.
         assert_eq!(client.get_key(0, 0, 0).await.unwrap(), KeyAction::No);
 
-        // A Set + readback through the real persistence path (the flash channel
-        // is drained concurrently below). The 2-layer keymap lets the default
-        // move off layer 0 so the readback observes the write.
+        // Set + readback through the real persistence path.
         client.set_default_layer(1).await.unwrap();
         assert_eq!(client.get_default_layer().await.unwrap(), 1);
 
-        // Round-trip a representative of each remaining domain through both real
-        // stacks — other endpoints are only checked by same-version mocks per side.
+        // Round-trip representative remaining domains.
         client.set_key(0, 1, 1, KeyAction::Morse(2)).await.unwrap();
         assert_eq!(client.get_key(0, 1, 1).await.unwrap(), KeyAction::Morse(2));
 
@@ -165,7 +154,7 @@ async fn client_against_run_session() {
         client.set_behavior(beh).await.unwrap();
         assert_eq!(client.get_behavior().await.unwrap(), beh);
 
-        // Macro: the zero-fill chunk contract, end to end.
+        // Macro zero-fill chunk contract.
         let mut macro_bytes: heapless::Vec<u8, MACRO_DATA_SIZE> = heapless::Vec::new();
         macro_bytes.extend_from_slice(&[1, 2, 3, 4]).unwrap();
         client.set_macro(0, 0, MacroData { data: macro_bytes }).await.unwrap();
@@ -174,7 +163,7 @@ async fn client_against_run_session() {
         assert_eq!(&got.data[..4], &[1, 2, 3, 4], "written prefix preserved");
         assert!(got.data[4..].iter().all(|&b| b == 0), "tail zero-filled past the write");
 
-        // Combo round-trip, guarded on the advertised count.
+        // Combo round-trip, guarded on advertised count.
         if caps.max_combos > 0 {
             let combo = Combo::new([KeyAction::Morse(1), KeyAction::Morse(2)], KeyAction::Morse(3), Some(0));
             client.set_combo(0, combo.clone()).await.unwrap();
@@ -186,16 +175,14 @@ async fn client_against_run_session() {
         let _ = client.get_connection_type().await.unwrap();
         let _ = client.get_led_indicator().await.unwrap();
 
-        // A device rejection must flatten to RynkHostError::Rejected end to end:
-        // the firmware implements only StorageResetMode::Full.
+        // Device rejection flattens to RynkHostError::Rejected.
         let rejected = client.storage_reset(StorageResetMode::LayoutOnly).await;
         assert!(
             matches!(rejected, Err(RynkHostError::Rejected(RynkError::Unimplemented))),
             "expected Rejected(Unimplemented), got {rejected:?}"
         );
 
-        // The built-in layout blob: paged over GetLayout, inflated, and
-        // postcard-decoded end to end — the full serve→fetch→inflate→decode seam.
+        // Layout blob crosses serve, page, inflate, and decode.
         let layout = client.get_layout().await.unwrap();
         assert_eq!(
             layout, layout_info,
@@ -204,7 +191,7 @@ async fn client_against_run_session() {
         assert_eq!(layout.variants.len(), 2, "two render variants");
         assert_eq!(layout.variants[1].keys.len(), 2, "variant b hides one key");
 
-        // A server→host topic push, decoded into a typed IncomingTopic.
+        // Server topic push decodes into a typed IncomingTopic.
         publish_event(LayerChangeEvent::new(3));
         let ev = client.next_event().await.unwrap();
         assert!(
@@ -213,9 +200,7 @@ async fn client_against_run_session() {
         );
     };
 
-    // Drive the session + flash-channel drainer concurrently with the script. The
-    // pipes never EOF, so the session would loop forever; it is dropped once the
-    // script returns. If the session resolves first, that's a framing bug.
+    // Drain flash writes; the session should not finish before the script.
     let device = select(
         service.run_session(&mut dev_rx, &mut dev_tx),
         rmk::channel::drain_flash_channel_for_test(),

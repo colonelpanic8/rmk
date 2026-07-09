@@ -146,9 +146,7 @@ mod tests {
 
     #[test]
     fn rynk_min_buffer_size_covers_largest_known_response() {
-        // `DeviceInfo` (three 32-byte strings) is the largest single-message
-        // response when bulk is disabled; the min buffer must hold its wrapped
-        // form plus header.
+        // DeviceInfo is the largest non-bulk response.
         let wrapped = <Result<DeviceInfo, RynkError> as MaxSize>::POSTCARD_MAX_SIZE;
         assert!(RYNK_MAX_PAYLOAD >= wrapped);
         assert!(RYNK_MIN_BUFFER_SIZE >= wrapped + RYNK_HEADER_SIZE);

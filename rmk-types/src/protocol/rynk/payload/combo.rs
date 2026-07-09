@@ -14,9 +14,7 @@ pub struct SetComboRequest {
     pub config: Combo,
 }
 
-// Bulk transfer types live in the `bulk` submodule below and are re-exported
-// when the `bulk` feature is enabled. Gating the entire submodule once avoids
-// repeating `#[cfg(feature = "bulk")]` on every type, impl, and import.
+// Keep the bulk cfg on this module; public payloads are re-exported below.
 #[cfg(feature = "bulk")]
 mod bulk {
     use postcard::experimental::max_size::MaxSize;
@@ -26,9 +24,7 @@ mod bulk {
     #[cfg(not(feature = "host"))]
     use crate::constants::BULK_SIZE;
 
-    // Firmware sizes this Vec from the buffer (`BULK_SIZE`, derived from
-    // `RYNK_BUFFER_SIZE`); the host leaves it unbounded (`alloc::Vec`) and bounds
-    // each transfer at runtime from the firmware-reported `max_bulk_configs`.
+    // Firmware uses a bounded Vec; host bounds transfers from capabilities.
     #[cfg(not(feature = "host"))]
     type BulkCombos = heapless::Vec<Combo, BULK_SIZE>;
     #[cfg(feature = "host")]
@@ -55,10 +51,7 @@ mod bulk {
         pub configs: BulkCombos,
     }
 
-    // `@bulk` endpoints are excluded from the buffer-floor fold, so this `MaxSize`
-    // is decorative — it only satisfies the `Endpoint: MaxSize` bound. A bulk frame
-    // fits the buffer by construction, so the buffer size is a valid (if loose)
-    // bound that host and firmware can share.
+    // Bulk endpoints size from the buffer; this only satisfies `Endpoint: MaxSize`.
     impl MaxSize for SetComboBulkRequest {
         const POSTCARD_MAX_SIZE: usize = crate::constants::RYNK_BUFFER_SIZE;
     }
@@ -141,9 +134,7 @@ mod tests {
         assert_max_size_bound(&c);
     }
 
-    // Firmware-only: exercises the heapless capacity (`BULK_SIZE`). On the host the
-    // field is an unbounded `alloc::Vec`; the wire format is identical and pinned by
-    // the snapshot tests.
+    // Firmware-only: exercises heapless bulk capacity.
     #[cfg(all(feature = "bulk", not(feature = "host")))]
     mod bulk {
         use heapless::Vec;

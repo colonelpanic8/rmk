@@ -4,7 +4,7 @@ use core::cell::Cell;
 
 use embassy_time::{Duration, Instant};
 #[cfg(feature = "rynk")]
-use rmk_types::protocol::rynk::{LockStatus, UNLOCK_KEYS_SIZE};
+use rmk_types::protocol::rynk::LockStatus;
 
 use crate::keymap::KeyMap;
 
@@ -101,11 +101,6 @@ impl<'a> HostLock<'a> {
 
 #[cfg(feature = "rynk")]
 impl HostLock<'_> {
-    /// The configured challenge as a wire vec (empty ⇒ permanently locked).
-    fn key_positions(&self) -> heapless::Vec<(u8, u8), UNLOCK_KEYS_SIZE> {
-        self.unlock_keys.iter().copied().collect()
-    }
-
     /// Side-effect-free snapshot for `GetLockStatus`: reports the current lock
     /// state and challenge without arming an attempt (lazy window-expiry aside).
     pub fn status(&self) -> LockStatus {
@@ -119,7 +114,7 @@ impl HostLock<'_> {
             } else {
                 self.unlock_keys.len() as u8
             },
-            key_positions: self.key_positions(),
+            key_positions: self.unlock_keys.iter().copied().collect(),
         }
     }
 
@@ -141,7 +136,7 @@ impl HostLock<'_> {
             locked: !self.is_unlocked(),
             unlocking: self.is_unlocking(),
             remaining_keys: remaining,
-            key_positions: self.key_positions(),
+            key_positions: self.unlock_keys.iter().copied().collect(),
         }
     }
 }

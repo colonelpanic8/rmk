@@ -41,6 +41,36 @@ pub mod protocol_limits {
     pub const MAX_MORSE_SIZE: usize = 32;
     /// Max bytes per macro data chunk — ceiling for `MACRO_DATA_SIZE`
     pub const MAX_MACRO_DATA_SIZE: usize = 256;
+    /// Max key positions in an unlock challenge.
+    pub const MAX_UNLOCK_KEYS_SIZE: usize = 4;
+}
+
+pub(crate) fn validate_unlock_keys(
+    section: &str,
+    unlock_keys: &[[u8; 2]],
+    layout: Option<&LayoutTomlConfig>,
+) -> Result<(), String> {
+    if unlock_keys.len() > protocol_limits::MAX_UNLOCK_KEYS_SIZE {
+        return Err(format!(
+            "{section}.unlock_keys has {} entries, the max is {}",
+            unlock_keys.len(),
+            protocol_limits::MAX_UNLOCK_KEYS_SIZE
+        ));
+    }
+
+    if let Some(layout) = layout {
+        for key in unlock_keys {
+            let (row, col) = (key[0], key[1]);
+            if row >= layout.rows || col >= layout.cols {
+                return Err(format!(
+                    "{section}.unlock_keys position ({row}, {col}) is outside the {}x{} matrix",
+                    layout.rows, layout.cols
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Configurations for RMK keyboard.
@@ -263,15 +293,10 @@ pub(crate) struct RmkConstantsConfig {
     /// Smaller values reduce firmware RAM usage but require more round-trips.
     #[serde_inline_default(64)]
     pub protocol_macro_chunk_size: usize,
-    /// Optional Rynk RX/TX buffer size (bytes); the single knob for bulk transfer
-    /// throughput. The `bulk` endpoints size their per-message element counts to
-    /// fill this buffer, so a larger value moves more keys/combos per round-trip
-    /// at the cost of RAM. When `None`, a `bulk` build defaults to
-    /// `RYNK_DEFAULT_BUFFER_SIZE` and every other build to the
-    /// `RYNK_MIN_BUFFER_SIZE` floor. The const assertion in `rmk/src/host/rynk`
-    /// rejects values below the floor.
-    #[serde(default)]
-    pub rynk_buffer_size: Option<usize>,
+    /// Rynk RX/TX buffer size (bytes); the single knob for bulk transfer
+    /// throughput.
+    #[serde_inline_default(512)]
+    pub rynk_buffer_size: usize,
 }
 
 fn check_combo_max_num<'de, D>(deserializer: D) -> Result<usize, D::Error>
@@ -346,7 +371,7 @@ impl Default for RmkConstantsConfig {
             ble_profiles_num: 3,
             split_central_sleep_timeout_seconds: 0,
             protocol_macro_chunk_size: 64,
-            rynk_buffer_size: None,
+            rynk_buffer_size: 512,
         }
     }
 }

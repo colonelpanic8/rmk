@@ -150,10 +150,7 @@ pub(crate) fn new_usb_builder<'d, D: Driver<'d>>(driver: D, keyboard_config: Dev
     let mut usb_config = embassy_usb::Config::new(keyboard_config.vid, keyboard_config.pid);
     usb_config.manufacturer = Some(keyboard_config.manufacturer);
     usb_config.product = Some(keyboard_config.product_name);
-    // The Rynk host library needs a marker to find RMK keyboards without
-    // probing every serial device on the system.
-    // `RYNK_SERIAL_MAGIC` is prepended to the USB serial number as the marker
-    // of Rynk devices.
+    // Prefix Rynk serials so hosts can identify RMK devices cheaply.
     #[cfg(feature = "rynk")]
     let serial_number = {
         static SERIAL: StaticCell<heapless::String<64>> = StaticCell::new();

@@ -107,8 +107,6 @@ struct KeyMapInner<'a> {
     matrix_state: MatrixState,
 }
 
-// ── Flat indexing helpers ──────────────────────────────────────────────
-
 impl KeyMapInner<'_> {
     #[inline]
     fn layer_index(&self, layer: usize, row: usize, col: usize) -> usize {
@@ -130,8 +128,6 @@ impl KeyMapInner<'_> {
         id * 2 + direction
     }
 }
-
-// ── KeyMapInner methods (all take &mut self or &self) ─────────────────
 
 impl KeyMapInner<'_> {
     fn get_keymap_config(&self) -> (usize, usize, usize) {
@@ -330,12 +326,7 @@ impl KeyMapInner<'_> {
     }
 }
 
-// ── Public KeyMap API (interior borrow hidden) ────────────────────────
-//
-// Every method borrows `inner`, mutates, and drops within one sync call — the
-// borrow never spans an `.await`. Embassy's scheduler is cooperative, so a
-// borrow held across an await would let another task observe the borrowed cell
-// and panic. New methods must return owned values, not borrow guards.
+// Keep `inner` borrows inside sync methods so no borrow crosses an await.
 
 impl<'a> KeyMap<'a> {
     /// Flatten [`KeymapData`] and build the `KeyMap`.
@@ -430,8 +421,6 @@ impl<'a> KeyMap<'a> {
         Self::build(data, behavior, positional_config)
     }
 
-    // ── Action resolution ──
-
     pub(crate) fn get_action_with_layer_cache(&self, event: KeyboardEvent) -> KeyAction {
         self.inner.borrow_mut().get_action_with_layer_cache(event)
     }
@@ -460,8 +449,6 @@ impl<'a> KeyMap<'a> {
     pub(crate) fn set_action_at(&self, pos: KeyboardEventPos, layer: usize, action: KeyAction) {
         self.inner.borrow_mut().set_action_at(pos, layer, action);
     }
-
-    // ── Layers ──
 
     pub(crate) fn activate_layer(&self, layer_num: u8) {
         self.inner.borrow_mut().activate_layer(layer_num);
@@ -542,8 +529,6 @@ impl<'a> KeyMap<'a> {
         self.inner.borrow_mut().update_fn_layer_state();
     }
 
-    // ── Config ──
-
     pub(crate) fn get_keymap_config(&self) -> (usize, usize, usize) {
         self.inner.borrow().get_keymap_config()
     }
@@ -557,8 +542,6 @@ impl<'a> KeyMap<'a> {
             Hand::Unknown
         }
     }
-
-    // ── Behavior getters (borrow scoped inside each method) ──
 
     pub(crate) fn combo_timeout(&self) -> Duration {
         self.inner.borrow().behavior.combo.timeout
@@ -608,8 +591,6 @@ impl<'a> KeyMap<'a> {
         self.inner.borrow().behavior.morse.morses.len()
     }
 
-    // ── Behavior setters ──
-
     pub(crate) fn set_combo_timeout(&self, timeout: Duration) {
         self.inner.borrow_mut().behavior.combo.timeout = timeout;
     }
@@ -634,8 +615,6 @@ impl<'a> KeyMap<'a> {
         self.inner.borrow_mut().behavior.morse.prior_idle_time = time;
     }
 
-    // ── Per-element morse ──
-
     pub(crate) fn get_morse(&self, idx: usize) -> Option<Morse> {
         self.inner.borrow().behavior.morse.morses.get(idx).cloned()
     }
@@ -643,8 +622,6 @@ impl<'a> KeyMap<'a> {
     pub(crate) fn with_morse_mut<R>(&self, idx: usize, f: impl FnOnce(&mut Morse) -> R) -> Option<R> {
         self.inner.borrow_mut().behavior.morse.morses.get_mut(idx).map(f)
     }
-
-    // ── Collection closures ──
 
     pub(crate) fn with_forks<R>(&self, f: impl FnOnce(&[Fork]) -> R) -> R {
         let inner = self.inner.borrow();
@@ -666,8 +643,6 @@ impl<'a> KeyMap<'a> {
         f(&mut inner.behavior.combo.combos)
     }
 
-    // ── Macros ──
-
     pub(crate) fn get_macro_sequence_start(&self, idx: u8) -> Option<usize> {
         MacroOperation::get_macro_sequence_start(&self.inner.borrow().behavior.keyboard_macros.macro_sequences, idx)
     }
@@ -680,8 +655,6 @@ impl<'a> KeyMap<'a> {
         )
     }
 
-    // ── Mouse ──
-
     pub(crate) fn mouse_buttons(&self) -> u8 {
         self.inner.borrow().mouse_buttons
     }
@@ -689,8 +662,6 @@ impl<'a> KeyMap<'a> {
     pub(crate) fn set_mouse_buttons(&self, buttons: u8) {
         self.inner.borrow_mut().mouse_buttons = buttons;
     }
-
-    // ── Bulk flat access (for Vial DynamicKeymapGetBuffer/SetBuffer) ──
 
     pub(crate) fn get_action_by_flat_index(&self, index: usize) -> KeyAction {
         let inner = self.inner.borrow();
@@ -707,8 +678,6 @@ impl<'a> KeyMap<'a> {
             inner.layers[index] = action;
         }
     }
-
-    // ── Encoder access (for Vial GetEncoder/SetEncoder) ──
 
     pub(crate) fn num_encoders(&self) -> usize {
         self.inner.borrow().num_encoder
@@ -765,8 +734,6 @@ impl<'a> KeyMap<'a> {
         false
     }
 
-    // ── Macro buffer (for Vial DynamicKeymapMacroGetBuffer/SetBuffer) ──
-
     pub(crate) fn read_macro_buffer(&self, offset: usize, target: &mut [u8]) {
         let inner = self.inner.borrow();
         let src = &inner.behavior.keyboard_macros.macro_sequences;
@@ -792,8 +759,6 @@ impl<'a> KeyMap<'a> {
     pub(crate) fn get_macro_sequences(&self) -> [u8; MACRO_SPACE_SIZE] {
         self.inner.borrow().behavior.keyboard_macros.macro_sequences
     }
-
-    // ── Matrix state (host_lock) ──
 
     #[cfg(feature = "host_lock")]
     pub(crate) fn update_matrix_state(&self, event: &KeyboardEvent) {

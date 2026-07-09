@@ -17,9 +17,7 @@ use super::bulk::{bulk_page, bulk_write_start};
 
 impl Handle<GetCombo> for RynkService<'_> {
     async fn handle(&self, idx: u8) -> Result<ComboConfig, RynkError> {
-        // An in-range but empty slot returns the empty config so the host
-        // gets a uniform shape across hits and misses; an out-of-range index
-        // is a semantic error.
+        // Empty in-range slots return the empty config; OOR is an error.
         self.ctx.with_combos(|combos| {
             if (idx as usize) >= combos.len() {
                 return Err(RynkError::Invalid);

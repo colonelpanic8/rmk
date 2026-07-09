@@ -143,9 +143,7 @@ async fn run_all<T: Read + Write>(mut client: Client<T>, over_ble: bool) -> Resu
     info!("── keymap ──");
     // Read, set a different value, verify, restore.
     match client.get_default_layer().await {
-        // Only round-trip an in-range value: restoring an out-of-range `orig`
-        // would be rejected by the firmware, fail the verify spuriously, and
-        // leave the device on the test's mutated layer.
+        // Only round-trip values we can restore.
         Ok(orig) if (orig as usize) < caps.num_layers as usize => {
             info!("  ✓ {:<22} {orig}", "get default_layer");
             let new = orig.wrapping_add(1) % caps.num_layers.max(1);

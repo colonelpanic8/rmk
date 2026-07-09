@@ -1,15 +1,9 @@
 //! End-to-end loopback integration test for the Rynk host service.
 //!
-//! Every case runs the production [`RynkService::run_session`] over an in-memory
-//! embedded-io duplex (see [`common::rynk_link`]) and drives it with a host-side
-//! `RynkClient`. Requests and responses cross the full framing/codec path —
-//! parse → dispatch → handler → response-encode → framing — plus the topic-emit
-//! and oversized-frame resync arms of the session loop. Nothing here touches a
-//! hardware transport, so the whole Rynk stack is tested in isolation.
+//! Cases run the production [`RynkService::run_session`] over an in-memory
+//! embedded-io duplex and drive it with a host-side `RynkClient`.
 //!
-//! Coverage is exhaustive: there is at least one case per dispatch arm in
-//! `RynkService::handle` (happy path where the mock keymap allows it, the
-//! `Invalid`/`Unimplemented` arm otherwise) and one case per topic push.
+//! Coverage includes each dispatch arm and topic push.
 
 #![cfg(feature = "rynk")]
 
@@ -44,18 +38,14 @@ use rmk_types::protocol::rynk::{
 use crate::common::rynk_link::{link_session, link_two_sessions};
 use crate::common::{wrap_keymap, wrap_keymap_with_encoders};
 
-/// Leak an `insecure` (always-unlocked) config so these loopback cases exercise
-/// protocol mechanics without the lock gate intercepting `BootloaderJump` /
-/// `StorageReset` / `GetMatrixState`. The gate itself is covered by the
-/// `host::rynk` and `host::lock` unit tests.
+/// Leak an always-unlocked config so these cases exercise protocol mechanics.
 fn insecure_config() -> &'static RmkConfig<'static> {
     let mut config = RmkConfig::default();
     config.lock_config.insecure = true;
     Box::leak(Box::new(config))
 }
 
-/// Build a `RynkService` over a tiny 1-layer 2-row 2-col keymap, so the tests
-/// don't depend on the size of the helper module's default keyboard.
+/// Build a tiny 1-layer 2x2 service.
 fn service() -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
     let per_key: &'static PositionalConfig<2, 2> = Box::leak(Box::new(PositionalConfig::default()));
@@ -64,9 +54,7 @@ fn service() -> RynkService<'static> {
     RynkService::new(km, insecure_config())
 }
 
-/// A 2-layer variant, so SetDefaultLayer can move the default off layer 0 and
-/// the readback can actually observe the write (the 1-layer keymap can't —
-/// layer 0 is both the default and the only valid value).
+/// 2-layer service so SetDefaultLayer can make an observable change.
 fn service_2_layers() -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
     let per_key: &'static PositionalConfig<2, 2> = Box::leak(Box::new(PositionalConfig::default()));
@@ -75,8 +63,7 @@ fn service_2_layers() -> RynkService<'static> {
     RynkService::new(km, insecure_config())
 }
 
-/// A keymap with 2 encoders, so `GetCapabilities` can report a non-zero
-/// `num_encoders` and the encoder endpoints become reachable.
+/// Service with two encoders, making encoder endpoints reachable.
 fn service_with_encoders() -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
     let per_key: &'static PositionalConfig<2, 2> = Box::leak(Box::new(PositionalConfig::default()));
@@ -86,9 +73,7 @@ fn service_with_encoders() -> RynkService<'static> {
     RynkService::new(km, insecure_config())
 }
 
-/// A single-layer 3-row 4-col keymap (12 keys) for the bulk endpoints: small
-/// enough that runs hit the keymap's edge, and 4-key rows make a run wrap a row
-/// boundary early. Larger runs use `service_3x4x4`.
+/// 3x4 service for bulk edge and row-wrap cases.
 #[cfg(feature = "bulk")]
 fn service_3x4() -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
@@ -99,9 +84,7 @@ fn service_3x4() -> RynkService<'static> {
     RynkService::new(km, config)
 }
 
-/// A 4-layer 3-row 4-col keymap: 48 keys total, more than one `BULK_KEYMAP_SIZE`
-/// run, so the max-capacity and over-budget tests can exercise a full run (and a
-/// run one past the budget) without the keymap's total size being the limiter.
+/// 48-key service for full and over-budget bulk runs.
 #[cfg(feature = "bulk")]
 fn service_3x4x4() -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
@@ -112,18 +95,11 @@ fn service_3x4x4() -> RynkService<'static> {
     RynkService::new(km, config)
 }
 
-/// Distinct action per bulk slot, so a write landing in the wrong position
-/// shows up as the wrong keycode rather than a lucky match. HID usage 4 is `A`,
-/// so slots 0.. map to A, B, C, … — distinct across a full `BULK_KEYMAP_SIZE`
-/// run (usages 4..=0x73 are all valid keys).
+/// Distinct action per bulk slot catches wrong-position writes.
 #[cfg(feature = "bulk")]
 fn bulk_action(i: usize) -> KeyAction {
     KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::from(4 + i as u8))))
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// System  (0x00xx)
-// ─────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn get_version() {
@@ -147,22 +123,17 @@ fn get_capabilities() {
         assert_eq!(caps.num_rows, 2);
         assert_eq!(caps.num_cols, 2);
         assert_eq!(caps.num_encoders, 0);
-        // Concrete protocol limits (default config) — these pin real values, so
-        // a handler reporting the wrong limit is caught, not just "decodes".
+        // Pin real protocol limits, not just decodability.
         assert_eq!(caps.max_combos, 8);
         assert_eq!(caps.max_morse, 8);
         assert_eq!(caps.max_forks, 8);
         assert_eq!(caps.macro_space_size, 256);
         assert_eq!(caps.macro_chunk_size, 64);
-        // Feature flags must track the compiled feature set. The suite runs this
-        // under both the all-on combo and a rynk-only combo (see test_all.sh),
-        // so these are exercised in both the true and false states.
+        // This suite runs with all-on and rynk-only feature sets.
         assert_eq!(caps.storage_enabled, cfg!(feature = "storage"));
         assert_eq!(caps.ble_enabled, cfg!(feature = "_ble"));
         assert_eq!(caps.is_split, cfg!(feature = "split"));
-        // Bulk advertisement tracks the compiled feature — the flag and both
-        // per-message budgets move together. Keys and configs have separate
-        // budgets (keys are far smaller, so they chunk in larger runs).
+        // Bulk flag and budgets must move together.
         assert_eq!(caps.bulk_transfer_supported, cfg!(feature = "bulk"));
         #[cfg(feature = "bulk")]
         {
@@ -185,8 +156,7 @@ fn get_device_info() {
             .request::<(), DeviceInfo>(Cmd::GetDeviceInfo, 0x08, &())
             .await
             .expect("Ok envelope");
-        // service() passes RmkConfig::default(), so the identity is the default
-        // DeviceConfig, and rmk_version tracks this crate's own version.
+        // service() uses the default identity and this crate version.
         assert_eq!(info.vendor_id, 0x4c4b);
         assert_eq!(info.product_id, 0x4643);
         assert_eq!(info.manufacturer.as_str(), "RMK");
@@ -200,10 +170,7 @@ fn get_device_info() {
 
 #[test]
 fn reboot_acks_where_reset_is_a_no_op() {
-    // On real hardware `reboot_keyboard()` never returns and no reply is sent
-    // (the host's `reboot()` is send-only). On targets where the reset is a
-    // no-op — like this test host — the handler falls through to the standard
-    // `Ok(())` envelope (`request` asserts the cmd + seq echo).
+    // Test targets may no-op reset and return the standard `Ok(())` envelope.
     let service = service();
     link_session(&service, async |client| {
         let r = client.request::<(), ()>(Cmd::Reboot, 0x60, &()).await;
@@ -213,7 +180,6 @@ fn reboot_acks_where_reset_is_a_no_op() {
 
 #[test]
 fn bootloader_jump_acks_where_jump_is_a_no_op() {
-    // Same contract as `reboot_acks_where_reset_is_a_no_op`.
     let service = service();
     link_session(&service, async |client| {
         let r = client.request::<(), ()>(Cmd::BootloaderJump, 0x61, &()).await;
@@ -234,9 +200,7 @@ fn storage_reset_acks() {
 
 #[test]
 fn storage_reset_rejects_layout_only_until_implemented() {
-    // `LayoutOnly` semantics aren't wired yet (`reset_storage` is always a
-    // Full wipe, bonds included); the handler rejects the request instead of
-    // silently over-wiping.
+    // Reject LayoutOnly until reset_storage can preserve bonds.
     let service = service();
     link_session(&service, async |client| {
         let r = client
@@ -246,15 +210,9 @@ fn storage_reset_rejects_layout_only_until_implemented() {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Keymap + encoder  (0x01xx)
-// ─────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn get_set_key_action_round_trip() {
     let service = service();
-    // Both requests share one session — Set is dispatched, then Get reads back
-    // the value over the same wire, pipelined behind the Set response.
     link_session(&service, async |client| {
         let position = KeyPosition {
             layer: 0,
@@ -272,12 +230,7 @@ fn get_set_key_action_round_trip() {
     });
 }
 
-/// Two `run_session`s over one shared `RynkService` — the production shape when
-/// a board runs the BLE-GATT and BLE-HID (`RynkHidService`) sessions
-/// concurrently. Both build their own `TopicSubscribers` against the global
-/// event channels and share one `KeyMap`; this must not panic (subscriber
-/// overflow or RefCell double-borrow) and writes from one session must be
-/// visible to the other.
+/// Concurrent sessions over one service must share state without panicking.
 #[test]
 fn concurrent_sessions_share_one_service() {
     let service = service_2_layers();
@@ -290,7 +243,7 @@ fn concurrent_sessions_share_one_service() {
         let key_a = KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A)));
         let key_b = KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::B)));
 
-        // Write from session A, then session B, over the shared KeyMap.
+        // Last writer over the shared KeyMap wins.
         let set_a = SetKeyRequest {
             position,
             action: key_a,
@@ -302,7 +255,7 @@ fn concurrent_sessions_share_one_service() {
         };
         assert_eq!(b.request::<_, ()>(Cmd::SetKeyAction, 0x21, &set_b).await, Ok(()));
 
-        // Both sessions read the same shared state — B's write (the last) wins.
+        // Both sessions read the shared final state.
         let from_a = a.request::<_, KeyAction>(Cmd::GetKeyAction, 0x12, &position).await;
         let from_b = b.request::<_, KeyAction>(Cmd::GetKeyAction, 0x22, &position).await;
         assert_eq!(
@@ -332,7 +285,7 @@ fn get_key_action_rejects_out_of_range() {
 fn set_key_action_rejects_out_of_range() {
     let service = service();
     link_session(&service, async |client| {
-        // service()'s keymap is 1×2×2, so row 9 is out of range.
+        // Row 9 is out of range for service().
         let set = SetKeyRequest {
             position: KeyPosition {
                 layer: 0,
@@ -350,15 +303,14 @@ fn set_key_action_rejects_out_of_range() {
 fn get_set_default_layer() {
     let service = service_2_layers();
     link_session(&service, async |client| {
-        // Fresh keymap defaults to layer 0; moving it to 1 is an observable
-        // change — a dropped Set would read back 0 and fail.
+        // Moving default layer to 1 makes dropped Set observable.
         let before = client.request::<(), u8>(Cmd::GetDefaultLayer, 0x10, &()).await;
         assert_eq!(before, Ok(0), "fresh keymap defaults to layer 0");
         let r = client.request::<u8, ()>(Cmd::SetDefaultLayer, 0x11, &1u8).await;
         assert_eq!(r, Ok(()));
         let after = client.request::<(), u8>(Cmd::GetDefaultLayer, 0x12, &()).await;
         assert_eq!(after, Ok(1), "SetDefaultLayer must persist the new default");
-        // Layer 2 is out of range for a 2-layer keymap.
+        // Layer 2 is out of range.
         let r = client.request::<u8, ()>(Cmd::SetDefaultLayer, 0x13, &2u8).await;
         assert_eq!(r, Err(RynkError::Invalid));
     });
@@ -389,8 +341,7 @@ fn set_default_layer_rejects_truncated_payload() {
 
 #[test]
 fn encoder_action_out_of_range() {
-    // service()'s keymap has 0 encoders, so any encoder id is out of range —
-    // this is the only reachable arm for the encoder Cmds with this mock keymap.
+    // service() has no encoders, so only the OOR path is reachable.
     let service = service();
     link_session(&service, async |client| {
         let get = GetEncoderRequest {
@@ -414,9 +365,7 @@ fn encoder_action_out_of_range() {
 
 #[test]
 fn capabilities_report_configured_encoder_count() {
-    // A keymap with encoders must advertise them (regression: capabilities
-    // hardcoded `num_encoders: 0`, hiding fully-wired encoder endpoints from any
-    // capability-respecting host). The endpoint is reachable once advertised.
+    // Capabilities must advertise encoder endpoints.
     let service = service_with_encoders();
     link_session(&service, async |client| {
         let caps = client
@@ -428,7 +377,7 @@ fn capabilities_report_configured_encoder_count() {
             "capabilities must reflect the configured encoder count"
         );
 
-        // In-range encoder is now reachable (would be `Invalid` if num_encoders==0).
+        // In-range encoder is reachable once advertised.
         let get = GetEncoderRequest {
             encoder_id: 1,
             layer: 0,
@@ -438,7 +387,7 @@ fn capabilities_report_configured_encoder_count() {
             .await;
         assert_eq!(action, Ok(EncoderAction::default()));
 
-        // Out-of-range encoder id (==count) is still rejected.
+        // id == count is still out of range.
         let oor = GetEncoderRequest {
             encoder_id: 2,
             layer: 0,
@@ -452,8 +401,7 @@ fn capabilities_report_configured_encoder_count() {
 
 #[test]
 fn get_set_encoder_round_trip() {
-    // SetEncoderAction writes both directions in one shot; the readback must
-    // reflect the whole `EncoderAction`, not a half-applied pair.
+    // Readback must reflect both encoder directions.
     let service = service_with_encoders();
     link_session(&service, async |client| {
         let action = EncoderAction::new(
@@ -486,13 +434,12 @@ fn keymap_bulk_round_trip_wraps_row_boundary() {
     use rmk_types::protocol::rynk::{GetKeymapBulkRequest, GetKeymapBulkResponse, SetKeymapBulkRequest};
     let service = service_3x4();
     link_session(&service, async |client| {
-        // A 4-key run from flat index 2 on 4-col rows covers (0,2) (0,3) (1,0)
-        // (1,1) — the row-major order both bulk endpoints must agree on.
+        // Row-major run wraps from (0,3) to (1,0).
         let mut actions: HVec<KeyAction, BULK_KEYMAP_SIZE> = HVec::new();
         for i in 0..4 {
             actions.push(bulk_action(i)).unwrap();
         }
-        // Flat index 2 on service_3x4 (3 rows × 4 cols) is key (0,0,2).
+        // Flat index 2 is key (0,0,2).
         let set = SetKeymapBulkRequest {
             layer: 0,
             start_row: 0,
@@ -501,7 +448,7 @@ fn keymap_bulk_round_trip_wraps_row_boundary() {
         };
         assert_eq!(client.request::<_, ()>(Cmd::SetKeymapBulk, 0x16, &set).await, Ok(()));
 
-        // GET returns a clamped page; the write lands in its first 4 items.
+        // GET clamps to the written 4-item page.
         let got = client
             .request::<_, GetKeymapBulkResponse>(
                 Cmd::GetKeymapBulk,
@@ -520,8 +467,7 @@ fn keymap_bulk_round_trip_wraps_row_boundary() {
             "bulk get reads back the bulk set, in order"
         );
 
-        // The single-key endpoint agrees on where the run wrapped: item 2
-        // crossed the row boundary onto (1,0).
+        // Single-key read confirms row wrap.
         let wrapped = KeyPosition {
             layer: 0,
             row: 1,
@@ -537,16 +483,13 @@ fn keymap_bulk_round_trip_wraps_row_boundary() {
 fn keymap_bulk_round_trip_wraps_layer_boundary() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
     use rmk_types::protocol::rynk::{GetKeymapBulkRequest, GetKeymapBulkResponse, SetKeymapBulkRequest};
-    // 2 layers × 2 rows × 2 cols = 8 keys. Flat index 3 is layer 0's last key
-    // (0,1,1); a 2-key run steps across the layer-0→layer-1 boundary, since the
-    // flat keymap is contiguous across layers.
+    // A 2-key run from flat index 3 crosses the layer boundary.
     let service = service_2_layers();
     link_session(&service, async |client| {
         let mut actions: HVec<KeyAction, BULK_KEYMAP_SIZE> = HVec::new();
         actions.push(bulk_action(0)).unwrap();
         actions.push(bulk_action(1)).unwrap();
-        // Flat index 3 on service_2_layers (2 rows × 2 cols) is key (0,1,1),
-        // layer 0's last key.
+        // Flat index 3 is layer 0's last key.
         let set = SetKeymapBulkRequest {
             layer: 0,
             start_row: 1,
@@ -573,8 +516,7 @@ fn keymap_bulk_round_trip_wraps_layer_boundary() {
             "bulk run reads back across the layer boundary, in order"
         );
 
-        // The single-key endpoint agrees on where the run crossed: item 1
-        // landed on layer 1's first key (1,0,0), item 0 on layer 0's last (0,1,1).
+        // Single-key reads confirm the layer-boundary wrap.
         let first_of_layer1 = KeyPosition {
             layer: 1,
             row: 0,
@@ -605,8 +547,7 @@ fn keymap_bulk_round_trip_wraps_layer_boundary() {
 fn keymap_bulk_max_capacity_round_trip() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
     use rmk_types::protocol::rynk::{GetKeymapBulkRequest, GetKeymapBulkResponse, SetKeymapBulkRequest};
-    // A full BULK_KEYMAP_SIZE run; the 48-key keymap holds it and it spans
-    // several layers (12 keys each).
+    // The 48-key keymap holds a full multi-layer bulk run.
     let service = service_3x4x4();
     link_session(&service, async |client| {
         let mut actions: HVec<KeyAction, BULK_KEYMAP_SIZE> = HVec::new();
@@ -621,7 +562,7 @@ fn keymap_bulk_max_capacity_round_trip() {
         };
         assert_eq!(client.request::<_, ()>(Cmd::SetKeymapBulk, 0x19, &set).await, Ok(()));
 
-        // 48 > cap, so GET at 0 returns a full capped page equal to the write.
+        // GET at 0 returns one full capped page.
         let got = client
             .request::<_, GetKeymapBulkResponse>(
                 Cmd::GetKeymapBulk,
@@ -645,8 +586,7 @@ fn keymap_bulk_clamps_and_rejects() {
     use rmk_types::protocol::rynk::{GetKeymapBulkRequest, GetKeymapBulkResponse, SetKeymapBulkRequest};
     let service = service_3x4();
     link_session(&service, async |client| {
-        // A valid start clamps to the keymap tail: (0,2,2) is flat 10 of 12 keys,
-        // yielding the 2-item short page at offsets 10,11.
+        // Valid tail starts clamp to a short page.
         let got = client
             .request::<_, GetKeymapBulkResponse>(
                 Cmd::GetKeymapBulk,
@@ -661,9 +601,7 @@ fn keymap_bulk_clamps_and_rejects() {
             .expect("Ok envelope");
         assert_eq!(got.actions.len(), 2, "short page is the keymap tail");
 
-        // A GET now takes a position, and a valid position always has at least one
-        // key — so there is no empty page. An out-of-geometry start (layer 1 does
-        // not exist on the 1-layer fixture) is rejected instead.
+        // Out-of-geometry starts reject instead of returning an empty page.
         let r = client
             .request::<_, GetKeymapBulkResponse>(
                 Cmd::GetKeymapBulk,
@@ -677,7 +615,7 @@ fn keymap_bulk_clamps_and_rejects() {
             .await;
         assert_eq!(r, Err(RynkError::Invalid), "out-of-geometry start is rejected");
 
-        // SET is all-or-nothing: an empty run is a host bug.
+        // Empty SET runs are host bugs.
         let set = SetKeymapBulkRequest {
             layer: 0,
             start_row: 0,
@@ -689,8 +627,7 @@ fn keymap_bulk_clamps_and_rejects() {
             Err(RynkError::Invalid)
         );
 
-        // A run past the last key (start (0,2,2) is flat 10; 10 + 3 > 12) is
-        // rejected whole; the in-range prefix stays untouched.
+        // Over-tail SET rejects without touching the in-range prefix.
         let mut actions: HVec<KeyAction, BULK_KEYMAP_SIZE> = HVec::new();
         for i in 0..3 {
             actions.push(bulk_action(i)).unwrap();
@@ -720,8 +657,7 @@ fn keymap_bulk_clamps_and_rejects() {
 fn keymap_bulk_get_caps_page_at_budget() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
     use rmk_types::protocol::rynk::{GetKeymapBulkRequest, GetKeymapBulkResponse};
-    // The 48-key keymap holds more than one full run, so a GET from 0 is capped
-    // by the per-message budget, not by the keymap's span.
+    // GET from 0 is capped by message budget, not keymap span.
     assert!(BULK_KEYMAP_SIZE < 48, "fixture must hold more than one full run");
     let service = service_3x4x4();
     link_session(&service, async |client| {
@@ -745,10 +681,6 @@ fn keymap_bulk_get_caps_page_at_budget() {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Macro  (0x02xx)
-// ─────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn get_set_macro_round_trip() {
     let service = service();
@@ -768,7 +700,7 @@ fn get_set_macro_round_trip() {
             .request::<_, MacroData>(Cmd::GetMacro, 0x21, &get)
             .await
             .expect("Ok envelope");
-        // The read is zero-filled up to MACRO_DATA_SIZE; the prefix is our write.
+        // Reads zero-fill after the written prefix.
         assert_eq!(&got.data[..3], &[0xAA, 0xBB, 0xCC]);
         assert!(
             got.data[3..].iter().all(|&b| b == 0),
@@ -776,10 +708,6 @@ fn get_set_macro_round_trip() {
         );
     });
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// Combo  (0x03xx)
-// ─────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn get_set_combo_round_trip() {
@@ -792,7 +720,7 @@ fn get_set_combo_round_trip() {
             .expect("Ok envelope");
         assert_eq!(empty, ComboConfig::empty());
 
-        // Write a non-empty combo (empty configs are stored as "no combo").
+        // Empty configs are stored as "no combo".
         let combo = ComboConfig::new(
             [KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A)))],
             KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::B))),
@@ -832,7 +760,7 @@ fn combo_bulk_round_trip_with_empty_slots() {
     use rmk_types::protocol::rynk::{GetComboBulkRequest, GetComboBulkResponse, SetComboBulkRequest};
     let service = service();
     link_session(&service, async |client| {
-        // Two distinct combos written at slots 3 and 4.
+        // Slots 3 and 4 are distinct writes.
         let combo = |out| {
             ComboConfig::new(
                 [KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A)))],
@@ -849,8 +777,7 @@ fn combo_bulk_round_trip_with_empty_slots() {
         };
         assert_eq!(client.request::<_, ()>(Cmd::SetComboBulk, 0x37, &set).await, Ok(()));
 
-        // A page starting one slot before the write: the untouched slot reads
-        // back as the empty config, matching the single Get's mapping.
+        // Page includes one untouched slot and one written slot.
         let got = client
             .request::<_, GetComboBulkResponse>(Cmd::GetComboBulk, 0x38, &GetComboBulkRequest { start_index: 2 })
             .await
@@ -860,7 +787,7 @@ fn combo_bulk_round_trip_with_empty_slots() {
         assert_eq!(got.configs[1], configs[0]);
         assert_eq!(got.configs[2], configs[1]);
 
-        // The single-item endpoint sees the bulk write at slot 4.
+        // Single-item read sees the bulk write.
         let single = client.request::<u8, ComboConfig>(Cmd::GetCombo, 0x39, &4u8).await;
         assert_eq!(single, Ok(configs[1].clone()));
     });
@@ -873,7 +800,7 @@ fn combo_bulk_clamps_and_rejects() {
     use rmk_types::protocol::rynk::{GetComboBulkRequest, GetComboBulkResponse, SetComboBulkRequest};
     let service = service();
     link_session(&service, async |client| {
-        // SET is all-or-nothing: an empty run is a host bug.
+        // Empty SET runs are host bugs.
         let set = SetComboBulkRequest {
             start_index: 0,
             configs: HVec::new(),
@@ -883,8 +810,7 @@ fn combo_bulk_clamps_and_rejects() {
             Err(RynkError::Invalid)
         );
 
-        // GET never errors — it clamps: start 7 of 8 slots is a 1-item short
-        // page; start 8 (== slot count) is the empty final page.
+        // GET clamps to short and final-empty pages.
         let got = client
             .request::<_, GetComboBulkResponse>(Cmd::GetComboBulk, 0x3B, &GetComboBulkRequest { start_index: 7 })
             .await
@@ -896,8 +822,7 @@ fn combo_bulk_clamps_and_rejects() {
             .expect("Ok envelope");
         assert!(got.configs.is_empty(), "start at the slot count yields an empty page");
 
-        // A run past the last slot (7 + 2 > 8) is rejected whole; slot 7 stays
-        // untouched.
+        // Over-tail SET rejects without touching slot 7.
         let combo = ComboConfig::new(
             [KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A)))],
             KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::B))),
@@ -923,16 +848,10 @@ fn combo_bulk_clamps_and_rejects() {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Morse  (0x04xx)
-// ─────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn get_set_morse_round_trip() {
     let service = service();
-    // `Morse` has no trivial constructor, so read slot 0 and flip its profile to
-    // a clearly distinct value before writing it back — a no-op Set would still
-    // return the default and fail the readback. (`Morse::eq` compares `profile`.)
+    // Flip an existing Morse profile so the write is distinguishable.
     link_session(&service, async |client| {
         let mut morse = client
             .request::<u8, Morse>(Cmd::GetMorse, 0x40, &0u8)
@@ -959,7 +878,7 @@ fn morse_rejects_out_of_range() {
     link_session(&service, async |client| {
         let r = client.request::<u8, Morse>(Cmd::GetMorse, 0x45, &250u8).await;
         assert_eq!(r, Err(RynkError::Invalid));
-        // SetMorse needs a payload; reuse slot 0's value but target an OOR index.
+        // Reuse slot 0's payload with an OOR target.
         let morse = client
             .request::<u8, Morse>(Cmd::GetMorse, 0x46, &0u8)
             .await
@@ -979,8 +898,7 @@ fn morse_bulk_round_trip() {
     use rmk_types::constants::BULK_SIZE;
     use rmk_types::protocol::rynk::{GetMorseBulkRequest, GetMorseBulkResponse, SetMorseBulkRequest};
     let service = service();
-    // `Morse` has no trivial constructor (see `get_set_morse_round_trip`), so
-    // bulk-read a page, give the first two distinct profiles, and write them back.
+    // Mutate a read page because Morse has no trivial constructor.
     link_session(&service, async |client| {
         let page = client
             .request::<_, GetMorseBulkResponse>(Cmd::GetMorseBulk, 0x48, &GetMorseBulkRequest { start_index: 1 })
@@ -1009,7 +927,7 @@ fn morse_bulk_round_trip() {
             "bulk get reads back the bulk set, in order"
         );
 
-        // The single-item endpoint sees the second bulk write at slot 2.
+        // Single-item read sees the second bulk write.
         let single = client.request::<u8, Morse>(Cmd::GetMorse, 0x4B, &2u8).await;
         assert_eq!(single, Ok(configs[1].clone()));
     });
@@ -1022,7 +940,7 @@ fn morse_bulk_clamps_and_rejects() {
     use rmk_types::protocol::rynk::{GetMorseBulkRequest, GetMorseBulkResponse, SetMorseBulkRequest};
     let service = service();
     link_session(&service, async |client| {
-        // SET is all-or-nothing: an empty run is a host bug.
+        // Empty SET runs are host bugs.
         let set = SetMorseBulkRequest {
             start_index: 0,
             configs: HVec::new(),
@@ -1032,8 +950,7 @@ fn morse_bulk_clamps_and_rejects() {
             Err(RynkError::Invalid)
         );
 
-        // GET never errors — it clamps: start 7 of 8 slots is a 1-item short
-        // page; start 8 (== slot count) is the empty final page.
+        // GET clamps to short and final-empty pages.
         let got = client
             .request::<_, GetMorseBulkResponse>(Cmd::GetMorseBulk, 0x4D, &GetMorseBulkRequest { start_index: 7 })
             .await
@@ -1045,8 +962,7 @@ fn morse_bulk_clamps_and_rejects() {
             .expect("Ok envelope");
         assert!(got.configs.is_empty(), "start at the slot count yields an empty page");
 
-        // Snapshot slot 7, then attempt a run past the last slot (7 + 2 > 8)
-        // carrying a distinct profile: rejected whole, so slot 7 stays untouched.
+        // Over-tail SET rejects without touching slot 7.
         let before = client
             .request::<u8, Morse>(Cmd::GetMorse, 0x4F, &7u8)
             .await
@@ -1069,16 +985,10 @@ fn morse_bulk_clamps_and_rejects() {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Fork  (0x05xx)
-// ─────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn get_set_fork_round_trip() {
     let service = service();
-    // Forks are filled to capacity by KeyMap::new, so slot 0 exists. Read the
-    // default, flip a field so the value is provably distinct, then write it —
-    // a no-op Set would still return the default and fail the readback.
+    // Flip a default fork field so the write is distinguishable.
     link_session(&service, async |client| {
         let mut fork = client
             .request::<u8, Fork>(Cmd::GetFork, 0x50, &0u8)
@@ -1115,16 +1025,10 @@ fn fork_rejects_out_of_range() {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Behavior config  (0x06xx)
-// ─────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn get_set_behavior_config_round_trip() {
     let service = service();
-    // All four values are non-default (defaults are 50ms / 1000ms / 20 / 20),
-    // so a dropped Set is observable. The harness drains FLASH_CHANNEL, so the
-    // four persistence writes never block regardless of channel capacity.
+    // Non-default values make a dropped Set observable.
     link_session(&service, async |client| {
         let cfg = WireBehaviorConfig {
             combo_timeout_ms: 123,
@@ -1142,10 +1046,6 @@ fn get_set_behavior_config_round_trip() {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Connection  (0x07xx)
-// ─────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn get_connection_type() {
     let service = service();
@@ -1153,7 +1053,7 @@ fn get_connection_type() {
         let t = client
             .request::<(), ConnectionType>(Cmd::GetConnectionType, 0x70, &())
             .await;
-        // Default global connection status prefers USB.
+        // Default global status prefers USB.
         assert_eq!(t, Ok(ConnectionType::Usb));
     });
 }
@@ -1166,7 +1066,7 @@ fn get_connection_status_matches_connection_type() {
             .request::<(), ConnectionStatus>(Cmd::GetConnectionStatus, 0x74, &())
             .await
             .expect("Ok envelope decodes into ConnectionStatus");
-        // The full snapshot and the derived single-transport view agree.
+        // Full snapshot and derived view agree.
         let t = client
             .request::<(), ConnectionType>(Cmd::GetConnectionType, 0x75, &())
             .await;
@@ -1189,7 +1089,7 @@ fn get_ble_status() {
 fn switch_ble_profile() {
     let service = service();
     link_session(&service, async |client| {
-        // Valid slot 0 enqueues a profile switch (BLE_PROFILE_CHANNEL cap 1).
+        // Slot 0 enqueues a profile switch.
         let r = client.request::<u8, ()>(Cmd::SwitchBleProfile, 0x72, &0u8).await;
         assert_eq!(r, Ok(()));
     });
@@ -1215,10 +1115,6 @@ fn clear_ble_profile() {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Status  (0x08xx)
-// ─────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn get_current_layer() {
     let service = service();
@@ -1236,8 +1132,7 @@ fn get_matrix_state() {
             .request::<(), MatrixState>(Cmd::GetMatrixState, 0x80, &())
             .await
             .expect("Ok envelope");
-        // The insecure harness is unlocked, so the gate passes and the real
-        // bitmap is returned — all-zero here since the test presses no keys.
+        // Insecure harness allows the real all-zero matrix bitmap.
         assert!(state.pressed_bitmap.iter().all(|&b| b == 0));
     });
 }
@@ -1260,13 +1155,13 @@ fn get_peripheral_status() {
     let service = service();
     link_session(&service, async |client| {
         use rmk_types::protocol::rynk::PeripheralStatus;
-        // A valid slot reads back the default snapshot: disconnected, no battery.
+        // Valid slot reads back the default snapshot.
         let status = client
             .request::<u8, PeripheralStatus>(Cmd::GetPeripheralStatus, 0x82, &0u8)
             .await
             .expect("Ok envelope");
         assert!(!status.connected);
-        // An out-of-range peripheral id is rejected.
+        // OOR peripheral id is rejected.
         let r = client
             .request::<u8, PeripheralStatus>(Cmd::GetPeripheralStatus, 0x83, &250u8)
             .await;
@@ -1303,20 +1198,13 @@ fn get_led_indicator_returns_snapshot() {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Protocol / framing
-// ─────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn drops_topic_cmd_from_host() {
     let service = service();
     link_session(&service, async |client| {
-        // Topic CMDs are server→host push only. The session drops such
-        // frames without replying — an error reply would echo a high-bit
-        // CMD that the host's reassembly queues as a phantom topic.
+        // Topic CMD requests must not create phantom topic replies.
         client.send(Cmd::LayerChange, 0x13, &0u8).await;
-        // The next request succeeds with no stray reply in between
-        // (`recv_response` panics on any non-topic frame with another seq).
+        // Next request proves there is no stray reply.
         let version = client.request::<(), ProtocolVersion>(Cmd::GetVersion, 0x14, &()).await;
         assert_eq!(version, Ok(ProtocolVersion::CURRENT), "session in sync after drop");
     });
@@ -1325,7 +1213,7 @@ fn drops_topic_cmd_from_host() {
 #[cfg(feature = "_ble")]
 #[test]
 fn drops_battery_topic_cmd_from_host() {
-    // `BatteryStatusChange` is the one `_ble`-gated topic; cover it explicitly.
+    // Cover the one `_ble`-gated topic explicitly.
     let service = service();
     link_session(&service, async |client| {
         client
@@ -1339,16 +1227,11 @@ fn drops_battery_topic_cmd_from_host() {
 #[test]
 fn unknown_cmd_over_the_wire_gets_unknown_cmd_reply() {
     let service = service();
-    // Cmd tags this build does not handle, one per range. 0x00FF (an
-    // unassigned System-range slot, standing in for a feature-gated-out or
-    // newer peer's command): dispatch answers UnknownCmd, not Malformed,
-    // because the frame itself was sound. 0xFFFF (topic range): dropped without
-    // a reply, like every topic-range request. Neither desyncs the session.
+    // Unknown request tags reply UnknownCmd; unknown topic tags are dropped.
     link_session(&service, async |client| {
         let mut header = [0u8; RYNK_HEADER_SIZE];
         header[0..2].copy_from_slice(&0x00FFu16.to_le_bytes());
         header[2] = 0x21; // seq — echoed on the error reply
-        // payload_len stays 0
         client.send_raw(&header).await;
         let reply = client.recv_response(0x21).await;
         assert_eq!(
@@ -1363,7 +1246,7 @@ fn unknown_cmd_over_the_wire_gets_unknown_cmd_reply() {
         header[2] = 0x22;
         client.send_raw(&header).await;
 
-        // The session is still in sync afterwards, with no stray reply.
+        // Session stays in sync afterwards.
         let version = client.request::<(), ProtocolVersion>(Cmd::GetVersion, 0x23, &()).await;
         assert_eq!(version, Ok(ProtocolVersion::CURRENT));
     });
@@ -1371,13 +1254,10 @@ fn unknown_cmd_over_the_wire_gets_unknown_cmd_reply() {
 
 #[test]
 fn lock_endpoints_dispatch() {
-    // The loopback harness runs `insecure`, so the device is always unlocked and
-    // the three lock arms are reachable over the wire. The gate and the
-    // physical-unlock ceremony are covered by the `host::rynk` / `host::lock`
-    // unit tests, which can drive the matrix and the mock clock.
+    // `insecure` keeps lock endpoints reachable over the wire.
     let service = service();
     link_session(&service, async |client| {
-        // GetLockStatus: insecure ⇒ never locked, no challenge configured.
+        // Insecure means unlocked with no challenge.
         let status = client
             .request::<(), LockStatus>(Cmd::GetLockStatus, 0x01, &())
             .await
@@ -1385,7 +1265,7 @@ fn lock_endpoints_dispatch() {
         assert!(!status.locked);
         assert!(status.key_positions.is_empty());
 
-        // A wire `Lock` is a no-op on an insecure device (is_unlocked stays true).
+        // Lock is a no-op on insecure config.
         assert_eq!(client.request::<(), ()>(Cmd::Lock, 0x02, &()).await, Ok(()));
         let status = client
             .request::<(), LockStatus>(Cmd::GetLockStatus, 0x03, &())
@@ -1393,7 +1273,7 @@ fn lock_endpoints_dispatch() {
             .expect("lock status");
         assert!(!status.locked, "insecure device ignores wire Lock");
 
-        // UnlockPoll with no keys configured warns and refuses — nothing to hold.
+        // No configured keys means nothing to hold.
         let polled = client
             .request::<(), LockStatus>(Cmd::UnlockPoll, 0x04, &())
             .await
@@ -1406,7 +1286,7 @@ fn lock_endpoints_dispatch() {
 #[test]
 fn pipelines_multiple_requests_in_one_session() {
     let service = service();
-    // Three distinct commands on one session, each correlated by its own seq.
+    // One session, three distinct seq correlations.
     link_session(&service, async |client| {
         let version = client.request::<(), ProtocolVersion>(Cmd::GetVersion, 0x31, &()).await;
         assert_eq!(version, Ok(ProtocolVersion::CURRENT));
@@ -1425,9 +1305,7 @@ fn pipelines_multiple_requests_in_one_session() {
 #[test]
 fn oversized_frame_is_rejected_then_stream_resyncs() {
     let service = service();
-    // A header that declares more payload than the device buffer can hold. The
-    // session must reply Malformed, drain the declared bytes off the wire, and
-    // resync so a well-formed request right after still gets a correct reply.
+    // Oversized payload declarations must drain and resync.
     let recovered = link_session(&service, async |client| {
         let payload_n = (RYNK_BUFFER_SIZE - RYNK_HEADER_SIZE + 1) as u16;
         let mut bad = [0u8; RYNK_HEADER_SIZE];
@@ -1435,7 +1313,7 @@ fn oversized_frame_is_rejected_then_stream_resyncs() {
         bad[2] = 0x55; // seq — echoed on the error reply
         bad[3..5].copy_from_slice(&payload_n.to_le_bytes());
         client.send_raw(&bad).await;
-        // The declared-but-bogus payload the session drains to resync.
+        // Bogus payload to drain.
         client.send_raw(&vec![0xAB; payload_n as usize]).await;
 
         let err = client.recv_response(0x55).await;
@@ -1445,19 +1323,11 @@ fn oversized_frame_is_rejected_then_stream_resyncs() {
             "oversized frame → Malformed"
         );
 
-        // A clean request after the resync still round-trips.
+        // Clean request after resync still round-trips.
         client.request::<(), ProtocolVersion>(Cmd::GetVersion, 0x56, &()).await
     });
     assert_eq!(recovered, Ok(ProtocolVersion::CURRENT));
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// Topics  (0x80xx, server → host push)
-//
-// `run_session` subscribes to every topic before the script runs, so an event
-// published from the script is forwarded as a topic frame on the next session
-// turn — exercising the topic-emit arm of the session loop and the wire encoder.
-// ─────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn topic_layer_change() {
@@ -1511,8 +1381,7 @@ fn topic_led_indicator() {
 fn topic_connection_change() {
     let service = service();
     let v = link_session(&service, async |client| {
-        // Publish a non-default status (default prefers USB) so the readback
-        // proves the published value crossed the wire, not a stale snapshot.
+        // Non-default status proves the published value crossed the wire.
         let status = ConnectionStatus {
             preferred: ConnectionType::Ble,
             ..ConnectionStatus::default()

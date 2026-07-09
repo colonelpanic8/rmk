@@ -118,9 +118,7 @@ impl<P: PacketPool> Write for RynkBleTx<'_, '_, '_, P> {
         }
         match RynkBleSource::active() {
             RynkBleSource::Hid => {
-                // Fragment into fixed 32-byte reports (final one zero-padded); the
-                // host reassembles via the frame header's LEN. N = 32 fits one
-                // notification at MTU ≥ 35.
+                // Fragment into fixed 32-byte reports; LEN strips final padding.
                 for chunk in buf.chunks(RYNK_HID_REPORT_SIZE) {
                     let mut report = [0u8; RYNK_HID_REPORT_SIZE];
                     report[..chunk.len()].copy_from_slice(chunk);

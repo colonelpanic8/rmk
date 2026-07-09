@@ -1,5 +1,5 @@
 [keyboard]
-# Example identity — replace name, vendor_id and product_id with your keyboard's own
+# Replace with your keyboard identity.
 name = "RMK Keyboard"
 product_name = "RMK Keyboard"
 vendor_id = 0x4c4b
@@ -8,16 +8,15 @@ manufacturer = "haobo"
 chip = "rp2040"
 
 [host]
-# Use RMK's native Rynk protocol instead of Vial. The two are mutually
-# exclusive (their rmk Cargo features conflict), so Vial is turned off here.
+# Use Rynk instead of Vial; their rmk features conflict.
 vial_enabled = false
 rynk_enabled = true
 
 [matrix]
-# Row and col pins are mandatory
+# Matrix pins are required.
 row_pins = ["PIN_6", "PIN_7", "PIN_8", "PIN_9"]
 col_pins = ["PIN_19", "PIN_20", "PIN_21"]
-# RMK uses col2row as the default matrix diode direction, if you want to use a row2col matrix, add `row2col = true`
+# Default diode direction is col2row; set `row2col = true` if needed.
 # row2col = true
 
 [layout]
@@ -51,7 +50,7 @@ _  _      _
 """
 
 [storage]
-# Storage feature is enabled by default
+# Storage is enabled by default.
 # enabled = false
 
 [rmk]

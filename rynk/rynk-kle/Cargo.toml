@@ -21,9 +21,7 @@ serde_json = "1"
 # Upstream KLE deserializer — does the cursor walk (positions, sizes, rotation,
 # legend normalization) so we don't hand-roll it.
 kle-serial = "0.3"
-# Build the layout blob (forward) exactly as the firmware does; `rynk` decodes
-# it through the same host path used by `GetLayout`. `toml` extracts the
-# `[layout]` table from a keyboard.toml.
+# Build and decode layout blobs through the firmware/host path.
 rmk-config = { path = "../../rmk-config" }
 rynk = { path = ".." }
 toml = "1.0"

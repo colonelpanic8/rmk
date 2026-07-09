@@ -30,8 +30,6 @@ impl<'a> KeyboardContext<'a> {
         }
     }
 
-    // ── Keymap operations ────────────────────────────────────────────────
-
     pub fn get_action(&self, layer: u8, row: u8, col: u8) -> KeyAction {
         self.keymap
             .get_action_at(KeyboardEventPos::key_pos(col, row), layer as usize)
@@ -100,8 +98,6 @@ impl<'a> KeyboardContext<'a> {
         let _ = (rows, cols);
     }
 
-    // ── Encoders ─────────────────────────────────────────────────────────
-
     pub fn get_encoder(&self, layer: u8, idx: u8) -> Option<EncoderAction> {
         self.keymap.get_encoder_action(layer as usize, idx as usize)
     }
@@ -159,8 +155,6 @@ impl<'a> KeyboardContext<'a> {
         let _ = written;
     }
 
-    // ── Macros ───────────────────────────────────────────────────────────
-
     pub fn read_macro_buffer(&self, offset: usize, target: &mut [u8]) {
         self.keymap.read_macro_buffer(offset, target);
     }
@@ -179,8 +173,6 @@ impl<'a> KeyboardContext<'a> {
     pub fn reset_macro_buffer(&self) {
         self.keymap.reset_macro_buffer();
     }
-
-    // ── Combos ───────────────────────────────────────────────────────────
 
     pub fn with_combos<R>(&self, f: impl FnOnce(&[Option<Combo>]) -> R) -> R {
         self.keymap.with_combos(f)
@@ -211,8 +203,6 @@ impl<'a> KeyboardContext<'a> {
         true
     }
 
-    // ── Morses ─────────────────────────────────────────
-
     pub fn get_morse(&self, idx: u8) -> Option<Morse> {
         self.keymap.get_morse(idx as usize)
     }
@@ -239,8 +229,6 @@ impl<'a> KeyboardContext<'a> {
         }
     }
 
-    // ── Behavior settings (read) ─────────────────────────────────────────
-
     pub fn combo_timeout(&self) -> Duration {
         self.keymap.combo_timeout()
     }
@@ -264,8 +252,6 @@ impl<'a> KeyboardContext<'a> {
     pub fn morse_prior_idle_time(&self) -> Duration {
         self.keymap.morse_prior_idle_time()
     }
-
-    // ── Behavior settings (write+persist) ────────────────────────────────
 
     pub async fn set_combo_timeout(&self, ms: u16) {
         self.keymap.set_combo_timeout(Duration::from_millis(ms as u64));
@@ -305,8 +291,6 @@ impl<'a> KeyboardContext<'a> {
         FLASH_CHANNEL.send(FlashOperationMessage::PriorIdleTime(ms)).await;
     }
 
-    // ── Layout / reset ───────────────────────────────────────────────────
-
     pub async fn set_layout_options(&self, opts: u32) {
         #[cfg(feature = "storage")]
         FLASH_CHANNEL.send(FlashOperationMessage::LayoutOptions(opts)).await;
@@ -318,8 +302,6 @@ impl<'a> KeyboardContext<'a> {
         #[cfg(feature = "storage")]
         FLASH_CHANNEL.send(FlashOperationMessage::Reset).await;
     }
-
-    // ── Live state ───────────────────────────────────────────────────────
 
     pub fn led_indicator(&self) -> LedIndicator {
         crate::keyboard::current_led_indicator()
@@ -348,15 +330,11 @@ impl<'a> KeyboardContext<'a> {
         FLASH_CHANNEL.send(FlashOperationMessage::DefaultLayer(layer)).await;
     }
 
-    // ── Connection ───────────────────────────────────────────────────────
-
     /// Tiebreaker connection currently chosen as preferred — independent
     /// of which transport is actively routable.
     pub fn preferred_connection(&self) -> ConnectionType {
         crate::state::current_connection_status().preferred
     }
-
-    // ── Forks ────────────────────────────────────────────────────────────
 
     pub fn get_fork(&self, idx: u8) -> Option<Fork> {
         self.keymap.with_forks(|forks| forks.get(idx as usize).copied())
@@ -379,8 +357,6 @@ impl<'a> KeyboardContext<'a> {
         }
         valid
     }
-
-    // ── Matrix state (host_lock) ─────────────────────────────────────
 
     #[cfg(feature = "host_lock")]
     pub fn read_matrix_state(&self, target: &mut [u8]) {

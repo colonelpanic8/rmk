@@ -176,11 +176,7 @@ pub fn link_session<T>(service: &RynkService<'_>, script: impl AsyncFnOnce(&mut 
         buf: [0u8; RYNK_BUFFER_SIZE],
     };
     test_block_on(async {
-        // Drive the session alongside a flash-channel drainer: a handler's
-        // persistence writes (`FLASH_CHANNEL.send().await` under `storage`)
-        // would otherwise block forever once the queue fills, since no storage
-        // task runs here. Neither future resolves on its own; the session
-        // resolving (EOF/error) means a framing bug.
+        // Drain test flash writes so storage handlers cannot block the session.
         let device = select(
             service.run_session(&mut dev_rx, &mut dev_tx),
             rmk::channel::drain_flash_channel_for_test(),

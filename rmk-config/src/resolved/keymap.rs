@@ -20,9 +20,7 @@ impl crate::KeyboardTomlConfig {
         // Encoders may be spread across split halves; only the board-wide total is used downstream.
         let num_encoder: usize = self.get_board_config()?.get_num_encoder().iter().sum();
 
-        // Encoder count is a board-wide constant, so a layer wires every encoder or none
-        // (matching the [layout].map all-or-nothing rule). A partial list would silently
-        // leave the unlisted encoders dead on that layer; too many would be truncated.
+        // Encoder maps are all-or-none; partial lists would leave encoders dead.
         for (i, encoders) in keymap_config.encoder_map.iter().enumerate() {
             if !encoders.is_empty() && encoders.len() != num_encoder {
                 return Err(format!(

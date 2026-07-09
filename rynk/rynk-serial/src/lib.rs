@@ -122,7 +122,7 @@ impl RynkDevice for SerialDevice {
     async fn open(self) -> Result<SerialTransport, RynkHostError> {
         let stream = tokio_serial::new(&self.path, CDC_BAUD_RATE)
             .open_native_async()
-            .map_err(|e| RynkHostError::Io(format!("open {}: {}", &self.path, e)))?;
+            .map_err(|e| RynkHostError::Io(format!("open {}: {}", self.path, e)))?;
         // Best-effort cleanup of stale bytes from an old session.
         let _ = stream.clear(ClearBuffer::Input);
         Ok(SerialTransport {
@@ -131,9 +131,7 @@ impl RynkDevice for SerialDevice {
     }
 }
 
-// PTY-backed tests: `SerialStream::pair()` is a real serial byte stream with no
-// hardware, so transport, timeout, and probe all run against a scripted peer.
-// Unix only, like the pair.
+// PTY-backed tests run the serial transport without hardware.
 #[cfg(all(test, unix))]
 mod tests {
     use std::os::fd::AsRawFd;
@@ -258,18 +256,14 @@ mod tests {
         let (peer, ours) = pty_pair();
         let device = scripted_firmware(peer, ProtocolVersion::CURRENT);
 
-        // The serial transport carries the GetVersion+GetCapabilities handshake;
-        // connect succeeding proves the full round trip. The negotiated values are
-        // asserted against the real firmware in the core driver's loopback test.
+        // Success proves the serial handshake round trip.
         Client::connect(transport(ours)).await.unwrap();
         device.await.unwrap();
     }
 
     #[tokio::test]
     async fn connect_times_out_on_silent_peer() {
-        // The peer end stays open but never answers, so `Client::connect` would
-        // hang forever; consumers bound it with their own timeout (the lifecycle's
-        // `connect` is runtime-free and carries none). Runs ~1s.
+        // Client::connect is timeout-free; callers bound silent peers.
         let (_peer, ours) = pty_pair();
         let timed_out = tokio::time::timeout(Duration::from_secs(1), Client::connect(transport(ours))).await;
         assert!(timed_out.is_err(), "connect must not resolve against a silent peer");

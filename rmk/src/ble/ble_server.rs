@@ -58,11 +58,7 @@ pub(crate) struct Server {
 #[cfg(feature = "rynk")]
 #[gatt_service(uuid = RYNK_SERVICE_UUID)]
 pub(crate) struct RynkService {
-    // `permissions(encrypted)` enforces the encrypted-link requirement inside
-    // the ATT server, so it survives any refactor of the app event loop. The
-    // app-level drop-before-pipe guard in `gatt_events_task` stays as the
-    // data-path filter (write-without-response carries data regardless of the
-    // ATT reply).
+    // ATT enforces encryption; the event loop still filters the data path.
     #[descriptor(uuid = "2908", read, value = [0u8, 1u8])]
     #[characteristic(uuid = RYNK_INPUT_CHAR_UUID, read, notify, permissions(encrypted))]
     pub(crate) input_data: heapless::Vec<u8, RYNK_BLE_CHUNK_SIZE>,

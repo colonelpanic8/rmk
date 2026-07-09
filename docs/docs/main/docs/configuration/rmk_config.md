@@ -38,7 +38,7 @@ ble_profiles_num = 3
 split_central_sleep_timeout_seconds = 0
 # Maximum macro data bytes in one Rynk macro request or response
 protocol_macro_chunk_size = 64
-# Optional Rynk RX/TX buffer size in bytes.
+# Rynk RX/TX buffer size in bytes.
 # rynk_buffer_size = 512
 ```
 

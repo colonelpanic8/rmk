@@ -80,10 +80,7 @@ fn generate_constants(bc: &BuildConstants) -> String {
         bc.max_patterns_per_key
     ));
 
-    // Message Vec-capacity constants: how many elements fit in one request/response.
-    // Firmware sizes them per-config from keyboard.toml; the host uses fixed protocol
-    // ceilings so it can decode responses from any firmware. Bulk transfer counts
-    // (`BULK_SIZE` / `BULK_KEYMAP_SIZE`) derive from the buffer instead — see below.
+    // Host uses protocol ceilings; firmware uses keyboard.toml/default capacities.
     let is_host = env::var("CARGO_FEATURE_HOST").is_ok();
     let is_bulk = env::var("CARGO_FEATURE_BULK").is_ok();
 
@@ -131,9 +128,7 @@ fn generate_constants(bc: &BuildConstants) -> String {
         }
     }
 
-    // Bulk element counts, gated on `bulk` and reported to the host via
-    // `GetCapabilities`. The `>= 1` asserts reject a `rynk_buffer_size` too small
-    // to hold a single element.
+    // Bulk counts derive from the buffer and must hold at least one element.
     if is_bulk {
         lines.push(
             "pub const BULK_SIZE: usize = \
@@ -149,29 +144,9 @@ fn generate_constants(bc: &BuildConstants) -> String {
         lines.push("const _: () = assert!(BULK_KEYMAP_SIZE >= 1, \"rynk_buffer_size is too small to hold one key in a bulk keymap message; increase it\");".to_string());
     }
 
-    // Rynk RX/TX buffer size, emitted only under `rynk`. A bulk build defaults to
-    // `RYNK_DEFAULT_BUFFER_SIZE` (bulk counts scale with it; the `RYNK_MIN_BUFFER_SIZE`
-    // floor would force extra round-trips); every other build uses the floor.
+    // Bulk defaults higher because its counts scale with the buffer.
     if env::var("CARGO_FEATURE_RYNK").is_ok() {
-        match bc.rynk_buffer_size {
-            Some(n) => {
-                lines.push(format!("pub const RYNK_BUFFER_SIZE: usize = {n};"));
-            }
-            None if is_bulk => {
-                lines.push(
-                    "pub const RYNK_BUFFER_SIZE: usize = \
-                     crate::protocol::rynk::RYNK_DEFAULT_BUFFER_SIZE;"
-                        .to_string(),
-                );
-            }
-            None => {
-                lines.push(
-                    "pub const RYNK_BUFFER_SIZE: usize = \
-                     crate::protocol::rynk::RYNK_MIN_BUFFER_SIZE;"
-                        .to_string(),
-                );
-            }
-        }
+        lines.push(format!("pub const RYNK_BUFFER_SIZE: usize = {};", bc.rynk_buffer_size));
     }
 
     // Event channels

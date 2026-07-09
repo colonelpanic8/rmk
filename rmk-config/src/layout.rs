@@ -1,17 +1,10 @@
 //! Build-time physical key layout.
 //!
-//! Walk a cursor over the `[layout].map` tokens (keys, encoders, gaps, `[y=]`
-//! steps, `[r=deg@(x,y)]` rotation regions), apply each `[[layout.variant]]`
-//! overlay, and produce a compressed,
-//! opaque blob the firmware streams verbatim over `GetLayout` (it never decodes
-//! it). The host inflates + postcard-decodes the blob into `LayoutInfo`.
+//! Walk `[layout].map`, apply variants, and build the compressed `GetLayout`
+//! blob. Firmware streams the blob; hosts inflate and decode it.
 //!
-//! The `#[derive(Serialize)]` mirror types here MUST match the host-decode types
-//! in the `rynk` host crate (`rynk::layout::*`) field-for-field. The match is by
-//! hand (no shared crate: these need `alloc`, but the only common dependency
-//! `rmk-types` is deliberately alloc-free), guarded by the cross-crate round-trip
-//! tests in `rynk/rynk-kle/src/to_layout.rs` (which decode this builder's blob
-//! back through `rynk::LayoutInfo::from_compressed_blob`).
+//! The serialized mirror types must match `rynk::layout::*`; cross-crate
+//! round-trip tests guard that hand-maintained contract.
 
 use std::collections::{HashMap, HashSet};
 
@@ -20,8 +13,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::LayoutTomlConfig;
 use crate::keymap::{ConfigParser, Rule};
-
-// ── Wire mirror types (must match the host decoder in `rynk::layout::*`) ─────
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 struct Rect {
@@ -40,8 +31,7 @@ struct Key {
     rect2: Option<Rect>,
 }
 
-// A fixed 1u knob: it renders at a center only — never resized, rotated, or
-// L-shaped, so it carries neither a size, an `r`, nor a `rect2`.
+// Encoders are always 1u; center is enough.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Encoder {
     id: u8,
@@ -61,8 +51,6 @@ struct LayoutInfo {
     default_variant: u8,
     variants: Vec<Variant>,
 }
-
-// ── Shapes ───────────────────────────────────────────────────────────────────
 
 /// A resolved shape: every default applied. `rect2` is the L-key's second
 /// rectangle stored as center-relative offsets — its `x`/`y` are offsets from
@@ -130,17 +118,15 @@ pub const STOCK_WIDTHS: &[(&str, f32)] = &[
 fn stock_shapes() -> HashMap<String, Shape> {
     let d = Shape::default();
     let mut m = HashMap::new();
-    // Width family `@Nu` — N units wide, 1u tall.
+    // Width family: `@Nu` is N units wide, 1u tall.
     for &(name, w) in STOCK_WIDTHS {
         m.insert(name.to_string(), Shape { w, ..d });
     }
-    // Tall: 1u wide, 2u tall (numpad + / Enter).
+    // Tall numpad Plus/Enter.
     m.insert("2u_tall".to_string(), Shape { h: 2.0, ..d });
-    // Stepped Caps: a single 1.75u rect (the step is a 3-D detail).
+    // Stepped Caps keeps a single 1.75u footprint.
     m.insert("stepped_caps".to_string(), Shape { w: 1.75, ..d });
-    // ISO Enter: a 1.25×2 bar + a 1.5×1 top overhang (true L, two rects). rect2
-    // offsets are center-to-center (NOT KLE's top-left x2/y2): the overhang sits on
-    // the bar's upper row with the right edges flush.
+    // ISO Enter uses center-relative rect2 offsets, not KLE top-left offsets.
     m.insert(
         "iso_enter".to_string(),
         Shape {
@@ -156,7 +142,7 @@ fn stock_shapes() -> HashMap<String, Shape> {
             ..d
         },
     );
-    // Big-ass Enter: 2.25×1 bottom + 1.5×1 top one row up, right-aligned.
+    // Big-ass Enter: bottom bar plus right-aligned upper cap.
     m.insert(
         "bae".to_string(),
         Shape {
@@ -172,8 +158,6 @@ fn stock_shapes() -> HashMap<String, Shape> {
     );
     m
 }
-
-// ── Map token stream ─────────────────────────────────────────────────────────
 
 /// One token of the `[layout].map` grammar. The single shared representation:
 /// keymap resolution takes the `Key` write-order + `hand`, the render walk
@@ -309,8 +293,6 @@ pub(crate) fn parse_map(map: &str, rows: u8, cols: u8) -> Result<Vec<MapToken>, 
     Ok(tokens)
 }
 
-// ── The cursor walk ──────────────────────────────────────────────────────────
-
 /// Cursor state. A row's baseline `y` is the TOP of the row; a key stores its
 /// center. The advance to the next row is *lazy*: a newline only arms a break
 /// (so a lone `[y=n]` line doesn't itself consume a row), and the next key /
@@ -367,8 +349,7 @@ fn walk(
     let mut w = Walker::new();
     let mut keys = Vec::new();
     let mut encoders = Vec::new();
-    // The active `[r=deg@(px,py)]` region. The cursor walk itself stays flat;
-    // only emitted centers are swung about the pivot (clockwise, y-down frame).
+    // Active rotation region; cursor coordinates stay flat.
     let mut rot: Option<(f32, f32, f32)> = None;
     let swing = |x: f32, y: f32, rot: &Option<(f32, f32, f32)>| -> (f32, f32) {
         match rot {
@@ -388,9 +369,7 @@ fn walk(
                 }
             }
             MapToken::VStep(n) => {
-                // `[y=n]` adjusts the gap above the NEXT row break. A marker with no
-                // row to attach to (e.g. before the first key) has nothing to adjust,
-                // so drop it rather than leak it into a later break.
+                // `[y=n]` affects only the next real row break.
                 if w.row_has_content {
                     w.pending_vstep += n;
                 }
@@ -401,16 +380,14 @@ fn walk(
             }
             MapToken::Key { row, col, shape, .. } => {
                 w.advance_if_pending();
-                // Hidden: removed from the walk — advances nothing, so following keys reflow.
+                // Hidden keys do not advance the cursor.
                 if hidden.contains(&(*row, *col)) {
                     continue;
                 }
                 let name = overrides.get(&(*row, *col)).map(String::as_str).or(shape.as_deref());
                 let s = resolve_shape(name, shapes)?;
                 let (cx, cy) = swing(w.cursor_x + s.w / 2.0 + s.x, w.baseline_y + s.h / 2.0 + s.y, &rot);
-                // rect2 offsets stay in the key's own frame: the renderer tilts the
-                // whole key (rect2 included) by `r` about the primary center, and
-                // 2-D rotations compose additively, so region + shape angles just add.
+                // rect2 stays in the key frame; region and shape angles add.
                 let rect2 = s.rect2.map(|r2| Rect {
                     x: cx + r2.x,
                     y: cy + r2.y,
@@ -434,15 +411,14 @@ fn walk(
             }
             MapToken::Encoder { id } => {
                 w.advance_if_pending();
-                // A fixed 1u knob: centered in a 1u cell, advancing one unit.
+                // Encoders are fixed 1u knobs.
                 let (x, y) = swing(w.cursor_x + 0.5, w.baseline_y + 0.5, &rot);
                 encoders.push(Encoder { id: *id, x, y });
                 w.cursor_x += 1.0;
                 w.row_has_content = true;
             }
             MapToken::Rot { deg, px, py } => {
-                // Pure overlay state — no cursor interaction, so a marker on its
-                // own line consumes no row (mirroring `[y=n]`).
+                // Rotation markers consume no row by themselves.
                 rot = (*deg != 0.0).then_some((*deg, *px, *py));
             }
         }
@@ -497,8 +473,7 @@ fn build_layout_info(
     };
     let tokens = parse_map(map, layout.rows, layout.cols)?;
 
-    // Real key coordinates (already bounds-checked + de-duped by `parse_map`);
-    // variant overlays are validated against this set below.
+    // Variant overlays must target real map keys.
     let key_coords: HashSet<(u8, u8)> = tokens
         .iter()
         .filter_map(|tok| match tok {
@@ -530,8 +505,7 @@ fn build_layout_info(
             u8::MAX as usize + 1
         ));
     }
-    // A variant `shapes`/`hidden` target that names no real key would be a
-    // silent no-op — reject it, mirroring the unknown-shape error.
+    // Reject overlay targets that would otherwise be silent no-ops.
     for v in variants_toml {
         let targets = v
             .shapes
@@ -550,9 +524,7 @@ fn build_layout_info(
         }
     }
 
-    // Each variant is a complete layout — its own keys AND encoders. A hidden key
-    // before an encoder reflows the keys after it, the encoder included. With no
-    // variants, one "default" variant carries the whole layout.
+    // Each variant is complete; hidden keys reflow later keys and encoders.
     let mut walked: Vec<(String, Vec<Key>, Vec<Encoder>)> = Vec::new();
     if variants_toml.is_empty() {
         let (keys, encoders) = walk(&tokens, &shapes, &HashMap::new(), &HashSet::new())?;
@@ -566,16 +538,14 @@ fn build_layout_info(
         }
     }
 
-    // Resolve by name to a 0-based index; an absent or unknown name falls back to variant 0.
+    // Unknown default variant names fall back to variant 0.
     let default_variant = layout
         .default_variant
         .as_ref()
         .and_then(|name| walked.iter().position(|(n, ..)| n == name))
         .unwrap_or(0) as u8;
 
-    // Encoder ids/count are variant-invariant (overlays never touch encoders, only
-    // their positions reflow), so validate one variant's list: ids unique + dense
-    // (0..N), and if any encoder positions are given they must cover every board encoder.
+    // Encoder ids are variant-invariant; validate one dense 0..N list.
     let encoders = &walked[0].2;
     let mut ids: Vec<u8> = encoders.iter().map(|e| e.id).collect();
     ids.sort_unstable();
@@ -628,8 +598,7 @@ pub(crate) fn build_layout_blob(
     };
     let bytes =
         postcard::to_allocvec(&info).map_err(|e| format!("keyboard.toml: layout blob serialize failed: {e}"))?;
-    // Raw DEFLATE at max level — compression runs at build time, so the extra
-    // effort is free, and the host inflates with the matching `miniz_oxide` decoder.
+    // Compression runs at build time; hosts use the matching raw DEFLATE decoder.
     Ok(miniz_oxide::deflate::compress_to_vec(&bytes, 10))
 }
 
@@ -668,15 +637,14 @@ mod tests {
 
     #[test]
     fn duplicate_coord_is_rejected() {
-        // The blob path now rejects a repeated (row,col) too (matching
-        // get_keymap_config), instead of emitting two keys for one cell.
+        // Blob and keymap paths must reject duplicate cells consistently.
         let cfg: LayoutTomlConfig = toml::from_str("rows = 1\ncols = 2\nmap = \"(0,0) (0,0)\"").unwrap();
         assert!(build_layout_blob(&cfg, None).is_err(), "duplicate (0,0) must fail");
     }
 
     #[test]
     fn stock_width_moves_the_cursor() {
-        // A 2u key then a 1u key: 2u is centered at 1.0, next at 2.5.
+        // A 2u key advances the next key to x=2.5.
         let info = info_of("rows = 1\ncols = 2\nmap = \"(0,0,@2u) (0,1)\"");
         let v = &info.variants[0];
         assert!(approx(key(v, 0, 0).rect.x, 1.0) && approx(key(v, 0, 0).rect.w, 2.0));
@@ -685,9 +653,7 @@ mod tests {
 
     #[test]
     fn stock_iso_enter_is_a_true_l() {
-        // The 1.5u overhang sits on the upper of the bar's two rows with the
-        // right edges flush — rect2 offsets are center-to-center, so KLE's
-        // top-left (-0.25, 0) becomes (-0.125, -0.5) here.
+        // rect2 offsets are center-to-center; the overhang aligns right.
         let info = info_of("rows = 1\ncols = 1\nmap = \"(0,0,@iso_enter)\"");
         let k = key(&info.variants[0], 0, 0);
         let r2 = k.rect2.expect("two rects");
@@ -708,7 +674,7 @@ mod tests {
 
     #[test]
     fn y_step_is_one_shot_and_lazy() {
-        // Row 1 lands 1 + 0.25 = 1.25 below row 0 despite the marker on its own line.
+        // Row 1 lands 1.25u below row 0.
         let info = info_of("rows = 2\ncols = 2\nmap = \"\"\"\n(0,0) (0,1)\n[y=0.25]\n(1,0) (1,1)\n\"\"\"");
         let v = &info.variants[0];
         assert!(approx(key(v, 0, 0).rect.y, 0.5));
@@ -717,8 +683,7 @@ mod tests {
 
     #[test]
     fn leading_y_step_is_dropped() {
-        // A `[y=n]` before the first row has no preceding row to push off — it
-        // must NOT leak into the row 0 → row 1 break and shift the whole board.
+        // Leading `[y=n]` must not leak into the first real row break.
         let info = info_of("rows = 3\ncols = 1\nmap = \"\"\"\n[y=0.5]\n(0,0)\n(1,0)\n(2,0)\n\"\"\"");
         let v = &info.variants[0];
         assert!(approx(key(v, 0, 0).rect.y, 0.5));
@@ -728,13 +693,12 @@ mod tests {
 
     #[test]
     fn unknown_default_variant_falls_back_to_zero() {
-        // Per decision #6: an unknown (or absent) default_variant resolves to 0,
-        // it does not fail the build.
+        // Unknown default names fall back instead of failing the build.
         let info = info_of(
             "rows = 1\ncols = 1\ndefault_variant = \"typo\"\nmap = \"(0,0)\"\n[[variant]]\nname = \"a\"\n[[variant]]\nname = \"b\"",
         );
         assert_eq!(info.default_variant, 0);
-        // A board with no [[variant]] at all + a named default still resolves to 0.
+        // No variants still resolves to default variant 0.
         let info2 = info_of("rows = 1\ncols = 1\ndefault_variant = \"x\"\nmap = \"(0,0)\"");
         assert_eq!(info2.default_variant, 0);
     }
@@ -754,7 +718,7 @@ mod tests {
 
     #[test]
     fn encoder_shape_is_rejected() {
-        // An encoder is a fixed 1u knob: `(e,id,@shape)` is not valid syntax.
+        // Encoders are fixed 1u knobs, so shapes are invalid.
         let cfg: LayoutTomlConfig = toml::from_str("rows = 1\ncols = 1\nmap = \"(0,0) (e,0,@2u)\"").unwrap();
         assert!(build_layout_blob(&cfg, None).is_err(), "(e,id,@shape) must be rejected");
     }
@@ -777,7 +741,7 @@ mod tests {
 
     #[test]
     fn variant_target_must_be_a_real_key() {
-        // `hidden` names (0,9), which is not a key in the 1x2 map.
+        // `hidden` names a non-key.
         let cfg: LayoutTomlConfig = toml::from_str(
             "rows = 1\ncols = 2\nmap = \"(0,0) (0,1)\"\n[[variant]]\nname = \"a\"\nhidden = [\"(0,9)\"]",
         )
@@ -787,8 +751,7 @@ mod tests {
 
     #[test]
     fn encoders_reflow_per_variant() {
-        // `mini` hides (0,0) and reflows the tokens after it left — the encoder
-        // included: the knob sits at x=2.5 in `full` but x=1.5 in `mini`.
+        // Hidden keys reflow following encoder positions too.
         let info = info_of(
             "rows = 1\ncols = 2\nmap = \"(0,0) (0,1) (e,0)\"\n[[variant]]\nname = \"full\"\n[[variant]]\nname = \"mini\"\nhidden = [\"(0,0)\"]",
         );
@@ -809,14 +772,14 @@ mod tests {
 
     #[test]
     fn encoder_count_must_match_board() {
-        // 1 `(e,id)` token but the board declares 2 encoders → error.
+        // One encoder token cannot cover two board encoders.
         let one: LayoutTomlConfig = toml::from_str("rows = 1\ncols = 1\nmap = \"(0,0) (e,0)\"").unwrap();
         assert!(
             build_layout_blob(&one, Some(2)).is_err(),
             "1 token vs 2 board encoders must fail"
         );
         assert!(build_layout_blob(&one, Some(1)).is_ok(), "matching count is fine");
-        // Providing NO encoder positions on a board that has encoders is allowed.
+        // Omitting encoder positions opts out of layout placement.
         let none: LayoutTomlConfig = toml::from_str("rows = 1\ncols = 1\nmap = \"(0,0)\"").unwrap();
         assert!(
             build_layout_blob(&none, Some(3)).is_ok(),
@@ -855,8 +818,7 @@ hidden = ["(0,0)", "(1,0)", "(2,0)", "(0,11)", "(1,11)", "(2,11)"]
 
     #[test]
     fn rotation_region_swings_keys_about_the_pivot() {
-        // [r=90@(2.5,0)]: (0,1) flat center (3.0, 0.5) swings to (2.0, 0.5);
-        // (0,2) flat (4.0, 0.5) lands one unit further down the same vertical.
+        // Rotation swings both keys onto the same vertical.
         let info = info_of("rows = 1\ncols = 3\nmap = \"(0,0) [1.5] [r=90@(2.5,0)] (0,1) (0,2)\"");
         let v = &info.variants[0];
         assert!(approx(key(v, 0, 0).rect.x, 0.5) && approx(key(v, 0, 0).r, 0.0));
@@ -880,8 +842,7 @@ hidden = ["(0,0)", "(1,0)", "(2,0)", "(0,11)", "(1,11)", "(2,11)"]
 
     #[test]
     fn rotation_is_rigid_across_rows() {
-        // A 2x2 block in one region: both lines share the pivot, so the flat
-        // inter-key geometry survives the rotation unchanged (rigid transform).
+        // One region applies a rigid transform across rows.
         let info =
             info_of("rows = 2\ncols = 2\nmap = \"\"\"\n[3.5] [r=25@(3.5,0)] (0,0) (0,1)\n[3.5] (1,0) (1,1)\n\"\"\"");
         let v = &info.variants[0];
@@ -890,7 +851,7 @@ hidden = ["(0,0)", "(1,0)", "(2,0)", "(0,11)", "(1,11)", "(2,11)"]
         assert!(approx(d(key(v, 0, 0), key(v, 0, 1)), 1.0));
         assert!(approx(d(key(v, 0, 0), key(v, 1, 0)), 1.0));
         assert!(approx(d(key(v, 0, 0), key(v, 1, 1)), 2f32.sqrt()));
-        // And the block really rotated: (0,0) center = pivot + R(25°)·(0.5, 0.5).
+        // Verify the actual rotated center.
         let (sin, cos) = 25f32.to_radians().sin_cos();
         let k = key(v, 0, 0);
         assert!(
@@ -903,12 +864,12 @@ hidden = ["(0,0)", "(1,0)", "(2,0)", "(0,11)", "(1,11)", "(2,11)"]
 
     #[test]
     fn rotation_zero_ends_the_region() {
-        // Mid-line: after [r=0] the key returns to its flat cursor spot.
+        // `[r=0]` returns to the flat cursor frame.
         let info = info_of("rows = 1\ncols = 3\nmap = \"(0,0) [r=15@(1,0)] (0,1) [r=0] (0,2)\"");
         let v = &info.variants[0];
         let k2 = key(v, 0, 2);
         assert!(approx(k2.rect.x, 2.5) && approx(k2.rect.y, 0.5) && approx(k2.r, 0.0));
-        // Across lines too: the region does not leak into the next row.
+        // The reset also holds across lines.
         let info = info_of("rows = 2\ncols = 1\nmap = \"\"\"\n[r=30@(0,0)] (0,0)\n[r=0] (1,0)\n\"\"\"");
         let v = &info.variants[0];
         assert!(approx(key(v, 1, 0).rect.x, 0.5) && approx(key(v, 1, 0).rect.y, 1.5));
@@ -919,10 +880,9 @@ hidden = ["(0,0)", "(1,0)", "(2,0)", "(0,11)", "(1,11)", "(2,11)"]
         let toml = "rows = 1\ncols = 1\nmap = \"[r=15@(0,0)] (0,0,@tilt) (e,0)\"\n[shapes]\ntilt = { r = 10.0 }";
         let info = info_of(toml);
         let v = &info.variants[0];
-        // Region and shape angles add: the key spins 10° in place within a
-        // cluster that is itself rotated 15°.
+        // Region and shape angles add.
         assert!(approx(key(v, 0, 0).r, 25.0), "r = {}", key(v, 0, 0).r);
-        // The knob's flat center (1.5, 0.5) swings about the origin.
+        // Encoder centers swing with the active region.
         let (sin, cos) = 15f32.to_radians().sin_cos();
         let e = &v.encoders[0];
         assert!(
@@ -942,9 +902,7 @@ hidden = ["(0,0)", "(1,0)", "(2,0)", "(0,11)", "(1,11)", "(2,11)"]
 
     #[test]
     fn hidden_keys_reflow_inside_a_rotation_region() {
-        // Hiding (0,0) reflows (0,1) to the region start in the FLAT frame
-        // first, then the rotation applies — so the mini variant's (0,1) lands
-        // exactly where the full variant's (0,0) was.
+        // Hidden-key reflow happens before rotation.
         let toml = "rows = 1\ncols = 2\nmap = \"[1.0] [r=20@(1,0)] (0,0) (0,1)\"\n[[variant]]\nname = \"full\"\n[[variant]]\nname = \"mini\"\nhidden = [\"(0,0)\"]";
         let info = info_of(toml);
         let full = info.variants.iter().find(|v| v.name == "full").unwrap();
@@ -962,11 +920,10 @@ hidden = ["(0,0)", "(1,0)", "(2,0)", "(0,11)", "(1,11)", "(2,11)"]
 
     #[test]
     fn y_step_shifts_every_row_below() {
-        // `[y=1]` between row 0 and row 1 pushes the gap by +1; because the
-        // baseline accumulates, EVERY row below row 0 is shifted down by 1.
+        // Baseline shifts accumulate below `[y=1]`.
         let info = info_of("rows = 3\ncols = 1\nmap = \"\"\"\n(0,0)\n[y=1]\n(1,0)\n(2,0)\n\"\"\"");
         let v = &info.variants[0];
-        // Stored y is the key CENTER (row top + 0.5). row-tops: 0, 2, 3.
+        // Stored y is the key center.
         assert!(approx(key(v, 0, 0).rect.y, 0.5)); // top 0
         assert!(approx(key(v, 1, 0).rect.y, 2.5)); // top 2  (= 1 + 1 shift)
         assert!(approx(key(v, 2, 0).rect.y, 3.5)); // top 3  (= 2 + 1 shift)
@@ -986,7 +943,7 @@ hidden = ["(0,0)", "(1,0)", "(2,0)", "(0,11)", "(1,11)", "(2,11)"]
 
     #[test]
     fn corne_worked_example() {
-        // Corne walk: first pinky key, gap jump, tilted thumb.
+        // Cover nudge, split gap, and thumb rotation in one fixture.
         let toml = r#"
 rows = 4
 cols = 12
@@ -1009,7 +966,7 @@ thumbR = { r = -15.0 }
 "#;
         let info = info_of(toml);
         let v = &info.variants[0];
-        // (0,0,L,@cP) lands at center (0.5, 1.05).
+        // Shape nudge affects the center.
         let k00 = key(v, 0, 0);
         assert!(
             approx(k00.rect.x, 0.5) && approx(k00.rect.y, 1.05),
@@ -1017,9 +974,9 @@ thumbR = { r = -15.0 }
             k00.rect.x,
             k00.rect.y
         );
-        // After six left keys + [1.0] gap, (0,6,R) lands at x = 7.5.
+        // The split gap moves the right half.
         assert!(approx(key(v, 0, 6).rect.x, 7.5), "right half x");
-        // Thumb (3,3) lands at (4.0, 3.55), tilted +15.
+        // Thumb shape carries its angle.
         let t = key(v, 3, 3);
         assert!(
             approx(t.rect.x, 4.0) && approx(t.rect.y, 3.55),
@@ -1028,14 +985,13 @@ thumbR = { r = -15.0 }
             t.rect.y
         );
         assert!(approx(t.r, 15.0));
-        // 36 grid keys + 6 thumbs = 42.
+        // 36 grid keys plus 6 thumbs.
         assert_eq!(v.keys.len(), 42);
     }
 
     #[test]
     fn iso_variant_reflows_to_match_ansi() {
-        // ANSI hides the iso key (3,14) → LShift 2.25 then Z at 2.25.
-        // ISO shrinks LShift to 1.25 and shows the 1u iso key → Z still at 2.25.
+        // ANSI and ISO should keep the first alpha aligned.
         let toml = r#"
 rows = 4
 cols = 16
@@ -1058,14 +1014,14 @@ shapes = { "(3,0)" = "@lsft_iso" }
         let info = info_of(toml);
         let ansi = &info.variants[0];
         let iso = &info.variants[1];
-        // (3,1) — the first alpha — lands at the same x in both variants.
+        // First alpha key aligns across variants.
         assert!(
             approx(key(ansi, 3, 1).rect.x, key(iso, 3, 1).rect.x),
             "ansi {} vs iso {}",
             key(ansi, 3, 1).rect.x,
             key(iso, 3, 1).rect.x
         );
-        // ANSI omits the iso key; ISO includes it.
+        // ISO-only key visibility differs by variant.
         assert!(ansi.keys.iter().all(|k| !(k.row == 3 && k.col == 14)));
         assert!(iso.keys.iter().any(|k| k.row == 3 && k.col == 14));
     }
@@ -1078,7 +1034,7 @@ shapes = { "(3,0)" = "@lsft_iso" }
         let back = miniz_oxide::inflate::decompress_to_vec(&compressed).unwrap();
         let decoded: LayoutInfo = postcard::from_bytes(&back).unwrap();
         assert_eq!(decoded, info);
-        // The ISO enter carries a second rectangle.
+        // ISO Enter carries a second rectangle.
         assert!(decoded.variants[0].keys[0].rect2.is_some());
     }
 
@@ -1128,7 +1084,7 @@ hidden = ["(3,14)"]
     #[test]
     fn multi_variant_60_percent() {
         let info = info_of(ANSI_ISO_60);
-        // Three render variants over one 63-key superset; ansi shown first.
+        // Three render variants over one superset.
         assert_eq!(info.variants.len(), 3);
         let names: Vec<_> = info.variants.iter().map(|v| v.name.as_str()).collect();
         assert_eq!(names, ["ansi", "iso", "split-bs"]);
@@ -1138,20 +1094,18 @@ hidden = ["(3,14)"]
         let iso = &info.variants[1];
         let splitbs = &info.variants[2];
 
-        // ANSI hides the ISO-only key and the split-bs half; ISO shows the ISO
-        // key; split-bs shows the split half. None of them changes N's identity.
+        // Variant visibility changes without changing key identity.
         let has = |v: &Variant, r, c| v.keys.iter().any(|k| k.row == r && k.col == c);
         assert!(!has(ansi, 3, 14) && !has(ansi, 0, 14));
         assert!(has(iso, 3, 14) && !has(iso, 0, 14));
         assert!(has(splitbs, 0, 14) && !has(splitbs, 3, 14));
 
-        // ISO Enter at (2,12) is a true L (two rects) only in the iso variant.
+        // ISO Enter is L-shaped only in the ISO variant.
         assert!(key(iso, 2, 12).rect2.is_some());
         assert!(key(ansi, 2, 12).rect2.is_none());
         assert!(approx(key(iso, 3, 0).rect.w, 1.25)); // LShift shrank for the extra key
 
-        // Reflow check: hiding (3,14) in ansi (2.25u LShift) lands the first
-        // alpha (3,1) at exactly the same x as iso (1.25u LShift + shown 1u key).
+        // Reflow keeps the first alpha aligned.
         assert!(
             approx(key(ansi, 3, 1).rect.x, key(iso, 3, 1).rect.x),
             "row-3 alpha must align: ansi {} vs iso {}",
@@ -1159,8 +1113,7 @@ hidden = ["(3,14)"]
             key(iso, 3, 1).rect.x
         );
 
-        // The classic row stagger: 1.5u Tab and 1.75u Caps push their rows right,
-        // so the alpha home row sits right of the number row.
+        // Row-width keys preserve the classic stagger.
         assert!(key(ansi, 1, 1).rect.x > key(ansi, 0, 1).rect.x);
         assert!(key(ansi, 2, 1).rect.x > key(ansi, 1, 1).rect.x);
     }
@@ -1169,9 +1122,9 @@ hidden = ["(3,14)"]
     fn multi_variant_60_blob_is_small() {
         let cfg: LayoutTomlConfig = toml::from_str(ANSI_ISO_60).unwrap();
         let blob = build_layout_blob(&cfg, None).unwrap();
-        // A 3-variant 60% compresses to well under a BLE-friendly couple of KB.
+        // Keep the blob BLE-friendly.
         assert!(!blob.is_empty() && blob.len() < 2048, "blob len = {}", blob.len());
-        // And it inflates + decodes back to the same LayoutInfo.
+        // The blob decodes back to the same layout.
         let back = miniz_oxide::inflate::decompress_to_vec(&blob).unwrap();
         let decoded: LayoutInfo = postcard::from_bytes(&back).unwrap();
         assert_eq!(decoded, build_layout_info(&cfg, None).unwrap().unwrap());
@@ -1179,9 +1132,7 @@ hidden = ["(3,14)"]
 
     #[test]
     fn example_nrf52840_numpad_layout() {
-        // The layout from examples/use_config/nrf52840_ble/keyboard.toml: a
-        // numpad whose Plus/Enter span two rows (@2u_tall) and whose zero is 2u wide
-        // (@2u), all via stock shapes. Keeps the shipped example honest.
+        // Mirror the shipped numpad example that uses stock shapes.
         let toml = r#"
 rows = 5
 cols = 4
@@ -1196,18 +1147,17 @@ map = """
         let info = info_of(toml);
         let v = &info.variants[0];
         assert_eq!(v.keys.len(), 17); // 4 + 4 + 3 + 4 + 2
-        // Plus and Enter are 2u tall, centered one unit below their row top.
+        // Plus and Enter are 2u tall.
         assert!(approx(key(v, 1, 3).rect.h, 2.0) && approx(key(v, 1, 3).rect.y, 2.0));
         assert!(approx(key(v, 3, 3).rect.h, 2.0) && approx(key(v, 3, 3).rect.y, 4.0));
-        // The zero is 2u wide; the dot sits immediately right of it.
+        // Zero is 2u wide; dot follows it.
         assert!(approx(key(v, 4, 0).rect.w, 2.0) && approx(key(v, 4, 0).rect.x, 1.0));
         assert!(approx(key(v, 4, 1).rect.x, 2.5));
     }
 
     #[test]
     fn split_corne_36_key_variant() {
-        // The split Corne, plus the 36-key view (hide the outer pinky
-        // columns). Same matrix, no morph — the variant only drops keys.
+        // The 36-key view hides outer pinky columns only.
         let info = info_of(CORNE_SPLIT);
         assert_eq!(info.variants.len(), 2);
         let full = &info.variants[0];
@@ -1215,12 +1165,10 @@ map = """
         assert_eq!(full.keys.len(), 42); // 36 grid + 6 thumbs
         assert_eq!(mini.keys.len(), 36); // outer pinky columns hidden
 
-        // The split gap is real: the right inner column (col 6) sits a full gap
-        // to the right of the left inner column (col 5) on the same row.
+        // The split gap separates the inner columns.
         assert!(key(full, 0, 6).rect.x - key(full, 0, 5).rect.x > 1.5);
 
-        // Reflow: hiding the left pinky (0,0) shifts the rest of row 0 left by 1u
-        // in the 36 view (the ring column is now the leftmost).
+        // Hiding the left pinky reflows row 0 by 1u.
         assert!(approx(key(full, 0, 1).rect.x - key(mini, 0, 1).rect.x, 1.0));
     }
 }

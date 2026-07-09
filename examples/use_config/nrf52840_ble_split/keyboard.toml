@@ -1,5 +1,5 @@
 [keyboard]
-# Example identity — replace name, vendor_id and product_id with your keyboard's own
+# Replace with your keyboard identity.
 name = "RMK Keyboard"
 product_name = "RMK Keyboard"
 vendor_id = 0x4c4b
@@ -67,8 +67,7 @@ hold_timeout = "240ms"
 gap_timeout = "230ms"
 
 [behavior.morse.profiles]
-# Named overrides of the [behavior.morse] defaults, referenced by name from a morse key
-# (profile = "...") or a tap-hold action's optional profile arg — e.g. a home row mod is MT(key, mod, H1).
+# Named [behavior.morse] profiles used by morse keys or tap-hold args.
 H1 = { permissive_hold = true, unilateral_tap = true, hold_timeout = "250ms", gap_timeout = "250ms" }
 H2 = { permissive_hold = true, unilateral_tap = true, hold_timeout = "200ms", gap_timeout = "200ms" }
 
@@ -108,7 +107,7 @@ adc_divider_total = 2806
 
 [split.central.matrix]
 matrix_type = "normal"
-# RMK uses col2row as the default matrix diode direction, if you want to use a row2col matrix, add `row2col = true`
+# Default diode direction is col2row; set `row2col = true` if needed.
 # row2col = true
 row_pins = ["P0_12", "P0_13"]
 col_pins = ["P0_14", "P0_15"]

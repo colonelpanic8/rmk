@@ -391,10 +391,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
         }
     }
 
-    // 3. Group encoder switches by index. Vial draws a knob as two adjacent 1u
-    //    CW/CCW click targets, but the physical knob is one ~1u object at their
-    //    center — so a multi-switch encoder collapses to a 1u knob there. A lone
-    //    switch is the knob drawn directly and keeps its size.
+    // 3. Collapse Vial CW/CCW switch pairs into one physical encoder knob.
     let mut enc_order: Vec<u32> = Vec::new();
     let mut enc_index: HashMap<u32, usize> = HashMap::new();
     let mut enc_switches: Vec<Vec<usize>> = Vec::new();
@@ -412,9 +409,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
     let mut encoders: Vec<EncoderRender> = Vec::new();
     for (i, sw) in enc_switches.iter().enumerate() {
         let id = enc_order[i];
-        // Switches in one rotation cluster → the knob rides the same `[r=...]`
-        // region and its position is exact; mixed clusters have no single flat
-        // frame, so the knob falls back to the flat bounding box.
+        // Mixed rotation clusters have no exact single knob frame.
         let cluster = rot_of(&input.keys[sw[0]]);
         let uniform = sw.iter().all(|&si| rot_of(&input.keys[si]) == cluster);
         if !uniform {
@@ -536,9 +531,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
     let mut prev_baseline: Option<f64> = None;
     // The `[r=...]` region in effect — sticky across lines, mirroring the walk.
     let mut active_region: Option<(f64, f64, f64)> = None;
-    // The map's y origin: the first row's baseline decodes as 0, so a pivot's
-    // absolute y must be translated by -y0 into the map frame (x needs no
-    // shift — the cursor starts at the sheet's x = 0 and gaps reproduce it).
+    // Translate KLE pivot y into the map frame whose first baseline is 0.
     let y0 = buckets
         .values()
         .next()
@@ -546,10 +539,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
         .unwrap_or(0.0);
 
     for unit_idxs in buckets.values() {
-        // Everything is laid out in KLE's *flat* (pre-rotation) frame; a key's
-        // cluster becomes an `[r=deg@(px,py)]` region and the build-time walk
-        // re-applies the swing. Flat coordinates are the clean ones the KLE
-        // author typed, so the emitted gaps and steps stay readable.
+        // Emit pre-rotation coordinates; `[r=...]` reapplies the swing.
         let baseline = unit_render(&units[unit_idxs[0]]).key.y;
         if let Some(pb) = prev_baseline {
             let vstep = baseline - pb - 1.0;
@@ -560,9 +550,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
         let mut cursor_x = 0.0;
         let mut row_tokens = Vec::new();
         for &ui in unit_idxs {
-            // A forward gap is a `[gap]` token; a backward one (overlapping
-            // caps) rides `x_nudge` — except layout-option alternates, which
-            // the variant re-walk reflows instead.
+            // Backward gaps ride `x_nudge`; variant alternates reflow instead.
             let g = unit_render(&units[ui]);
             let region = rot_of(g.key);
             if region != active_region {
@@ -597,13 +585,11 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
                     row_tokens.push(token);
                 }
                 Unit::Enc(ei) => {
-                    // Encoders are a fixed 1u knob: no shape, ever — just `(e,id)`.
+                    // Encoders are fixed 1u knobs.
                     row_tokens.push(format!("(e,{})", encoders[*ei].id));
                 }
             }
-            // Mirror rmk-config's walk: a shape's `x` shifts only the center,
-            // the cursor still advances by `w` from the un-nudged base — so a
-            // nudged key must not drag the keys after it leftward.
+            // Shape `x` nudges only the center, not cursor advance.
             cursor_x = ex - x_nudge + g.key.width;
         }
         map_lines.push(row_tokens.join(" "));
@@ -666,9 +652,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
                 match chosen {
                     None => hidden.push(order[ci]),
                     Some(ki) => {
-                        // The alternate is laid out in the map cell's region
-                        // frame; `region_top_left` un-swings a mismatched
-                        // cluster so the rendered position stays exact.
+                        // Un-swing mismatched clusters into the map cell frame.
                         let name_opt = shape_desc(&input.keys[ki], cell_baseline[ci], 0.0, cell_region[ci])
                             .map(|d| reg.name_for(&d));
                         if name_opt != map_shape[ci] {
@@ -949,9 +933,7 @@ mod tests {
 
     #[test]
     fn rotated_key_becomes_a_rotation_region() {
-        // A KLE cluster maps onto an `[r=deg@(px,py)]` region with the key at
-        // its clean flat coordinates — no baked shape, no floats. The pivot's y
-        // is translated into the map frame (the first baseline decodes as 0).
+        // KLE rotation clusters become `[r=...]` regions, not baked shapes.
         let g = gen_layout(json!([[{"r": 30, "rx": 3, "ry": 1, "x": 1}, "0,0"]]), 1, 1);
         assert!(
             g.display_toml.contains("[r=30.0@(3.0,0.0)] [4.0] (0,0)"),
@@ -1000,10 +982,7 @@ mod tests {
         assert_valid(&g);
     }
 
-    // ── Faithfulness: convert → blob → decode → compare back to kle-serial ──────
-    // `assert_valid` only proves the map parses. These decode the built blob the
-    // exact way the host does (inflate + postcard into rynk's wire types) and
-    // check each key's center/size/rotation actually matches the input positions.
+    // Faithfulness: decode the blob and compare against kle-serial geometry.
 
     /// The canonical (default-shown) instance of a cell — mirrors `generate`.
     fn canon(insts: &[usize], parsed: &ParsedKeymap) -> usize {
@@ -1110,9 +1089,7 @@ mod tests {
 
     #[test]
     fn overlapping_keys_dont_drift_the_row() {
-        // A backward x jump overlaps 0,1 into 0,0, so 0,1 rides an `x` nudge.
-        // rmk-config's cursor still advances by `w` from the un-nudged base,
-        // so 0,2 must land exactly where KLE put it — not shifted by the nudge.
+        // Overlap nudge must not drag following keys.
         let km = json!([["0,0", {"x": -0.25}, "0,1", "0,2"]]);
         let parsed = parse_keymap(&km).unwrap();
         assert_faithful(&decode_default(&parsed, 1, 3), &expected_default(&parsed), "overlap");

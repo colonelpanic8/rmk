@@ -386,6 +386,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
 
                         // trouble-host 0.7 exposes written bytes via a closure; copy them out
                         // once so the dispatch below (which awaits) can use them freely.
+                        // Sized for the active host protocol's largest BLE write.
                         #[cfg(feature = "rynk")]
                         let mut data_buf = [0u8; crate::host::rynk::RYNK_BLE_CHUNK_SIZE];
                         #[cfg(not(feature = "rynk"))]
@@ -466,9 +467,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                                 handled = true;
                             }
 
-                            // WebHID transport (RynkHidService): each write is a fixed
-                            // 32-byte report — a fragment of the rynk frame stream.
-                            // De-frame (drop padding via the header LEN) into the pipe.
+                            // WebHID writes fixed 32-byte Rynk frame fragments.
                             #[cfg(feature = "rynk")]
                             if !handled && event.handle() == output_hid.handle {
                                 let data = event.data();

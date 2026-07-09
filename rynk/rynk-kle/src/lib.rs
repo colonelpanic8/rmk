@@ -44,9 +44,7 @@ fn matrix_dim(root: &Value, key: &str) -> u32 {
 /// positions are assigned row-major from key placement and a warning is added
 /// to [`Generated::warnings`].
 pub fn convert_kle(root: &Value) -> Result<Generated, String> {
-    // A raw KLE export ("Download JSON" on keyboard-layout-editor.com) is the bare
-    // row array (kle-serial skips a leading metadata object); a Vial/VIA definition
-    // wraps that array in `layouts.keymap` and adds `matrix` dims + option labels.
+    // Raw KLE is a row array; Vial/VIA wraps it in `layouts.keymap`.
     let keymap = if root.is_array() {
         root
     } else {

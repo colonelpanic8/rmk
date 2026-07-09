@@ -47,9 +47,8 @@ pub struct BuildConstants {
     pub ble_profiles_num: usize,
     pub split_central_sleep_timeout_seconds: u32,
     pub protocol_macro_chunk_size: usize,
-    /// Optional Rynk RX/TX buffer size (bytes).
-    /// `None` to fall back to `RYNK_MIN_BUFFER_SIZE`.
-    pub rynk_buffer_size: Option<usize>,
+    /// Rynk RX/TX buffer size (bytes).
+    pub rynk_buffer_size: usize,
     pub events: Vec<EventChannel>,
     pub passkey: Option<Passkey>,
 }

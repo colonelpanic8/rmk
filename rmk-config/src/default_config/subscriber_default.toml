@@ -50,13 +50,7 @@ events = [
     { name = "battery_status", count = 2 },
 ]
 
-# --- Rynk host-service subscribers ---
-#
-# host/rynk/topics.rs: each `run_session` builds a `TopicSubscribers` that
-# subscribes to all of these. There is one session per transport that has a
-# host service attached, so a board exposing both USB and BLE runs two
-# sessions concurrently. Reserve one slot here for the always-present session;
-# the `rynk` + `_ble` entry below adds the second (USB + BLE) slot.
+# Rynk sessions subscribe to these topics; USB+BLE boards need two slots.
 
 [[subscriber]]
 features = ["rynk"]

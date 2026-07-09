@@ -21,9 +21,7 @@
 #[cfg(all(feature = "rynk", feature = "vial"))]
 compile_error!("features `rynk` and `vial` are mutually exclusive");
 
-// `host` only provides the configurator plumbing; it needs a concrete protocol
-// (`rynk` or `vial`) to expose a `HostService`. The reverse direction is
-// enforced by Cargo: `vial` and `rynk` both pull in `host`.
+// `host` needs a concrete configurator protocol to expose `HostService`.
 #[cfg(all(feature = "host", not(any(feature = "rynk", feature = "vial"))))]
 compile_error!("feature `host` requires enabling either `rynk` or `vial`");
 

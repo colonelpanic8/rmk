@@ -92,8 +92,7 @@ impl Handle<StorageReset> for RynkService<'_> {
     }
 }
 
-// ── Lock gate ── all three stay dispatchable while locked (see the gate in
-// `RynkService::dispatch`).
+// Lock endpoints stay dispatchable while locked.
 
 impl Handle<GetLockStatus> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<LockStatus, RynkError> {

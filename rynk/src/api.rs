@@ -48,10 +48,6 @@ impl<T: Read + Write> Client<T> {
         })
     }
 
-    // Gating is structural only (whole feature families); the firmware is the
-    // authoritative validator of numeric limits, rejecting out-of-range or
-    // over-capacity requests, so the host does not pre-check them.
-
     /// Reject a bulk command locally when the cached capabilities say bulk
     /// transfer is absent, before touching the wire.
     fn require_bulk_transfer(&self, cmd: Cmd) -> Result<(), RynkHostError> {
@@ -71,8 +67,6 @@ impl<T: Read + Write> Client<T> {
             Err(RynkHostError::Unsupported(cmd, "BLE not enabled"))
         }
     }
-
-    // ── system ──
 
     /// Read the firmware's protocol version.
     pub async fn get_version(&mut self) -> Result<ProtocolVersion, RynkHostError> {
@@ -108,8 +102,6 @@ impl<T: Read + Write> Client<T> {
         self.request::<command::StorageReset>(&mode).await
     }
 
-    // ── lock gate ──
-
     /// Read the current lock state without side effects.
     ///
     /// [`LockStatus::key_positions`] is the challenge to hold; empty while
@@ -135,8 +127,6 @@ impl<T: Read + Write> Client<T> {
     pub async fn lock(&mut self) -> Result<(), RynkHostError> {
         self.request::<command::Lock>(&()).await
     }
-
-    // ── keymap ──
 
     /// Read one key's action.
     pub async fn get_key(&mut self, layer: u8, row: u8, col: u8) -> Result<KeyAction, RynkHostError> {
@@ -209,8 +199,6 @@ impl<T: Read + Write> Client<T> {
         self.request::<command::SetKeymapBulk>(&request).await
     }
 
-    // ── layout ──
-
     /// Read the physical layout. The firmware serves it as an opaque,
     /// compressed blob paged over `GetLayout`; this reassembles every page (by
     /// byte offset), inflates the blob, and decodes it into [`LayoutInfo`]. An
@@ -245,8 +233,6 @@ impl<T: Read + Write> Client<T> {
         collected.truncate(total.unwrap_or(0));
         LayoutInfo::from_compressed_blob(&collected).map_err(RynkHostError::Layout)
     }
-
-    // ── combos / forks / morse / macros ──
 
     /// Read one combo entry by index.
     pub async fn get_combo(&mut self, index: u8) -> Result<Combo, RynkHostError> {
@@ -333,11 +319,7 @@ impl<T: Read + Write> Client<T> {
             .await
     }
 
-    // ── bulk pagers ──
-    // Read/write a WHOLE resource by paging the low-level `*_bulk` endpoints,
-    // sizing each loop from cached capabilities: totals bound the read cursor,
-    // the advertised page size chunks the write. Capability gating and range
-    // checks stay in the low-level calls these drive.
+    // Pagers use low-level bulk calls for capability and range checks.
 
     /// Read the whole keymap (every layer, row-major) by paging `GetKeymapBulk`.
     pub async fn read_all_keymap(&mut self) -> Result<Vec<KeyAction>, RynkHostError> {
@@ -458,8 +440,6 @@ impl<T: Read + Write> Client<T> {
         Ok(())
     }
 
-    // ── behavior ──
-
     /// Read the global behavior config.
     pub async fn get_behavior(&mut self) -> Result<BehaviorConfig, RynkHostError> {
         self.request::<command::GetBehaviorConfig>(&()).await
@@ -469,8 +449,6 @@ impl<T: Read + Write> Client<T> {
     pub async fn set_behavior(&mut self, config: BehaviorConfig) -> Result<(), RynkHostError> {
         self.request::<command::SetBehaviorConfig>(&config).await
     }
-
-    // ── status ──
 
     /// Read the currently active layer.
     pub async fn get_current_layer(&mut self) -> Result<u8, RynkHostError> {
@@ -516,8 +494,6 @@ impl<T: Read + Write> Client<T> {
     pub async fn get_led_indicator(&mut self) -> Result<LedIndicator, RynkHostError> {
         self.request::<command::GetLedIndicator>(&()).await
     }
-
-    // ── connection ──
 
     /// Read the active connection type (USB / BLE).
     pub async fn get_connection_type(&mut self) -> Result<ConnectionType, RynkHostError> {

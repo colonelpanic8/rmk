@@ -1,3 +1,5 @@
+use crate::validate_unlock_keys;
+
 /// Resolved host-tool configuration.
 pub struct Host {
     pub vial_enabled: bool,
@@ -13,28 +15,8 @@ impl crate::KeyboardTomlConfig {
         let host_toml = self.get_host_config();
         let unlock_keys = host_toml.unlock_keys.unwrap_or_default();
 
-        // Must match `rmk_types::protocol::rynk::UNLOCK_KEYS_SIZE` (rmk-config
-        // can't depend on rmk-types — rmk-types build-depends on rmk-config).
-        const UNLOCK_KEYS_MAX: usize = 4;
-        if unlock_keys.len() > UNLOCK_KEYS_MAX {
-            panic!(
-                "❌ Parse `keyboard.toml` error: [host].unlock_keys has {} entries, the max is {UNLOCK_KEYS_MAX}",
-                unlock_keys.len()
-            );
-        }
-        // Every position must be inside the matrix. Skip when `[layout]` is
-        // absent — that error is surfaced by the layout resolver itself.
-        if let Some(layout) = self.layout.as_ref() {
-            for key in &unlock_keys {
-                let (row, col) = (key[0], key[1]);
-                if row >= layout.rows || col >= layout.cols {
-                    panic!(
-                        "❌ Parse `keyboard.toml` error: [host].unlock_keys position ({row}, {col}) is outside the {}×{} matrix",
-                        layout.rows, layout.cols
-                    );
-                }
-            }
-        }
+        validate_unlock_keys("[host]", &unlock_keys, self.layout.as_ref())
+            .unwrap_or_else(|err| panic!("❌ Parse `keyboard.toml` error: {err}"));
 
         Host {
             vial_enabled: host_toml.vial_enabled,

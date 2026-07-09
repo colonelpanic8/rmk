@@ -32,10 +32,7 @@ log_section() {
     printf "\n==> %s\n" "$1"
 }
 
-# Feature-set matrix for rmk check/clippy/test. An empty entry means
-# `--no-default-features` with no extra features on top. This is the single
-# source of truth: check.sh, test.sh, and scripts/test_all.sh all consume it,
-# so a set added here is checked, clippy'd, and tested everywhere.
+# Shared rmk feature-set matrix; empty means only `--no-default-features`.
 RMK_FEATURESETS=(
     ""
     "log,std"

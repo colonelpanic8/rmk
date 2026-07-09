@@ -1,5 +1,5 @@
 [keyboard]
-# Example identity — replace name, vendor_id and product_id with your keyboard's own
+# Replace with your keyboard identity.
 name = "RMK Keyboard"
 product_name = "RMK Keyboard"
 vendor_id = 0x4c4b
@@ -52,7 +52,7 @@ serial = [
 ]
 [split.central.matrix]
 matrix_type = "normal"
-# RMK uses col2row as the default matrix diode direction, if you want to use a row2col matrix, add `row2col = true`
+# Default diode direction is col2row; set `row2col = true` if needed.
 # row2col = true
 row_pins = ["PIN_9", "PIN_11"]
 col_pins = ["PIN_10", "PIN_12"]

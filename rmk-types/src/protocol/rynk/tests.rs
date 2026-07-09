@@ -331,7 +331,7 @@ fn wire_values_locked() {
     let ex = exemplars();
 
     // Values-only exemplars (no frame counterpart).
-    let mut unlock_keys: heapless::Vec<(u8, u8), UNLOCK_KEYS_SIZE> = heapless::Vec::new();
+    let mut unlock_keys = heapless::Vec::new();
     unlock_keys.push((1, 2)).unwrap();
     unlock_keys.push((3, 4)).unwrap();
     let lock_status = LockStatus {
@@ -600,7 +600,7 @@ fn wire_frames_locked() {
         action: KeyAction::Morse(7),
     };
     let led = LedIndicator::NUM_LOCK | LedIndicator::SCROLL_LOCK;
-    let mut unlock_keys: heapless::Vec<(u8, u8), UNLOCK_KEYS_SIZE> = heapless::Vec::new();
+    let mut unlock_keys = heapless::Vec::new();
     unlock_keys.push((1, 2)).unwrap();
     unlock_keys.push((3, 4)).unwrap();
     let lock_status = LockStatus {
@@ -611,7 +611,7 @@ fn wire_frames_locked() {
     };
 
     let entries: alloc::vec::Vec<(&str, alloc::vec::Vec<u8>)> = alloc::vec![
-        // ── System (0x00xx) ──
+        // System (0x00xx).
         ("GetVersion request ()", encode_frame(Cmd::GetVersion, SEQ, &())),
         (
             "GetVersion reply Ok(CURRENT)",
@@ -679,7 +679,7 @@ fn wire_frames_locked() {
                 &Ok::<DeviceInfo, RynkError>(ex.device_info.clone())
             ),
         ),
-        // ── Keymap / encoder (0x01xx) ──
+        // Keymap / encoder (0x01xx).
         (
             "GetKeyAction request KeyPosition{0,5,13}",
             encode_frame(Cmd::GetKeyAction, SEQ, &key_pos)
@@ -747,7 +747,7 @@ fn wire_frames_locked() {
             "SetEncoderAction reply Ok(())",
             encode_frame(Cmd::SetEncoderAction, SEQ, &Ok::<(), RynkError>(())),
         ),
-        // ── Macro (0x02xx) ──
+        // Macro (0x02xx).
         (
             "GetMacro request GetMacroRequest{1,256}",
             encode_frame(Cmd::GetMacro, SEQ, &GetMacroRequest { index: 1, offset: 256 }),
@@ -772,7 +772,7 @@ fn wire_frames_locked() {
             "SetMacro reply Ok(())",
             encode_frame(Cmd::SetMacro, SEQ, &Ok::<(), RynkError>(()))
         ),
-        // ── Combo (0x03xx) ──
+        // Combo (0x03xx).
         ("GetCombo request 3", encode_frame(Cmd::GetCombo, SEQ, &3u8)),
         (
             "GetCombo reply Ok(Combo{[Single(A)],Morse(1),L2})",
@@ -793,7 +793,7 @@ fn wire_frames_locked() {
             "SetCombo reply Ok(())",
             encode_frame(Cmd::SetCombo, SEQ, &Ok::<(), RynkError>(()))
         ),
-        // ── Morse (0x04xx) ──
+        // Morse (0x04xx).
         ("GetMorse request 0", encode_frame(Cmd::GetMorse, SEQ, &0u8)),
         (
             "GetMorse reply Ok(Morse{TAP->Key(A)})",
@@ -814,7 +814,7 @@ fn wire_frames_locked() {
             "SetMorse reply Ok(())",
             encode_frame(Cmd::SetMorse, SEQ, &Ok::<(), RynkError>(()))
         ),
-        // ── Fork (0x05xx) ──
+        // Fork (0x05xx).
         ("GetFork request 2", encode_frame(Cmd::GetFork, SEQ, &2u8)),
         (
             "GetFork reply Ok(Fork{Single(A),No,Morse(2)})",
@@ -835,7 +835,7 @@ fn wire_frames_locked() {
             "SetFork reply Ok(())",
             encode_frame(Cmd::SetFork, SEQ, &Ok::<(), RynkError>(()))
         ),
-        // ── Behavior (0x06xx) ──
+        // Behavior (0x06xx).
         (
             "GetBehaviorConfig request ()",
             encode_frame(Cmd::GetBehaviorConfig, SEQ, &())
@@ -856,7 +856,7 @@ fn wire_frames_locked() {
             "SetBehaviorConfig reply Ok(())",
             encode_frame(Cmd::SetBehaviorConfig, SEQ, &Ok::<(), RynkError>(())),
         ),
-        // ── Connection (0x07xx) ──
+        // Connection (0x07xx).
         (
             "GetConnectionType request ()",
             encode_frame(Cmd::GetConnectionType, SEQ, &())
@@ -881,7 +881,7 @@ fn wire_frames_locked() {
                 &Ok::<ConnectionStatus, RynkError>(ex.connection)
             ),
         ),
-        // ── Status (0x08xx) ──
+        // Status (0x08xx).
         (
             "GetCurrentLayer request ()",
             encode_frame(Cmd::GetCurrentLayer, SEQ, &())
@@ -917,7 +917,7 @@ fn wire_frames_locked() {
             "GetLedIndicator reply Ok(LedIndicator(Num|Scroll))",
             encode_frame(Cmd::GetLedIndicator, SEQ, &Ok::<LedIndicator, RynkError>(led)),
         ),
-        // ── Topics (0x80xx, server→host push, SEQ 0) ──
+        // Topics (0x80xx, server→host push, SEQ 0).
         ("LayerChange topic 3", encode_frame(Cmd::LayerChange, 0, &3u8)),
         ("WpmUpdate topic 42", encode_frame(Cmd::WpmUpdate, 0, &42u16)),
         (

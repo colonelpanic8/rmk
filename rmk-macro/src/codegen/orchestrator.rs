@@ -1,10 +1,10 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use rmk_config::DebouncerType;
 use rmk_config::resolved::hardware::{
     BoardConfig, ChipSeries, KeyInfo, MatrixConfig, MatrixType, UniBodyConfig,
 };
 use rmk_config::resolved::{Behavior, Hardware, Host, Identity, Keymap, Layout};
+use rmk_config::DebouncerType;
 
 use super::behavior::expand_behavior_config;
 use super::chip::bind_interrupt::expand_bind_interrupt;
@@ -329,9 +329,7 @@ fn expand_main(
         quote! {}
     };
 
-    // Bake the opaque physical-layout blob as a compile-time const and thread it
-    // through `RmkConfig` (exactly like Vial's keyboard-def) — no runtime setter.
-    // The blob is produced by rmk-config's cursor walk over `[layout].map`.
+    // Bake the physical-layout blob as a compile-time const.
     let (layout_blob_static, rynk_layout_field) = if host.rynk_enabled {
         let blob_lit = proc_macro2::Literal::byte_string(&layout.blob);
         (

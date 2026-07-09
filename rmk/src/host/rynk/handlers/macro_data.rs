@@ -10,9 +10,7 @@ use super::Handle;
 
 impl Handle<GetMacro> for RynkService<'_> {
     async fn handle(&self, r: GetMacroRequest) -> Result<MacroData, RynkError> {
-        // Reply is always a full MACRO_DATA_SIZE chunk (zero-filled past the
-        // macro space), so length is no end signal — the host terminates by
-        // its capability size and the macro encoding itself.
+        // Full chunks are zero-filled; length is not an end signal.
         let _ = r.index; // reserved for a future per-macro indirection layer
         let mut data: Vec<u8, MACRO_DATA_SIZE> = Vec::new();
         data.resize_default(MACRO_DATA_SIZE).expect("MACRO_DATA_SIZE matches");

@@ -205,7 +205,7 @@ macro_rules! topics {
 
 // Define endpoints: `Name = value: Request => Response;`
 endpoints! {
-    // ── System (0x00xx); 0x0009 reserved for layout ──
+    // System (0x00xx); 0x0009 reserved for layout.
     GetVersion = 0x0001: () => ProtocolVersion;
     GetCapabilities = 0x0002: () => DeviceCapabilities;
     Reboot = 0x0003: () => ();
@@ -223,7 +223,7 @@ endpoints! {
     /// Identity strings and USB ids; feature gating stays in `GetCapabilities`.
     GetDeviceInfo = 0x000A: () => DeviceInfo;
 
-    // ── Keymap (0x01xx) — includes encoder ──
+    // Keymap (0x01xx) — includes encoder.
     GetKeyAction = 0x0101: KeyPosition => KeyAction;
     SetKeyAction = 0x0102: SetKeyRequest => ();
     GetDefaultLayer = 0x0103: () => u8;
@@ -235,11 +235,11 @@ endpoints! {
     #[cfg(feature = "bulk")]
     @bulk SetKeymapBulk = 0x0108: SetKeymapBulkRequest => ();
 
-    // ── Macro (0x02xx) ──
+    // Macro (0x02xx).
     GetMacro = 0x0201: GetMacroRequest => MacroData;
     SetMacro = 0x0202: SetMacroRequest => ();
 
-    // ── Combo (0x03xx) ──
+    // Combo (0x03xx).
     GetCombo = 0x0301: u8 => Combo;
     SetCombo = 0x0302: SetComboRequest => ();
     #[cfg(feature = "bulk")]
@@ -247,7 +247,7 @@ endpoints! {
     #[cfg(feature = "bulk")]
     @bulk SetComboBulk = 0x0304: SetComboBulkRequest => ();
 
-    // ── Morse (0x04xx) ──
+    // Morse (0x04xx).
     GetMorse = 0x0401: u8 => Morse;
     SetMorse = 0x0402: SetMorseRequest => ();
     #[cfg(feature = "bulk")]
@@ -255,15 +255,15 @@ endpoints! {
     #[cfg(feature = "bulk")]
     @bulk SetMorseBulk = 0x0404: SetMorseBulkRequest => ();
 
-    // ── Fork (0x05xx) ──
+    // Fork (0x05xx).
     GetFork = 0x0501: u8 => Fork;
     SetFork = 0x0502: SetForkRequest => ();
 
-    // ── Behavior (0x06xx) ──
+    // Behavior (0x06xx).
     GetBehaviorConfig = 0x0601: () => BehaviorConfig;
     SetBehaviorConfig = 0x0602: BehaviorConfig => ();
 
-    // ── Connection (0x07xx) ──
+    // Connection (0x07xx).
     GetConnectionType = 0x0701: () => ConnectionType;
     /// Full `ConnectionStatus` snapshot.
     GetConnectionStatus = 0x0702: () => ConnectionStatus;
@@ -274,7 +274,7 @@ endpoints! {
     #[cfg(feature = "_ble")]
     ClearBleProfile = 0x0705: u8 => ();
 
-    // ── Status (0x08xx) ──
+    // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
     GetMatrixState = 0x0802: () => MatrixState;
     #[cfg(feature = "_ble")]
@@ -291,7 +291,7 @@ endpoints! {
 
 // Define topics: `Name = value: Payload;`
 topics! {
-    // ── Topics (0x80xx, server → host push) ──
+    // Topics (0x80xx, server → host push).
     LayerChange = 0x8001: u8;
     WpmUpdate = 0x8002: u16;
     ConnectionChange = 0x8003: ConnectionStatus;
@@ -307,12 +307,7 @@ topics! {
 /// their size derives from the buffer instead.
 pub const RYNK_MAX_PAYLOAD: usize = max_const(MAX_ENDPOINT_PAYLOAD, MAX_TOPIC_PAYLOAD);
 
-// Bulk transfer element counts are derived from the Rynk buffer size, not
-// configured: a bulk message exists to fill the buffer, so its count is whatever
-// fits. `rmk-types/build.rs` emits `BULK_SIZE`/`BULK_KEYMAP_SIZE` on the firmware
-// as calls to these `const fn`s over `RYNK_BUFFER_SIZE`, then reports them to the
-// host via `GetCapabilities`. They live here, not in `build.rs`, because they
-// need the payload types' `POSTCARD_MAX_SIZE`, which `build.rs` cannot see.
+// Bulk counts live here because they need payload `POSTCARD_MAX_SIZE`.
 #[cfg(feature = "bulk")]
 mod bulk_capacity {
     use postcard::experimental::max_size::MaxSize;
@@ -327,17 +322,7 @@ mod bulk_capacity {
     /// than this many elements regardless of how large the buffer is.
     const BULK_COUNT_CEILING: usize = u8::MAX as usize;
 
-    /// Default Rynk RX/TX buffer size (bytes) when `rynk_buffer_size` is unset.
-    /// Because the bulk counts scale with the buffer, this also sets default bulk
-    /// throughput: 512 B holds several combos/morses and a long keymap run per
-    /// message while staying modest on RAM.
-    pub const RYNK_DEFAULT_BUFFER_SIZE: usize = 512;
-
-    /// Elements of `item_size` bytes that fit in one `buffer`-byte frame after
-    /// reserving the header, `fixed` non-element bytes, and the widest length
-    /// prefix a `u8` count can take (the varint of 255 is 2 bytes). Capped at
-    /// `u8::MAX`; may be 0 for a buffer too small to hold one element, which the
-    /// `BULK_SIZE >= 1` build assert then rejects with a clear message.
+    /// Elements that fit after header, fixed bytes, and worst-case count prefix.
     const fn items_that_fit(buffer: usize, item_size: usize, fixed: usize) -> usize {
         let overhead = RYNK_HEADER_SIZE + fixed + crate::varint_max_size(BULK_COUNT_CEILING);
         min_const(buffer.saturating_sub(overhead) / item_size, BULK_COUNT_CEILING)
@@ -360,7 +345,7 @@ mod bulk_capacity {
 }
 
 #[cfg(feature = "bulk")]
-pub use bulk_capacity::{RYNK_DEFAULT_BUFFER_SIZE, bulk_keymap_size_for_buffer, bulk_size_for_buffer};
+pub use bulk_capacity::{bulk_keymap_size_for_buffer, bulk_size_for_buffer};
 
 #[cfg(test)]
 mod tests {
@@ -466,9 +451,7 @@ mod tests {
             assert!(c >= prev_c && k >= prev_k, "counts must not shrink as the buffer grows");
             (prev_c, prev_k) = (c, k);
 
-            // Every non-zero count's worst-case frame — header + the fixed
-            // request/response bytes + the widest u8 length prefix + elements —
-            // must fit the buffer it was derived from.
+            // Worst-case frames must fit the buffer that produced the count.
             if c >= 1 {
                 let frame = RYNK_HEADER_SIZE + 1 + varint_max_size(c) + c * combo_item;
                 assert!(frame <= buffer, "combo/morse bulk frame {frame} > buffer {buffer}");
