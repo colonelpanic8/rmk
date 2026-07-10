@@ -189,13 +189,11 @@ For other configuration updates, please refer to [Configuration](../configuratio
 
 Dongle support is back! Checkout [config example](https://github.com/HaoboGu/rmk/tree/main/examples/use_config/nrf52840_ble_split_dongle) and [Rust example](https://github.com/HaoboGu/rmk/tree/main/examples/use_rust/nrf52840_ble_split_dongle) for more details.
 
-::: info 
-
+::: info
 For Rust code users, you need to add a `keyboard.toml` with following content to your project to specify the number of peripherals:
 
 ```toml title="keyboard.toml"
 [rmk]
 split_peripherals_num = 2
 ```
-
 :::

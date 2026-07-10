@@ -47,9 +47,7 @@ let rmk_config = RmkConfig {
 </Tabs>
 
 ::: info
-
 To make your keyboard to be recognized by Vial, the `serial_number` shall start with `vial:f64c2b3c:`
-
 :::
 
 ## Hardware Selection
@@ -79,7 +77,9 @@ board = "nice!nano_v2"  # Pre-configured board
 - **Raspberry Pi**: `rp2040`
 - **STM32 Series**: Any STM32 chip supported by [embassy-stm32](https://github.com/embassy-rs/embassy/blob/main/embassy-stm32/Cargo.toml) with USB capability
 
-::: info `rp2350` is currently supported via the Rust API examples, but `keyboard.toml` chip selection only recognizes `rp2040` for now. :::
+::: info
+`rp2350` is currently supported via the Rust API examples, but `keyboard.toml` chip selection only recognizes `rp2040` for now.
+:::
 
 #### Supported Development Boards
 
@@ -88,7 +88,9 @@ board = "nice!nano_v2"  # Pre-configured board
 - `pi_pico_w` - Raspberry Pi Pico W with WiFi/BLE
 - `XIAO BLE` - Seeed Studio XIAO nRF52840
 
-::: tip Board names are case-sensitive. :::
+::: tip
+Board names are case-sensitive.
+:::
 
 ## USB Configuration
 

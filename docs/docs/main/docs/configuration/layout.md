@@ -30,7 +30,7 @@ Both strings are read in the same order, so the key at matrix position `(0,0)` i
 
 ## The layout map
 
-`[layout].map` places your keys in the order you want to define them. **The order matters**: every `[[keymap.layer]]` reads its keys in this same order, so the *n*-th key in the map is the *n*-th key on each layer.
+`[layout].map` places your keys in the order you want to define them. **The order matters**: every `[[keymap.layer]]` reads its keys in this same order, so the _n_-th key in the map is the _n_-th key on each layer.
 
 Each item in the map is one of:
 
@@ -104,7 +104,7 @@ Hand names are case-insensitive. The marker is the third element of the tuple, e
 
 ## Rendered layout
 
-Everything in this section changes only how your keyboard is *drawn* in editors like Vial and Rynk — never what a key does. RMK compiles the rendered layout into a compact blob that the firmware streams to the host on request; the firmware itself never reads it. You can skip this section entirely: a bare `(row, col)` renders as a plain 1u key.
+Everything in this section changes only how your keyboard is _drawn_ in editors like Vial and Rynk — never what a key does. RMK compiles the rendered layout into a compact blob that the firmware streams to the host on request; the firmware itself never reads it. You can skip this section entirely: a bare `(row, col)` renders as a plain 1u key.
 
 ### Shapes
 
@@ -175,11 +175,11 @@ map = """
 
 ### Encoders
 
-`(e, id)` places rotary encoder `id` in the rendered layout, e.g. `(e, 0)`. Encoder ids must be unique and cover `0..N` with no gaps. When you declare *any* encoder tokens, their count must match the number of encoders your board declares — but providing no `(e, id)` tokens at all is allowed: the encoders still work, they just have nothing to render. Encoders are render-only — they are *not* keymap positions, so they don't appear in `[[keymap.layer]].keys` (their actions go in `[[keymap.layer]].encoders` instead).
+`(e, id)` places rotary encoder `id` in the rendered layout, e.g. `(e, 0)`. Encoder ids must be unique and cover `0..N` with no gaps. When you declare _any_ encoder tokens, their count must match the number of encoders your board declares — but providing no `(e, id)` tokens at all is allowed: the encoders still work, they just have nothing to render. Encoders are render-only — they are _not_ keymap positions, so they don't appear in `[[keymap.layer]].keys` (their actions go in `[[keymap.layer]].encoders` instead).
 
 ### Variants
 
-One `map` can describe a *superset* of positions that renders in several ways — for example a 60% board that ships as ANSI, ISO, and split-backspace. Each `[[layout.variant]]` is a complete render of the **same keymap**: it hides some keys and reshapes others, and the remaining keys reflow to close the gaps.
+One `map` can describe a _superset_ of positions that renders in several ways — for example a 60% board that ships as ANSI, ISO, and split-backspace. Each `[[layout.variant]]` is a complete render of the **same keymap**: it hides some keys and reshapes others, and the remaining keys reflow to close the gaps.
 
 ```toml
 [layout]
@@ -235,9 +235,7 @@ The number and order of keys on each layer must match the `(row, col)` keys in `
 `[keymap].layers` sets the total number of layers. It's optional — it defaults to the number of `[[keymap.layer]]` blocks you define; set it larger only to reserve extra empty layers (handy for on-the-fly Vial or Rynk editing).
 
 ::: warning
-
 If you define fewer layers than `keymap.layers`, RMK fills the rest with empty layers automatically (so you can configure them freely in Vial). Empty layers still consume flash and RAM, so avoid a large layer count if you're short on space.
-
 :::
 
 In each `layer.keys`, keys are bound to key actions. Because of the TOML format, this is done in a string: RMK parses it and fills in the actual keymap initializer, like the one in [`keymap.rs`](https://github.com/HaoboGu/rmk/tree/main/examples/use_rust/rp2040/src/keymap.rs).
@@ -252,11 +250,9 @@ The `layer.keys` string follows several rules:
 
    You may use aliases, prefixed with `@`, like `@my_copy` in the example above. Alias names are case sensitive. Defining aliases is covered below.
 
-   You may use layer names instead of layer numbers, like `TO(base_layer)` above.
-   ::: warning
+   You may use layer names instead of layer numbers, like `TO(base_layer)` above. ::: warning
 
    A layer name used this way may not contain whitespace and may not be a number. Layer names are case sensitive.
-
    :::
 
 2. For a no-key (`KeyAction::No`), use `No`.
@@ -302,9 +298,7 @@ my_paste = "WM(V, LCtrl)"
 ```
 
 ::: warning
-
 Alias names may not contain whitespace, and they are case sensitive.
-
 :::
 
 ## Converting from KLE or Vial

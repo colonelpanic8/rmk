@@ -1,6 +1,6 @@
 import * as path from 'node:path'
 import { defineConfig } from '@rspress/core'
-import { pluginLlms } from '@rspress/plugin-llms';
+import { pluginLlms } from '@rspress/plugin-llms'
 import { pluginSitemap } from '@rspress/plugin-sitemap'
 import { pluginTailwindcss } from '@rsbuild/plugin-tailwindcss'
 

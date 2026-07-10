@@ -78,9 +78,7 @@ rmk::input_device::pointing::CaretConfig {
 Uses `MotionAccumulator` in persistent mode: `total = remainder + delta`, output = `total / divisor`, but the **full total** stays in the accumulator (not just the remainder). The consumer (caret logic) decides when to reset the accumulator via `reset_x()`/`reset_y()` after a tap has been triggered.
 
 ::: note
-
 Caret mode currently gets rid of all pressed modifiers (shift, CTRL) and sends the bare HidKeyCode.
-
 :::
 
 ## Mode switching

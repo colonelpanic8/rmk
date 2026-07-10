@@ -1,3 +1,5 @@
 pnpm-lock.yaml
 dist/
 docs/v*
+docs/main/**/*.md
+docs/main/**/*.mdx

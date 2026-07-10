@@ -1,14 +1,11 @@
 # Host Configuration
 
-The `[host]` section selects the firmware protocol used by host-side tools.
-RMK currently supports two mutually exclusive protocols:
+The `[host]` section selects the firmware protocol used by host-side tools. RMK currently supports two mutually exclusive protocols:
 
 - `rynk_enabled`: RMK's native protocol for RMK-aware host tools.
 - `vial_enabled`: the Vial/VIA-compatible protocol for the Vial app.
 
-The `keyboard.toml` values must match the `rmk` Cargo features. If
-`host.rynk_enabled = true`, enable the `rynk` Cargo feature. If
-`host.vial_enabled = true`, enable the `vial` Cargo feature. Do not enable both.
+The `keyboard.toml` values must match the `rmk` Cargo features. If `host.rynk_enabled = true`, enable the `rynk` Cargo feature. If `host.vial_enabled = true`, enable the `vial` Cargo feature. Do not enable both.
 
 ## Configuration Example
 

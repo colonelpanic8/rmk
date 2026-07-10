@@ -3,10 +3,8 @@
 A joystick is an analog input device that can be used for mouse control and other functions. Currently, only NRF series chips are supported.
 
 ::: warning
-
 1. You need to use a debug probe to find your parameters now.
 2. Only Nrf is supported now.
-
 :::
 
 TODO:

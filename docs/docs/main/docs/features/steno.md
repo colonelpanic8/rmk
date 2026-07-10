@@ -1,17 +1,8 @@
 # Stenography
 
-RMK supports [Plover](https://opensteno.org/plover/) stenography over
-USB HID. When the `steno` feature is enabled, the keyboard registers as a
-stenography machine that Plover (v5.1+) connects to via the
-[plover-machine-hid](https://github.com/dnaq/plover-machine-hid) plugin,
-without serial emulation.
+RMK supports [Plover](https://opensteno.org/plover/) stenography over USB HID. When the `steno` feature is enabled, the keyboard registers as a stenography machine that Plover (v5.1+) connects to via the [plover-machine-hid](https://github.com/dnaq/plover-machine-hid) plugin, without serial emulation.
 
-Steno keys are mapped in your layout like any other key. RMK sends the live
-state of all held steno keys to the host on every key press and release,
-matching the [Plover HID protocol](https://github.com/dnaq/plover-machine-hid).
-Chord detection happens entirely in Plover: by default chords fire when all
-keys are released, but Plover's "first-up chord send" and "auto-repeat"
-options also work because the firmware reports every state change.
+Steno keys are mapped in your layout like any other key. RMK sends the live state of all held steno keys to the host on every key press and release, matching the [Plover HID protocol](https://github.com/dnaq/plover-machine-hid). Chord detection happens entirely in Plover: by default chords fire when all keys are released, but Plover's "first-up chord send" and "auto-repeat" options also work because the firmware reports every state change.
 
 ## Setup
 
@@ -59,14 +50,11 @@ let keymap = [
 1. Flash your keyboard with the `steno` feature enabled.
 2. Open Plover and go to **Configure > Machine**.
 3. Select **Plover HID** as the machine type.
-4. Click **Connect**. Plover finds your keyboard by its HID usage page
-   (`0xFF50`).
+4. Click **Connect**. Plover finds your keyboard by its HID usage page (`0xFF50`).
 5. Test a chord with Plover paper tape.
 
 ## Limitations
 
-- USB only. BLE does not support steno because the standard HID-over-GATT
-  service has no stenography characteristic.
-- No dictionary on the keyboard. RMK sends raw steno chords to the host;
-  translation to text happens in Plover.
+- USB only. BLE does not support steno because the standard HID-over-GATT service has no stenography characteristic.
+- No dictionary on the keyboard. RMK sends raw steno chords to the host; translation to text happens in Plover.
 - No serial emulation: TX Bolt and GeminiPR are not supported.

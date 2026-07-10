@@ -6,9 +6,9 @@
   "scripts": {
     "postinstall": "tsx fetch-docs.ts",
     "build": "rspress build",
-    "check": "prettier .",
+    "check": "node scripts/format-rspress-markdown.mjs --check && prettier . --check",
     "dev": "rspress dev",
-    "format": "prettier . --write",
+    "format": "node scripts/format-rspress-markdown.mjs && prettier . --write",
     "preview": "rspress preview"
   },
   "dependencies": {

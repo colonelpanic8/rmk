@@ -150,17 +150,17 @@ renderer = "my_crate::MyRenderer"
 
 The `ctx` argument passed to `render` carries a snapshot of the current keyboard state:
 
-| Field             | Type                  | Description                                                                |
-| ----------------- | --------------------- | -------------------------------------------------------------------------- |
-| `layer`           | `u8`                  | Current active layer index                                                 |
-| `wpm`             | `u16`                 | Words-per-minute estimate                                                  |
-| `caps_lock`       | `bool`                | Caps Lock indicator state                                                  |
-| `num_lock`        | `bool`                | Num Lock indicator state                                                   |
-| `modifiers`       | `ModifierCombination` | Active modifier keys (Shift, Ctrl, Alt, GUI)                               |
-| `key_pressed`     | `bool`                | Whether a key is currently held down                                       |
-| `key_press_latch` | `bool`                | True if a key was pressed since the last render; cleared after each render |
-| `sleeping`        | `bool`                | Whether the keyboard is in sleep mode                                      |
-| `battery`         | `BatteryStateEvent`   | Battery charge level and state                                             |
+| Field | Type | Description |
+| --- | --- | --- |
+| `layer` | `u8` | Current active layer index |
+| `wpm` | `u16` | Words-per-minute estimate |
+| `caps_lock` | `bool` | Caps Lock indicator state |
+| `num_lock` | `bool` | Num Lock indicator state |
+| `modifiers` | `ModifierCombination` | Active modifier keys (Shift, Ctrl, Alt, GUI) |
+| `key_pressed` | `bool` | Whether a key is currently held down |
+| `key_press_latch` | `bool` | True if a key was pressed since the last render; cleared after each render |
+| `sleeping` | `bool` | Whether the keyboard is in sleep mode |
+| `battery` | `BatteryStateEvent` | Battery charge level and state |
 
 Feature-gated fields (require the corresponding RMK feature to be enabled):
 

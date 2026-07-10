@@ -83,7 +83,6 @@ pub struct AnotherEvent {
 - `pubs` (optional): Max publishers. If specified, uses PubSub channel. Default is 1.
 
 ::: note Channel types
-
 - **Channel**: Each event is consumed by **one** subscriber. If multiple subscribers exist, only one receives each event.
 - **PubSub**: Each event is broadcast to **all** subscribers. Specify `subs` or `pubs` to enable.
   :::

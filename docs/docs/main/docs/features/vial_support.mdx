@@ -2,9 +2,13 @@
 
 RMK can expose the [Vial](https://get.vial.today/) protocol for compatibility with the Vial app. Vial allows you to change your keymapping in real-time without flashing new firmware.
 
-::: warning Vial and [Rynk](./rynk) are mutually exclusive firmware protocols. The `rmk` crate's default Cargo features enable Rynk, not Vial. To build Vial firmware, disable default features and enable the `vial` feature explicitly. :::
+::: warning
+Vial and [Rynk](./rynk) are mutually exclusive firmware protocols. The `rmk` crate's default Cargo features enable Rynk, not Vial. To build Vial firmware, disable default features and enable the `vial` feature explicitly.
+:::
 
-::: warning Vial requires the [storage feature](./storage) to persist your keymap data. Without storage feature enabled, any changes to your keymap will be lost after the keyboard reboots. :::
+::: warning
+Vial requires the [storage feature](./storage) to persist your keymap data. Without storage feature enabled, any changes to your keymap will be lost after the keyboard reboots.
+:::
 
 ## Enable Vial
 
@@ -35,22 +39,17 @@ Add any chip, BLE, split, display, or other features your board needs.
 To use Vial with RMK, you need a keyboard definition file named `vial.json`. Vial provides detailed documentation on how to generate this file: https://get.vial.today/docs/porting-to-via.html.
 
 ::: Note When creating your `vial.json`, it is essential that you use the exact same layout definition as your RMK firmware's internal keymap, which is defined in either `src/keymap.rs` or `keyboard.toml`.
-
 It's important to understand the difference:
 
 - `vial.json`: Defines the keyboard layout recognized by Vial, which specifies the position of each key that Vial sets.
 - `src/keymap.rs` / `keyboard.toml`: Defines the actual layout and keymap in the firmware, which specifies the action for each key press.
-
 :::
 
 ::: tip Generate vial.json from your keyboard.toml
-
 If your `keyboard.toml` already defines the [`[layout]`](../configuration/layout) section, [rmkit](https://github.com/haobogu/rmkit) can generate a matching `vial.json` for you: run `rmkit layout convert --to-vial path/to/keyboard.toml`. The rendered layout is decoded from the exact layout the firmware builds, so it cannot drift from the firmware — just fill in the Vial-specific fields (USB `vendorId`/`productId`, `lighting`, `customKeycodes`, …) yourself. The same command also works in the forward direction, converting an existing `vial.json` or KLE export into the `[layout]` section — see [converting from KLE or Vial](../configuration/layout#converting-from-kle-or-vial).
-
 :::
 
-Once you have your `vial.json` file, simply place it in the root directory of your RMK firmware
-project. RMK will automatically handle the rest.
+Once you have your `vial.json` file, simply place it in the root directory of your RMK firmware project. RMK will automatically handle the rest.
 
 ## Disable Vial
 
@@ -81,7 +80,9 @@ For security purposes, you can configure unlock keys that must be pressed simult
 unlock_keys = [[0, 0], [0, 1]]  # Keys at (row=0,col=0) and (row=0,col=1)
 ```
 
-::: tip The unlock keys use the physical matrix position (row, column), not the keycode. Make sure to use keys that are easy to press simultaneously but not commonly pressed together accidentally. :::
+::: tip
+The unlock keys use the physical matrix position (row, column), not the keycode. Make sure to use keys that are easy to press simultaneously but not commonly pressed together accidentally.
+:::
 
 ## Start Vial Unlocked (insecure)
 
@@ -94,4 +95,6 @@ For development and testing it can be convenient to skip this step. Setting `ins
 insecure = true
 ```
 
-::: Note `insecure` (formerly `vial_insecure`; the old name still parses) only takes effect for Vial with the `vial_lock` Cargo feature. Since v0.9 `vial_lock` is no longer a default feature, so enable it explicitly in `Cargo.toml` (it also pulls in `vial`). It does not replace `unlock_keys`: the host can still lock and re-unlock a session that started unlocked, so you may keep `unlock_keys` configured alongside it. :::
+::: Note
+`insecure` (formerly `vial_insecure`; the old name still parses) only takes effect for Vial with the `vial_lock` Cargo feature. Since v0.9 `vial_lock` is no longer a default feature, so enable it explicitly in `Cargo.toml` (it also pulls in `vial`). It does not replace `unlock_keys`: the host can still lock and re-unlock a session that started unlocked, so you may keep `unlock_keys` configured alongside it.
+:::

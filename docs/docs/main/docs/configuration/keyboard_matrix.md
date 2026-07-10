@@ -54,8 +54,7 @@ GPIO pin names vary by microcontroller. Here are the correct formats for each su
 
 1. Visit [Embassy docs](https://docs.embassy.dev/)
 2. Navigate to your specific chip (e.g., `embassy-stm32/stm32h750xb`)
-3. Check the peripherals module for valid GPIO pin names:
-   ![gpio_peripheral_name](../../images/gpio_peripheral_name.png)
+3. Check the peripherals module for valid GPIO pin names: ![gpio_peripheral_name](../../images/gpio_peripheral_name.png)
 
 ### Matrix Type Configuration
 
@@ -156,7 +155,6 @@ unlock_keys = [[0, 0], [0, 1]]  # Keys at (row=0,col=0) and (row=0,col=1)
 ```
 
 ::: tip
-
 - The unlock keys use the physical matrix position (row, column), not the keycode
 - Choose keys that are easy to press simultaneously but not commonly pressed together accidentally
 - See the [Vial Support](../features/vial_support.mdx) page for more details on Vial configuration

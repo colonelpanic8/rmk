@@ -1,8 +1,6 @@
 # Bootloader Configuration (embassy-boot)
 
-[embassy-boot](https://github.com/embassy-rs/embassy/tree/main/embassy-boot) is a libary of the embassy framework that is used to build bootloaders.
-RMK supports DFU firmware updates via embassy-boot for **RP2040** and **nRF52840**. An embassy-boot based bootloader splits flash into ACTIVE and DFU slots, providing safe updates with automatic rollback on failure.
-This is an optional feature of RMK, the default bootloaders of the devices can still be used as usual without runtime updates via USB DFU.
+[embassy-boot](https://github.com/embassy-rs/embassy/tree/main/embassy-boot) is a libary of the embassy framework that is used to build bootloaders. RMK supports DFU firmware updates via embassy-boot for **RP2040** and **nRF52840**. An embassy-boot based bootloader splits flash into ACTIVE and DFU slots, providing safe updates with automatic rollback on failure. This is an optional feature of RMK, the default bootloaders of the devices can still be used as usual without runtime updates via USB DFU.
 
 A pre-built embassy-boot based bootloader called **bootymcbootface** is available for both platforms. The partition formula is identical:
 
@@ -238,7 +236,7 @@ run_all!(
 The bootloader divides flash into regions. The defaults follow the [bootymcbootface](https://codeberg.org/Schievel/bootymcbootface/) convention and are automatically calculated from `flash_size`:
 
 | Region          | Offset         | Size                                 |
-|-----------------|----------------|--------------------------------------|
+| --------------- | -------------- | ------------------------------------ |
 | Bootloader(s)   | `0x0000000`    | 28 KB                                |
 | Boot state      | `0x6000`       | 4 KB                                 |
 | Active firmware | `0x7000`       | `(flash_size - 28K - 128K - 4K) / 2` |
@@ -256,9 +254,9 @@ Your `memory.x` must match this partition layout — see the [flashing guide](..
 A GPIO pin for the DFU LED.
 
 | Platform | Default LED pin | Example configuration |
-|----------|----------------|----------------------|
-| RP2040   | `PIN_25`       | `led = "PIN_25"`     |
-| nRF52840 | `P0_15`        | `led = "P0_15"`      |
+| -------- | --------------- | --------------------- |
+| RP2040   | `PIN_25`        | `led = "PIN_25"`      |
+| nRF52840 | `P0_15`         | `led = "P0_15"`       |
 
 See the [LED behavior table](../user_guide/flash_firmware/use_embassy_boot.mdx#led-behavior-during-dfu-transfer-optional) for the full state machine.
 
@@ -271,4 +269,3 @@ See the [DFU lock section](../user_guide/flash_firmware/use_embassy_boot.mdx#unl
 ::: tip
 Choose keys that are easy to press simultaneously but not commonly pressed together accidentally.
 :::
-

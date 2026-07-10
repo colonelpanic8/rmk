@@ -6,21 +6,7 @@ const config: Config = {
   singleQuote: true,
   trailingComma: 'none',
   tabWidth: 2,
-  proseWrap: 'always',
-  overrides: [
-    {
-      files: '*.md',
-      options: {
-        proseWrap: 'preserve'
-      }
-    },
-    {
-      files: '*.mdx',
-      options: {
-        proseWrap: 'never'
-      }
-    }
-  ]
+  proseWrap: 'never'
 }
 
 export default config
