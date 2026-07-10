@@ -36,17 +36,13 @@ In this example, when both layers 1 (`upper`) and 2 (`lower`) are active, layer 
 
 The `one_shot` sub-table contains common one-shot configuration (for both OSM and OSL)
 
-Currently, there are only `timeout` field that specifies how long the one-shot modifier/layer remains active.
-When no key is pressed within this time, the one-shot modifier/layer will be canceled.
-`timeout` value is a string suffixed with `s` or `ms` (default: `1s`).
+Currently, there are only `timeout` field that specifies how long the one-shot modifier/layer remains active. When no key is pressed within this time, the one-shot modifier/layer will be canceled. `timeout` value is a string suffixed with `s` or `ms` (default: `1s`).
 
 ## One-Shot Modifiers
 
 The `one_shot_modifiers` sub-table configures one-shot modifiers (OSM).
 
-By default, one-shot modifiers do not activate on keypress and will be sent only when other key is pressed.
-You can change this behavior by setting `activate_on_keypress` to `true`.
-This behavior is also known as One-Shot Sticky Modifiers (OSSM).
+By default, one-shot modifiers do not activate on keypress and will be sent only when other key is pressed. You can change this behavior by setting `activate_on_keypress` to `true`. This behavior is also known as One-Shot Sticky Modifiers (OSSM).
 
 If you press One-Shot Modifier again, it will be sent as a normal modifier key press and, therefore, released.
 
@@ -219,7 +215,6 @@ morses = [
 ```
 
 ::: warning
-
 The three definition methods are mutually exclusive. For any single Morse key definition, you must choose only one of the following approaches:
 
 - Full Morse: `morse_actions`
@@ -227,7 +222,6 @@ The three definition methods are mutually exclusive. For any single Morse key de
 - Vial-style: `tap`, `hold`, `hold_after_tap`, `double_tap`.
 
 Mixing fields from different methods in the same definition is not allowed.
-
 :::
 
 ### Profile
@@ -235,10 +229,8 @@ Mixing fields from different methods in the same definition is not allowed.
 The `profile` of a morse key contains all tunable configurations of this morse key, such as behavior mode, timing configurations, etc.
 
 ::: tip
-
 - `enable_flow_tap`: Enables HRM (Home Row Mod) mode. When enabled, the global `prior_idle_time` setting becomes functional. Defaults to `false`. Profiles may set this to override the global `[behavior.morse]` value; omitting it inherits the global value.
-- `prior_idle_time`: *(global only)* If the previous non-modifier key is released within this period before pressing the current tap-hold key, the tap action for the tap-hold behavior will be triggered. This parameter lives in `[behavior.morse]` (not in a per-key profile) and is effective only when `enable_flow_tap` is enabled for the key. Defaults to 120ms.
-
+- `prior_idle_time`: _(global only)_ If the previous non-modifier key is released within this period before pressing the current tap-hold key, the tap action for the tap-hold behavior will be triggered. This parameter lives in `[behavior.morse]` (not in a per-key profile) and is effective only when `enable_flow_tap` is enabled for the key. Defaults to 120ms.
 :::
 
 A profile contains the following fields:
@@ -550,28 +542,24 @@ timeout = "500ms"
 threshold = 5
 ```
 
-| Field          | Type    | Default | Description |
-|----------------|---------|---------|-------------|
-| `device_id`    | integer | —       | Pointing device id this entry applies to. Omit for a fallback that matches any device not covered by another entry. At most one fallback (and at most one entry per `device_id`) is allowed. |
-| `target_layer` | integer | —       | Layer index to activate (must be `< [layout.layers]`). |
-| `timeout`      | string  | `"500ms"`| Inactivity duration before deactivation (e.g., `"600ms"`, `"2s"`). |
-| `threshold`    | integer | `1`     | Minimum absolute X/Y delta to trigger motion (`>= 1`). Increase to filter sensor noise. |
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `device_id` | integer | — | Pointing device id this entry applies to. Omit for a fallback that matches any device not covered by another entry. At most one fallback (and at most one entry per `device_id`) is allowed. |
+| `target_layer` | integer | — | Layer index to activate (must be `< [layout.layers]`). |
+| `timeout` | string | `"500ms"` | Inactivity duration before deactivation (e.g., `"600ms"`, `"2s"`). |
+| `threshold` | integer | `1` | Minimum absolute X/Y delta to trigger motion (`>= 1`). Increase to filter sensor noise. |
 
 Up to `AUTO_MOUSE_LAYER_MAX_NUM` (4) entries are supported. With `keyboard.toml` a build error is raised if more are configured; via the Rust API any entries beyond the limit are silently dropped.
 
 ::: warning
-
 Prefer a dedicated layer that is not bound to any manual keys (like `MO` or `TG`). The auto-mouse task releases its ownership when keyboard-driven changes deactivate the layer, so transient overlap is handled cleanly. Layer state is still a single boolean, however, so pressing `TG(target_layer)` while auto-mouse is active toggles the layer off instead of pinning it on.
 
 Entries that share the same `target_layer` cooperate: the layer stays active until the last device stops moving, so per-device `timeout`/`threshold` differences on a shared layer are safe.
-
 :::
 
 ::: note Event Configuration
-
 - **Subscriber Slots**: Increment both `[event.pointing].subs` and `[event.layer_change].subs` by `1` in your `keyboard.toml` to reserve slots for this task. See [Event Configuration](./event.md).
 - **Buffer Size**: If pointing events are dropped under high-frequency input, increase `[event.pointing].channel_size` (default `8`). `[event.layer_change].channel_size` defaults to `1` and only needs raising if you burst many layer changes faster than subscribers consume them.
-
 :::
 
 ::: note Rust API

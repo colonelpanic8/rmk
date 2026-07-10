@@ -776,8 +776,13 @@ mod tests {
     #[test]
     fn morse_profile_parts_roundtrip() {
         for p in [
-            MorseProfile::new(Some(false), Some(MorseMode::HoldOnOtherPress), Some(TIMEOUT_MAX_MS), Some(1))
-                .with_enable_flow_tap(Some(false)),
+            MorseProfile::new(
+                Some(false),
+                Some(MorseMode::HoldOnOtherPress),
+                Some(TIMEOUT_MAX_MS),
+                Some(1),
+            )
+            .with_enable_flow_tap(Some(false)),
             MorseProfile::new(Some(true), Some(MorseMode::Normal), Some(200), Some(150))
                 .with_enable_flow_tap(Some(true)),
             MorseProfile::const_default(),

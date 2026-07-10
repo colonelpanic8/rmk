@@ -2,7 +2,7 @@
 //! transports: the custom 128-bit GATT [`RynkService`] (native bluest hosts) and
 //! the vendor HID-over-GATT `RynkHidService` (browsers via WebHID).
 //!
-//! A connection is one host on one transport, so [`run_host_ble`] runs ONE
+//! A connection is one host on one transport, so [`HostGattHandler::run`] runs ONE
 //! [`RynkService::run_session`]: the inbound [`RYNK_BLE_RX_PIPE`] (both transports
 //! de-frame into it in `gatt_events_task`) is the Rx, and [`RynkBleTx`] routes each
 //! reply/topic to whichever characteristic the host is using ([`RynkBleSource`]).
@@ -17,10 +17,101 @@ use heapless::Vec;
 use rmk_types::protocol::rynk::{RYNK_BLE_CHUNK_SIZE, RYNK_HEADER_SIZE, RYNK_HID_REPORT_SIZE};
 use trouble_host::prelude::*;
 
+use super::HostWriteOutcome;
 use crate::ble::ble_server::Server;
 use crate::channel::RYNK_BLE_RX_PIPE;
 use crate::host::rynk::RynkService;
 use crate::host::transport::HostTransportError;
+
+pub(crate) const HOST_WRITE_BUFFER_SIZE: usize = RYNK_BLE_CHUNK_SIZE;
+
+/// Per-connection GATT write dispatcher for the two Rynk BLE transports.
+pub(crate) struct HostGattHandler {
+    custom_output_handle: u16,
+    custom_input_cccd_handle: u16,
+    hid_output_handle: u16,
+    hid_input_cccd_handle: u16,
+    hid_control_point_handle: u16,
+    hid_frame_tracker: RynkHidFrameTracker,
+}
+
+impl HostGattHandler {
+    pub(crate) fn new(server: &Server<'_>) -> Self {
+        Self {
+            custom_output_handle: server.rynk_service.output_data.handle,
+            custom_input_cccd_handle: server
+                .rynk_service
+                .input_data
+                .cccd_handle
+                .expect("No CCCD for Rynk input"),
+            hid_output_handle: server.rynk_hid_service.output_data.handle,
+            hid_input_cccd_handle: server
+                .rynk_hid_service
+                .input_data
+                .cccd_handle
+                .expect("No CCCD for Rynk HID input"),
+            hid_control_point_handle: server.rynk_hid_service.hid_control_point.handle,
+            hid_frame_tracker: RynkHidFrameTracker::new(),
+        }
+    }
+
+    pub(crate) async fn handle_write(&mut self, handle: u16, data: &[u8], encrypted: bool) -> HostWriteOutcome {
+        if handle == self.custom_output_handle {
+            if !data.is_empty() {
+                if encrypted {
+                    debug!("Got Rynk packet ({} bytes)", data.len());
+                    // Await the pipe's backpressure when the consumer falls behind.
+                    RYNK_BLE_RX_PIPE.write_all(data).await;
+                    RynkBleSource::Custom.activate();
+                } else {
+                    warn!("Rynk: dropping {}-byte write on unencrypted link", data.len());
+                }
+            }
+            HostWriteOutcome::Handled
+        } else if handle == self.custom_input_cccd_handle {
+            // A subscription alone must not bind the reply transport. OS HOGP
+            // drivers may subscribe automatically when restoring a bond.
+            HostWriteOutcome::CccdUpdated
+        } else if handle == self.hid_output_handle {
+            if encrypted {
+                if data.len() == RYNK_HID_REPORT_SIZE {
+                    let bytes = self.hid_frame_tracker.take(data);
+                    RYNK_BLE_RX_PIPE.write_all(bytes).await;
+                    RynkBleSource::Hid.activate();
+                } else {
+                    warn!("Wrong Rynk HID report size: {}", data.len());
+                }
+            } else {
+                warn!("Rynk HID: dropping {}-byte write on unencrypted link", data.len());
+            }
+            HostWriteOutcome::Handled
+        } else if handle == self.hid_input_cccd_handle {
+            HostWriteOutcome::CccdUpdated
+        } else if handle == self.hid_control_point_handle {
+            HostWriteOutcome::ControlPoint
+        } else {
+            HostWriteOutcome::Unhandled
+        }
+    }
+
+    /// Run one Rynk session over `conn`, clearing stale RX bytes and the
+    /// transport selector from a prior connection first.
+    pub(crate) async fn run<'stack, 'server, P: PacketPool>(
+        server: &'server Server<'_>,
+        conn: &GattConnection<'stack, 'server, P>,
+        service: &RynkService<'_>,
+    ) {
+        RYNK_BLE_RX_PIPE.clear();
+        RynkBleSource::None.activate();
+        let mut rx = &RYNK_BLE_RX_PIPE;
+        let mut tx = RynkBleTx {
+            custom_input: server.rynk_service.input_data.clone(),
+            hid_input: server.rynk_hid_service.input_data,
+            conn,
+        };
+        service.run_session(&mut rx, &mut tx).await;
+    }
+}
 
 /// Which BLE transport the host is using, so the session routes replies/topics to
 /// the right characteristic. Set only on a config WRITE, never on a CCCD subscribe
@@ -78,24 +169,6 @@ impl RynkHidFrameTracker {
         self.remaining -= n;
         &report[..n]
     }
-}
-
-/// Run one rynk session over `conn`, clearing stale RX bytes and the transport
-/// selector from a prior connection first. Returns when the session ends.
-pub async fn run_host_ble<'stack, 'server, P: PacketPool>(
-    server: &'server Server<'_>,
-    conn: &GattConnection<'stack, 'server, P>,
-    service: &RynkService<'_>,
-) {
-    RYNK_BLE_RX_PIPE.clear();
-    RynkBleSource::None.activate();
-    let mut rx = &RYNK_BLE_RX_PIPE;
-    let mut tx = RynkBleTx {
-        custom_input: server.rynk_service.input_data.clone(),
-        hid_input: server.rynk_hid_service.input_data,
-        conn,
-    };
-    service.run_session(&mut rx, &mut tx).await;
 }
 
 /// Write half: routes each reply/topic frame to the active transport's
@@ -157,6 +230,39 @@ impl<P: PacketPool> Write for RynkBleTx<'_, '_, '_, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classifies_rynk_gatt_handles() {
+        use crate::test_support::test_block_on as block_on;
+
+        let server = Server::new_default("rmk").unwrap();
+        let mut handler = HostGattHandler::new(&server);
+
+        assert_eq!(
+            block_on(handler.handle_write(server.rynk_service.output_data.handle, &[], true)),
+            HostWriteOutcome::Handled
+        );
+        assert_eq!(
+            block_on(handler.handle_write(server.rynk_hid_service.output_data.handle, &[], true,)),
+            HostWriteOutcome::Handled
+        );
+        assert_eq!(
+            block_on(handler.handle_write(server.rynk_service.input_data.cccd_handle.unwrap(), &[], true,)),
+            HostWriteOutcome::CccdUpdated
+        );
+        assert_eq!(
+            block_on(handler.handle_write(server.rynk_hid_service.input_data.cccd_handle.unwrap(), &[], true,)),
+            HostWriteOutcome::CccdUpdated
+        );
+        assert_eq!(
+            block_on(handler.handle_write(server.rynk_hid_service.hid_control_point.handle, &[0], true,)),
+            HostWriteOutcome::ControlPoint
+        );
+        assert_eq!(
+            block_on(handler.handle_write(u16::MAX, &[], true)),
+            HostWriteOutcome::Unhandled
+        );
+    }
 
     /// A 70-byte frame (header LEN = 65) fragmented into 32-byte reports and
     /// de-fragmented via the header LEN reassembles exactly, padding dropped.

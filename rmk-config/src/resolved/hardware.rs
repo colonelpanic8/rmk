@@ -3,11 +3,10 @@
 //! Leaf types are re-exported directly from the TOML configuration types
 //! Only types with genuine structural transformation are defined here.
 
-use crate::validate_unlock_keys;
-
 pub use crate::board::{BoardConfig, UniBodyConfig};
 pub use crate::chip::{ChipModel, ChipSeries};
 pub use crate::communication::{CommunicationConfig, UsbInfo};
+use crate::validate_unlock_keys;
 pub use crate::{
     BleConfig, ChipConfig, CommunicationProtocol, DependencyConfig, DisplayConfig, DisplayDriver, EncoderConfig,
     EncoderResolution, I2cConfig, InputDeviceConfig, Iqs5xxConfig, Iqs5xxI2cConfig, JoystickConfig, KeyInfo,

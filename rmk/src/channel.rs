@@ -107,7 +107,7 @@ pub async fn drain_flash_channel_for_test() {
 pub(crate) static BLE_PROFILE_CHANNEL: Channel<RawMutex, BleProfileAction, 1> = Channel::new();
 
 /// Vial RX from BLE GATT `output_data` writes — one 32-byte chunk per write.
-/// Pushed by `gatt_events_task`, drained by [`crate::ble::vial::run_host_ble`].
+/// Pushed by `gatt_events_task`, drained by [`crate::ble::host::HostGattHandler::run`].
 #[cfg(all(feature = "vial", feature = "_ble"))]
 pub(crate) static VIAL_BLE_RX_CHANNEL: Channel<RawMutex, [u8; 32], VIAL_CHANNEL_SIZE> = Channel::new();
 

@@ -8,8 +8,6 @@ use embassy_time::{Duration, Timer, with_timeout};
 use rmk_types::ble::BleState;
 use rmk_types::connection::ConnectionType;
 use rmk_types::led_indicator::LedIndicator;
-#[cfg(feature = "rynk")]
-use rmk_types::protocol::rynk::RYNK_HID_REPORT_SIZE;
 use trouble_host::prelude::appearance::human_interface_device::KEYBOARD;
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::*;
@@ -17,12 +15,12 @@ use trouble_host::prelude::*;
 use crate::ble::battery_service::BleBatteryServer;
 use crate::ble::ble_server::{BleHidServer, Server};
 use crate::ble::device_info::{PnPID, VidSource};
+#[cfg(feature = "host")]
+use crate::ble::host::{HOST_WRITE_BUFFER_SIZE, HostGattHandler, HostWriteOutcome};
 use crate::ble::led::BleLedReader;
 #[cfg(feature = "passkey_entry")]
 use crate::ble::passkey::{PasskeyInputState, next_gatt_event};
 use crate::ble::profile::{ProfileInfo, ProfileManager, UPDATED_CCCD_TABLE, UPDATED_PROFILE};
-#[cfg(feature = "rynk")]
-use crate::ble::rynk::{RynkBleSource, RynkHidFrameTracker};
 use crate::channel::{BLE_REPORT_CHANNEL, LED_SIGNAL};
 use crate::config::{BleBatteryConfig, RmkConfig};
 use crate::core_traits::Runnable;
@@ -35,15 +33,13 @@ use crate::state::set_ble_state;
 pub(crate) mod battery_service;
 pub(crate) mod ble_server;
 pub(crate) mod device_info;
+#[cfg(feature = "host")]
+pub(crate) mod host;
 pub(crate) mod led;
 #[cfg(feature = "_nrf_ble")]
 pub(crate) mod nrf;
 pub mod passkey;
 pub(crate) mod profile;
-#[cfg(feature = "rynk")]
-pub(crate) mod rynk;
-#[cfg(all(feature = "vial", feature = "_ble"))]
-pub(crate) mod vial;
 
 /// Global state of sleep management
 /// - `true`: Indicates central is sleeping
@@ -288,20 +284,6 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
     let output_keyboard = server.hid_service.output_keyboard;
     let hid_control_point = server.hid_service.hid_control_point;
     let input_keyboard = server.hid_service.input_keyboard;
-    #[cfg(feature = "vial")]
-    let (output_host, input_host, host_control_point) = (
-        server.vial_service.output_data,
-        server.vial_service.input_data,
-        server.vial_service.hid_control_point,
-    );
-    #[cfg(feature = "rynk")]
-    let (output_host, input_host) = (
-        server.rynk_service.output_data.clone(),
-        server.rynk_service.input_data.clone(),
-    );
-    // WebHID transport handles — fixed-size [u8; N] chars are Copy (no clone).
-    #[cfg(feature = "rynk")]
-    let (output_hid, input_hid) = (server.rynk_hid_service.output_data, server.rynk_hid_service.input_data);
     let mouse = server.composite_service.mouse_report;
     let media = server.composite_service.media_report;
     let media_control_point = server.composite_service.hid_control_point;
@@ -310,9 +292,8 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
     #[cfg(feature = "passkey_entry")]
     let mut passkey_state = PasskeyInputState::new();
 
-    // WebHID de-frame state: tracks the in-flight rynk frame to drop report padding.
-    #[cfg(feature = "rynk")]
-    let mut hid_frame_tracker = RynkHidFrameTracker::new();
+    #[cfg(feature = "host")]
+    let mut host_gatt_handler = HostGattHandler::new(server);
 
     loop {
         #[cfg(feature = "passkey_entry")]
@@ -375,21 +356,14 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                         }
                     }
                     GattEvent::Write(event) => {
-                        // Reject host-channel writes on an unencrypted link before
-                        // they reach the Rynk session, not just at the ATT reply.
                         let encrypted = conn.raw().security_level()?.encrypted();
-
-                        #[cfg(feature = "vial")]
-                        let host_control_point_match = event.handle() == host_control_point.handle;
-                        #[cfg(not(feature = "vial"))]
-                        let host_control_point_match = false;
 
                         // trouble-host 0.7 exposes written bytes via a closure; copy them out
                         // once so the dispatch below (which awaits) can use them freely.
                         // Sized for the active host protocol's largest BLE write.
-                        #[cfg(feature = "rynk")]
-                        let mut data_buf = [0u8; crate::host::rynk::RYNK_BLE_CHUNK_SIZE];
-                        #[cfg(not(feature = "rynk"))]
+                        #[cfg(feature = "host")]
+                        let mut data_buf = [0u8; HOST_WRITE_BUFFER_SIZE];
+                        #[cfg(not(feature = "host"))]
                         let mut data_buf = [0u8; 32];
                         let data_len = event.with_data(|_, data| {
                             let n = data.len().min(data_buf.len());
@@ -397,6 +371,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                             data.len()
                         });
                         let data = &data_buf[..data_len.min(data_buf.len())];
+                        let mut control_point_write = false;
 
                         if event.handle() == output_keyboard.handle {
                             if data_len == 1 {
@@ -415,8 +390,23 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                             cccd_updated = true;
                         } else if event.handle() == hid_control_point.handle
                             || event.handle() == media_control_point.handle
-                            || host_control_point_match
                         {
+                            control_point_write = true;
+                        } else {
+                            #[cfg(feature = "host")]
+                            match host_gatt_handler.handle_write(event.handle(), data, encrypted).await {
+                                HostWriteOutcome::Handled => {}
+                                HostWriteOutcome::CccdUpdated => cccd_updated = true,
+                                HostWriteOutcome::ControlPoint => control_point_write = true,
+                                HostWriteOutcome::Unhandled => {
+                                    debug!("Write GATT Event to Unknown: {:?}", event.handle())
+                                }
+                            }
+                            #[cfg(not(feature = "host"))]
+                            debug!("Write GATT Event to Unknown: {:?}", event.handle());
+                        }
+
+                        if control_point_write {
                             info!("Write GATT Event to Control Point: {:?}", event.handle());
                             #[cfg(feature = "split")]
                             {
@@ -431,67 +421,6 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                                         _ => {}
                                     }
                                 }
-                            }
-                        } else {
-                            #[cfg(feature = "host")]
-                            let mut handled = false;
-                            #[cfg(not(feature = "host"))]
-                            let handled = false;
-                            #[cfg(feature = "host")]
-                            if event.handle() == output_host.handle {
-                                #[cfg(feature = "vial")]
-                                if data_len == 32 {
-                                    debug!("Got Vial packet: {:?}", data);
-                                    crate::channel::VIAL_BLE_RX_CHANNEL.send(data_buf).await;
-                                } else {
-                                    warn!("Wrong Vial packet data: {:?}", data);
-                                }
-
-                                #[cfg(feature = "rynk")]
-                                if !data.is_empty() {
-                                    if encrypted {
-                                        debug!("Got Rynk packet ({} bytes)", data.len());
-                                        // Awaits the pipe's backpressure when the rynk
-                                        // consumer falls behind.
-                                        crate::channel::RYNK_BLE_RX_PIPE.write_all(data).await;
-                                        RynkBleSource::Custom.activate();
-                                    } else {
-                                        warn!("Rynk: dropping {}-byte write on unencrypted link", data.len());
-                                    }
-                                }
-
-                                handled = true;
-                            } else if event.handle() == input_host.cccd_handle.expect("No CCCD for host input") {
-                                // Bind the transport only on a real write, not on a CCCD subscribe.
-                                cccd_updated = true;
-                                handled = true;
-                            }
-
-                            // WebHID writes fixed 32-byte Rynk frame fragments.
-                            #[cfg(feature = "rynk")]
-                            if !handled && event.handle() == output_hid.handle {
-                                let data = event.data();
-                                if encrypted {
-                                    if data.len() == RYNK_HID_REPORT_SIZE {
-                                        let bytes = hid_frame_tracker.take(data);
-                                        crate::channel::RYNK_BLE_RX_PIPE.write_all(bytes).await;
-                                        RynkBleSource::Hid.activate();
-                                    } else {
-                                        warn!("Wrong Rynk HID report size: {}", data.len());
-                                    }
-                                } else {
-                                    warn!("Rynk HID: dropping {}-byte write on unencrypted link", data.len());
-                                }
-                                handled = true;
-                            } else if !handled
-                                && event.handle() == input_hid.cccd_handle.expect("No CCCD for host hid input")
-                            {
-                                cccd_updated = true;
-                                handled = true;
-                            }
-
-                            if !handled {
-                                debug!("Write GATT Event to Unknown: {:?}", event.handle());
                             }
                         }
 
@@ -787,7 +716,7 @@ async fn run_ble_keyboard<
     #[cfg(feature = "host")]
     let host_task = async {
         if let Some(service) = host_service {
-            crate::host::run_host_ble(server, conn, service).await;
+            HostGattHandler::run(server, conn, service).await;
         } else {
             core::future::pending::<()>().await;
         }

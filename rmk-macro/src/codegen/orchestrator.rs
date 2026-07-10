@@ -1,10 +1,10 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
+use rmk_config::DebouncerType;
 use rmk_config::resolved::hardware::{
     BoardConfig, ChipSeries, KeyInfo, MatrixConfig, MatrixType, UniBodyConfig,
 };
 use rmk_config::resolved::{Behavior, Hardware, Host, Identity, Keymap, Layout};
-use rmk_config::DebouncerType;
 
 use super::behavior::expand_behavior_config;
 use super::chip::bind_interrupt::expand_bind_interrupt;

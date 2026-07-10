@@ -24,7 +24,7 @@ use rynk::rmk_types::protocol::rynk::{
     GetMorseBulkResponse, MacroData, ProtocolVersion, RynkError, SetComboBulkRequest, SetKeymapBulkRequest,
     SetMorseBulkRequest, StorageResetMode,
 };
-use rynk::{Client, RequestError};
+use rynk::{Client, RynkHostError};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_ADDR: &str = "127.0.0.1:9000";
@@ -100,16 +100,16 @@ fn empty_morse(profile: MorseProfile) -> Morse {
     }
 }
 
-fn expect_rejected<T: Debug>(label: &str, res: Result<T, RequestError>, expected: RynkError) {
+fn expect_rejected<T: Debug>(label: &str, res: Result<T, RynkHostError>, expected: RynkError) {
     match res {
-        Err(RequestError::Rejected(actual)) if actual == expected => {}
+        Err(RynkHostError::Rejected(actual)) if actual == expected => {}
         other => panic!("{label}: expected Rejected({expected:?}), got {other:?}"),
     }
 }
 
-fn expect_unsupported<T: Debug>(label: &str, res: Result<T, RequestError>) {
+fn expect_unsupported<T: Debug>(label: &str, res: Result<T, RynkHostError>) {
     match res {
-        Err(RequestError::Unsupported(_, _)) => {}
+        Err(RynkHostError::Unsupported(_, _)) => {}
         other => panic!("{label}: expected Unsupported, got {other:?}"),
     }
 }
@@ -125,8 +125,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|_| format!("Rynk handshake timed out over QEMU TCP serial at {addr}"))??;
 
-    assert_eq!(client.protocol_version(), ProtocolVersion::CURRENT);
-    let caps = *client.capabilities();
+    assert_eq!(client.get_version().await?, ProtocolVersion::CURRENT);
+    let caps = client.get_capabilities().await?;
     assert_eq!((caps.num_layers, caps.num_rows, caps.num_cols), (2, 3, 3));
     assert_eq!(caps.num_encoders, 1);
     assert_eq!(caps.max_combos, 8);
@@ -144,7 +144,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(caps.max_bulk_keys > 0);
     assert!(caps.max_bulk_configs > 0);
 
-    assert_eq!(client.get_version().await?, ProtocolVersion::CURRENT);
     assert_eq!(client.get_capabilities().await?, caps);
 
     assert_eq!(client.get_default_layer().await?, 0);
