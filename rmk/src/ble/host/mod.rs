@@ -11,9 +11,9 @@ pub(crate) type HostGattHandler = rynk::HostGattHandler;
 pub(crate) type HostGattHandler = vial::HostGattHandler;
 
 #[cfg(feature = "rynk")]
-pub(crate) const HOST_WRITE_BUFFER_SIZE: usize = rynk::HOST_WRITE_BUFFER_SIZE;
+pub(crate) const HOST_WRITE_BUFFER_SIZE: usize = rmk_types::protocol::rynk::RYNK_BLE_CHUNK_SIZE;
 #[cfg(feature = "vial")]
-pub(crate) const HOST_WRITE_BUFFER_SIZE: usize = vial::HOST_WRITE_BUFFER_SIZE;
+pub(crate) const HOST_WRITE_BUFFER_SIZE: usize = 32;
 
 /// Result of dispatching a GATT write to the active host protocol.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

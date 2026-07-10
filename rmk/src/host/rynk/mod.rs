@@ -185,7 +185,7 @@ impl<'a> RynkService<'a> {
             Cmd::GetMatrixState => Handle::<command::GetMatrixState>::handle_message(self, msg).await,
             #[cfg(feature = "_ble")]
             Cmd::GetBatteryStatus => Handle::<command::GetBatteryStatus>::handle_message(self, msg).await,
-            #[cfg(all(feature = "_ble", feature = "split"))]
+            #[cfg(feature = "split")]
             Cmd::GetPeripheralStatus => Handle::<command::GetPeripheralStatus>::handle_message(self, msg).await,
             Cmd::GetWpm => Handle::<command::GetWpm>::handle_message(self, msg).await,
             Cmd::GetSleepState => Handle::<command::GetSleepState>::handle_message(self, msg).await,

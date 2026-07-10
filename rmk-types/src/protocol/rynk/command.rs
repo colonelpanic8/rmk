@@ -29,7 +29,7 @@ use crate::connection::{ConnectionStatus, ConnectionType};
 use crate::fork::Fork;
 use crate::led_indicator::LedIndicator;
 use crate::morse::Morse;
-#[cfg(all(feature = "_ble", feature = "split"))]
+#[cfg(feature = "split")]
 use crate::protocol::rynk::PeripheralStatus;
 
 /// CMD high bit marking a topic (server → host push).
@@ -279,7 +279,7 @@ endpoints! {
     GetMatrixState = 0x0802: () => MatrixState;
     #[cfg(feature = "_ble")]
     GetBatteryStatus = 0x0803: () => BatteryStatus;
-    #[cfg(all(feature = "_ble", feature = "split"))]
+    #[cfg(feature = "split")]
     GetPeripheralStatus = 0x0804: u8 => PeripheralStatus;
     /// Latest WPM, sourced from the `WpmUpdate` topic snapshot.
     GetWpm = 0x0805: () => u16;

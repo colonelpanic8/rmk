@@ -13,8 +13,6 @@ use crate::channel::VIAL_BLE_RX_CHANNEL;
 use crate::host::transport::HostTransportError;
 use crate::host::via::VialService;
 
-pub(crate) const HOST_WRITE_BUFFER_SIZE: usize = 32;
-
 /// Per-connection GATT write dispatcher for Vial over HID.
 pub(crate) struct HostGattHandler {
     output_handle: u16,

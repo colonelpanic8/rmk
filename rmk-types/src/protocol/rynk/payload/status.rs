@@ -24,8 +24,9 @@ impl MaxSize for MatrixState {
     const POSTCARD_MAX_SIZE: usize = crate::heapless_vec_max_size::<u8, MATRIX_BITMAP_SIZE>();
 }
 
-/// Status of a single split peripheral.
-#[cfg(all(feature = "_ble", feature = "split"))]
+/// Status of a single split peripheral. Wired peripherals report
+/// `connected: true` with `battery: Unavailable`.
+#[cfg(feature = "split")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]

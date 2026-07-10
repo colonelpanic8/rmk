@@ -23,8 +23,6 @@ use crate::channel::RYNK_BLE_RX_PIPE;
 use crate::host::rynk::RynkService;
 use crate::host::transport::HostTransportError;
 
-pub(crate) const HOST_WRITE_BUFFER_SIZE: usize = RYNK_BLE_CHUNK_SIZE;
-
 /// Per-connection GATT write dispatcher for the two Rynk BLE transports.
 pub(crate) struct HostGattHandler {
     custom_output_handle: u16,

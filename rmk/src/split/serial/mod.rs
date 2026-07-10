@@ -1,7 +1,7 @@
 use embedded_io_async::{Read, Write};
 
 use super::driver::SplitDriverError;
-use crate::split::driver::{PeripheralManager, SplitReader, SplitWriter};
+use crate::split::driver::{PeripheralManager, SplitReader, SplitWriter, set_peripheral_connected};
 use crate::split::{SPLIT_MESSAGE_MAX_SIZE, SplitMessage};
 
 /// Receive split message from peripheral via serial and process it
@@ -26,6 +26,8 @@ pub(crate) async fn run_serial_peripheral_manager<
     let peripheral_manager = PeripheralManager::<ROW, COL, ROW_OFFSET, COL_OFFSET, _>::new(split_serial_driver, id);
     info!("Running peripheral manager {}", id);
 
+    // A wired peripheral is connected for as long as its manager runs.
+    set_peripheral_connected(id, true);
     peripheral_manager.run().await;
 }
 

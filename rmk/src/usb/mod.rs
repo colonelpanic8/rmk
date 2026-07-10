@@ -165,11 +165,6 @@ pub(crate) fn new_usb_builder<'d, D: Driver<'d>>(driver: D, keyboard_config: Dev
     usb_config.max_power = 450;
     usb_config.supports_remote_wakeup = true;
 
-    #[cfg(feature = "_usb_high_speed")]
-    {
-        usb_config.max_speed = embassy_usb::UsbDeviceSpeed::High;
-    }
-
     // Required for windows compatibility.
     usb_config.max_packet_size_0 = 64;
     usb_config.device_class = 0xEF;

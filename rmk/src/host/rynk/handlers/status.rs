@@ -5,11 +5,11 @@
 #[cfg(feature = "_ble")]
 use rmk_types::battery::BatteryStatus;
 use rmk_types::led_indicator::LedIndicator;
-#[cfg(all(feature = "_ble", feature = "split"))]
+#[cfg(feature = "split")]
 use rmk_types::protocol::rynk::PeripheralStatus;
 #[cfg(feature = "_ble")]
 use rmk_types::protocol::rynk::command::GetBatteryStatus;
-#[cfg(all(feature = "_ble", feature = "split"))]
+#[cfg(feature = "split")]
 use rmk_types::protocol::rynk::command::GetPeripheralStatus;
 use rmk_types::protocol::rynk::command::{GetCurrentLayer, GetLedIndicator, GetMatrixState, GetSleepState, GetWpm};
 use rmk_types::protocol::rynk::{MATRIX_BITMAP_SIZE, MatrixState, RynkError};
@@ -45,13 +45,13 @@ impl Handle<GetBatteryStatus> for RynkService<'_> {
 }
 
 /// `Cmd::GetPeripheralStatus` — payload is a peripheral slot id. The
-/// snapshot is owned by the split central
-/// ([`current_peripheral_status`](crate::split::ble::central::current_peripheral_status)),
+/// snapshot is owned by the split driver layer
+/// ([`current_peripheral_status`](crate::split::driver::current_peripheral_status)),
 /// fed at the `PeripheralConnectedEvent` / `PeripheralBatteryEvent` publish sites.
-#[cfg(all(feature = "_ble", feature = "split"))]
+#[cfg(feature = "split")]
 impl Handle<GetPeripheralStatus> for RynkService<'_> {
     async fn handle(&self, id: u8) -> Result<PeripheralStatus, RynkError> {
-        crate::split::ble::central::current_peripheral_status(id as usize).ok_or(RynkError::Invalid)
+        crate::split::driver::current_peripheral_status(id as usize).ok_or(RynkError::Invalid)
     }
 }
 
