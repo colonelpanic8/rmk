@@ -11,6 +11,8 @@
 
 /// A key's outline rectangle in key-units.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct Rect {
     pub x: f32,
     pub y: f32,
@@ -22,6 +24,8 @@ pub struct Rect {
 /// rotation, and an optional second rectangle for L-shaped keys (ISO/big-ass
 /// Enter). `r` rotates the whole key, `rect2` included.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct Key {
     pub row: u8,
     pub col: u8,
@@ -33,6 +37,8 @@ pub struct Key {
 /// One encoder's placement within a variant: a fixed 1u knob, so just its
 /// center — never resized, rotated, or L-shaped.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct Encoder {
     pub id: u8,
     pub x: f32,
@@ -43,6 +49,8 @@ pub struct Encoder {
 /// reflows the tokens after it — encoders included — so each variant carries its
 /// own encoder positions.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct Variant {
     pub name: String,
     pub keys: Vec<Key>,
@@ -51,6 +59,8 @@ pub struct Variant {
 
 /// The decoded physical layout: one entry per render variant.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct LayoutInfo {
     pub default_variant: u8,
     pub variants: Vec<Variant>,
