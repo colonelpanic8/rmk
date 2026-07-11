@@ -23,7 +23,7 @@ use rmk_types::protocol::rynk::{
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
     pub(crate) hid_service: HidService,
-    pub(crate) vial_service: VialService,
+    pub(crate) vial_service: VialGattService,
     pub(crate) composite_service: CompositeService,
     pub(crate) device_config_service: DeviceConfigurationService,
 }
@@ -33,7 +33,7 @@ pub(crate) struct Server {
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
     pub(crate) hid_service: HidService,
-    pub(crate) rynk_service: RynkService,
+    pub(crate) rynk_service: RynkGattService,
     pub(crate) rynk_hid_service: RynkHidService,
     pub(crate) composite_service: CompositeService,
     pub(crate) device_config_service: DeviceConfigurationService,
@@ -57,7 +57,7 @@ pub(crate) struct Server {
 /// [`crate::channel::RYNK_BLE_RX_PIPE`] for [`crate::ble::host::HostGattHandler::run`] to drain.
 #[cfg(feature = "rynk")]
 #[gatt_service(uuid = RYNK_SERVICE_UUID)]
-pub(crate) struct RynkService {
+pub(crate) struct RynkGattService {
     // ATT enforces encryption; the event loop still filters the data path.
     #[descriptor(uuid = "2908", read, value = [0u8, 1u8])]
     #[characteristic(uuid = RYNK_INPUT_CHAR_UUID, read, notify, permissions(encrypted))]
@@ -96,7 +96,7 @@ pub(crate) struct RynkHidService {
 /// [`crate::ble::host::HostGattHandler::run`] to drain.
 #[cfg(feature = "vial")]
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
-pub(crate) struct VialService {
+pub(crate) struct VialGattService {
     #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
     pub(crate) hid_info: [u8; 4],
     #[characteristic(uuid = "2a4b", read, value = ViaReport::desc().try_into().expect("Failed to convert ViaReport to [u8; 27]"))]
