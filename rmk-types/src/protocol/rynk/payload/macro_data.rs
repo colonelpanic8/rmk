@@ -24,7 +24,6 @@ impl MaxSize for MacroData {
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct GetMacroRequest {
-    pub index: u8,
     pub offset: u16,
 }
 
@@ -36,7 +35,6 @@ pub struct GetMacroRequest {
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct SetMacroRequest {
-    pub index: u8,
     pub offset: u16,
     pub data: MacroData,
 }
@@ -66,8 +64,8 @@ mod tests {
 
     #[test]
     fn round_trip_get_macro_request() {
-        round_trip(&GetMacroRequest { index: 0, offset: 0 });
-        round_trip(&GetMacroRequest { index: 3, offset: 256 });
+        round_trip(&GetMacroRequest { offset: 0 });
+        round_trip(&GetMacroRequest { offset: 256 });
     }
 
     #[test]
@@ -75,7 +73,6 @@ mod tests {
         let mut data: Vec<u8, MACRO_DATA_SIZE> = Vec::new();
         data.extend_from_slice(&[0x01, 0x02]).unwrap();
         round_trip(&SetMacroRequest {
-            index: 1,
             offset: 0,
             data: MacroData { data },
         });

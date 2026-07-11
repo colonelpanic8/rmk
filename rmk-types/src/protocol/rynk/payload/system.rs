@@ -41,10 +41,7 @@ pub struct DeviceCapabilities {
     pub num_encoders: u8,
     pub max_combos: u8,
     pub max_combo_keys: u8,
-    /// Number of macros supported, set by the user at compile time. `0`
-    /// disables macros: the host MUST NOT use them or consult `macro_space_size`.
-    pub max_macros: u8,
-    /// Byte size of the flat macro region; only meaningful when `max_macros > 0`.
+    /// Byte size of the flat macro region. `0` disables macro data endpoints.
     pub macro_space_size: u16,
     pub max_morse: u8,
     pub max_patterns_per_key: u8,
@@ -181,7 +178,6 @@ mod tests {
             num_encoders: 2,
             max_combos: 16,
             max_combo_keys: 4,
-            max_macros: 32,
             macro_space_size: 2048,
             max_morse: 8,
             max_patterns_per_key: 8,
@@ -205,7 +201,6 @@ mod tests {
             num_encoders: 0,
             max_combos: 0,
             max_combo_keys: 0,
-            max_macros: 0,
             macro_space_size: 0,
             max_morse: 0,
             max_patterns_per_key: 0,

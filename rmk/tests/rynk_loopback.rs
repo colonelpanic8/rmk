@@ -688,14 +688,13 @@ fn get_set_macro_round_trip() {
         let mut data: HVec<u8, 64> = HVec::new();
         data.extend_from_slice(&[0xAA, 0xBB, 0xCC]).unwrap();
         let set = SetMacroRequest {
-            index: 0,
             offset: 0,
             data: MacroData { data },
         };
         let r = client.request::<_, ()>(Cmd::SetMacro, 0x20, &set).await;
         assert_eq!(r, Ok(()));
 
-        let get = GetMacroRequest { index: 0, offset: 0 };
+        let get = GetMacroRequest { offset: 0 };
         let got = client
             .request::<_, MacroData>(Cmd::GetMacro, 0x21, &get)
             .await

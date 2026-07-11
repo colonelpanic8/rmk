@@ -131,7 +131,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(caps.num_encoders, 1);
     assert_eq!(caps.max_combos, 8);
     assert_eq!(caps.max_combo_keys, 4);
-    assert_eq!(caps.max_macros, 16);
     assert_eq!(caps.macro_space_size, 256);
     assert_eq!(caps.macro_chunk_size, 64);
     assert_eq!(caps.max_morse, 8);
@@ -210,8 +209,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut macro_bytes = heapless::Vec::new();
     macro_bytes.extend_from_slice(&[1, 2, 3, 4]).unwrap();
-    client.set_macro(0, 0, MacroData { data: macro_bytes }).await?;
-    let got_macro = client.get_macro(0, 0).await?;
+    client.set_macro(0, MacroData { data: macro_bytes }).await?;
+    let got_macro = client.get_macro(0).await?;
     assert_eq!(got_macro.data.len(), caps.macro_chunk_size as usize);
     assert_eq!(&got_macro.data[..4], &[1, 2, 3, 4]);
     assert!(got_macro.data[4..].iter().all(|&b| b == 0));

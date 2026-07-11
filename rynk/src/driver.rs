@@ -504,7 +504,6 @@ mod tests {
             num_cols: 14,
             max_combos: 8,
             max_combo_keys: 4,
-            max_macros: 8,
             macro_space_size: 1024,
             max_morse: 4,
             max_patterns_per_key: 4,
