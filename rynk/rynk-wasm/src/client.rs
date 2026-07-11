@@ -20,7 +20,7 @@ use rynk::rmk_types::protocol::rynk::{
     MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetKeymapBulkRequest,
     SetMorseBulkRequest, StorageResetMode,
 };
-use rynk::{Client, IncomingTopic, RynkDevice, TopicEvent};
+use rynk::{Client, IncomingTopic, LayoutInfo, RynkDevice, TopicEvent};
 use wasm_bindgen::prelude::*;
 
 use crate::device::WebDevice;
@@ -116,6 +116,7 @@ endpoints! {
     set_encoder(encoder_id: u8, layer: u8; action: EncoderAction) -> (),
     get_keymap_bulk(layer: u8, start_row: u8, start_col: u8) -> GetKeymapBulkResponse,
     set_keymap_bulk(; request: SetKeymapBulkRequest) -> (),
+    get_layout() -> LayoutInfo,
     // combos / forks / morse / macros
     get_combo(index: u8) -> Combo,
     set_combo(index: u8; config: Combo) -> (),

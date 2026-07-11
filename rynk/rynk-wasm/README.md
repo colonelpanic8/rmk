@@ -173,7 +173,8 @@ Available method groups mirror the native `rynk::Client` API:
 - System: `get_version`, `get_capabilities`, `reboot`, `bootloader_jump`,
   `storage_reset`
 - Keymap: `get_key`, `set_key`, `get_default_layer`, `set_default_layer`,
-  `get_encoder`, `set_encoder`, `get_keymap_bulk`, `set_keymap_bulk`
+  `get_encoder`, `set_encoder`, `get_keymap_bulk`, `set_keymap_bulk`,
+  `get_layout`
 - Combos/forks/morse/macros: `get_combo`, `set_combo`, `get_combo_bulk`,
   `set_combo_bulk`, `get_fork`, `set_fork`, `get_morse`, `set_morse`,
   `get_morse_bulk`, `set_morse_bulk`, `get_macro`, `set_macro`
