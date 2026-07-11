@@ -120,14 +120,12 @@ host = ["dep:byteorder"]
 ## Enable vial support
 vial = ["host"]
 
-## Enable vial lock feature. TODO: remove it, use `host_lock`
-vial_lock = ["vial", "host_lock"]
-
 ## Enable DFU lock feature — physical key unlock for DFU firmware download
 dfu_lock = ["host_lock"]
 
 ## Enable physical key unlock and matrix state tracking — the shared base of the
-## lock features (`vial_lock`, `dfu_lock`, and `rynk` all imply it).
+## lock features (`dfu_lock` and `rynk` imply it; combine with `vial` for the
+## Vial lock).
 host_lock = []
 
 ## Enable Rynk protocol support (RMK-native protocol, mutually exclusive with vial).
