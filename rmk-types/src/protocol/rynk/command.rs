@@ -96,29 +96,33 @@ const fn assert_unique(cmds: &[u16]) {
 
 /// Macro for defining the endpoint (request/response) table.
 ///
-/// A row may carry an optional `@bulk` marker before its name. Such an
-/// endpoint is generated like any other, but is left out of the
-/// `MAX_ENDPOINT_PAYLOAD` fold: its payload is sized dynamically (bulk transfer,
-/// whose element count tracks `RYNK_BUFFER_SIZE`), so it must not drive the
-/// buffer floor — the buffer drives it, not the other way around.
+/// A row may carry an optional `@bulk` marker before its name: the endpoint
+/// is gated behind the `bulk` feature and left out of the
+/// `MAX_ENDPOINT_PAYLOAD` fold. Its payload is sized dynamically (bulk
+/// transfer, whose element count tracks `RYNK_BUFFER_SIZE`), so it must not
+/// drive the buffer floor — the buffer drives it, not the other way around.
 macro_rules! endpoints {
     // Fold contribution of one row: its max payload, or 0 when marked `@bulk`.
     (@floor $name:ident) => { <$name as Endpoint>::MAX_PAYLOAD };
     (@floor $marker:ident $name:ident) => { 0 };
+    // Gate one generated item on the feature named by the row's marker.
+    (@gate bulk $item:item) => { #[cfg(feature = "bulk")] $item };
+    (@gate $item:item) => { $item };
     ($( $(#[$meta:meta])* $(@ $marker:ident)? $name:ident = $cmd:literal : $req:ty => $resp:ty; )*) => {
         #[allow(non_upper_case_globals)]
         impl Cmd {
-            $( $(#[$meta])* pub const $name: Self = Cmd::from_raw($cmd); )*
+            $( endpoints!(@gate $($marker)? $(#[$meta])* pub const $name: Self = Cmd::from_raw($cmd);); )*
         }
         $(
-            $(#[$meta])*
-            pub enum $name {}
-            $(#[$meta])*
-            impl Endpoint for $name {
-                const CMD: Cmd = Cmd::$name;
-                type Request = $req;
-                type Response = $resp;
-            }
+            endpoints!(@gate $($marker)? $(#[$meta])* pub enum $name {});
+            endpoints!(@gate $($marker)?
+                $(#[$meta])*
+                impl Endpoint for $name {
+                    const CMD: Cmd = Cmd::$name;
+                    type Request = $req;
+                    type Response = $resp;
+                }
+            );
         )*
         const _: () = {
             $( core::assert!(!Cmd::from_raw($cmd).is_topic(), "request CMD value in the topic range"); )*
@@ -230,9 +234,7 @@ endpoints! {
     SetDefaultLayer = 0x0104: u8 => ();
     GetEncoderAction = 0x0105: GetEncoderRequest => EncoderAction;
     SetEncoderAction = 0x0106: SetEncoderRequest => ();
-    #[cfg(feature = "bulk")]
     @bulk GetKeymapBulk = 0x0107: GetKeymapBulkRequest => GetKeymapBulkResponse;
-    #[cfg(feature = "bulk")]
     @bulk SetKeymapBulk = 0x0108: SetKeymapBulkRequest => ();
 
     // Macro (0x02xx).
@@ -242,17 +244,13 @@ endpoints! {
     // Combo (0x03xx).
     GetCombo = 0x0301: u8 => Combo;
     SetCombo = 0x0302: SetComboRequest => ();
-    #[cfg(feature = "bulk")]
     @bulk GetComboBulk = 0x0303: GetComboBulkRequest => GetComboBulkResponse;
-    #[cfg(feature = "bulk")]
     @bulk SetComboBulk = 0x0304: SetComboBulkRequest => ();
 
     // Morse (0x04xx).
     GetMorse = 0x0401: u8 => Morse;
     SetMorse = 0x0402: SetMorseRequest => ();
-    #[cfg(feature = "bulk")]
     @bulk GetMorseBulk = 0x0403: GetMorseBulkRequest => GetMorseBulkResponse;
-    #[cfg(feature = "bulk")]
     @bulk SetMorseBulk = 0x0404: SetMorseBulkRequest => ();
 
     // Fork (0x05xx).
