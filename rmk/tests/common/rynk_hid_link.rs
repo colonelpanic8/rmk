@@ -1,6 +1,6 @@
 //! HID-framed variant of [`super::rynk_link`]: interposes the fixed 32-byte HID
 //! report framing (firmware `RynkHidService`, de-framed at the `ble::rynk` seam
-//! via `drop_report_padding` and reply-framed by `RynkBleTx`) between the host
+//! via `RynkHidFrameTracker` and reply-framed by `RynkBleTx`) between the host
 //! client and `run_session`, so the framing round-trips through the *real*
 //! dispatcher.
 //!
@@ -19,6 +19,7 @@ use rmk_types::protocol::rynk::{Cmd, RYNK_HEADER_SIZE, RYNK_HID_REPORT_SIZE, Ryn
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use super::rynk_link::Frame;
 use super::test_block_on::test_block_on;
 
 /// One direction of the link, carrying whole HID reports.
@@ -34,32 +35,9 @@ async fn write_framed(link: &Link, data: &[u8]) {
     }
 }
 
-/// A frame read off the wire, decoded only as far as its header.
-pub struct Frame {
-    pub header: RynkHeader,
-    pub payload: Vec<u8>,
-}
-
-impl Frame {
-    /// Decode the payload as a `Result<T, RynkError>` envelope, strictly.
-    pub fn envelope<T: DeserializeOwned>(&self) -> Result<T, RynkError> {
-        let (env, rest) = postcard::take_from_bytes::<Result<T, RynkError>>(&self.payload)
-            .expect("response payload must decode as an envelope");
-        assert!(rest.is_empty(), "response payload has {} trailing byte(s)", rest.len());
-        env
-    }
-
-    /// Decode the payload as a bare `T` — topic frames are not enveloped.
-    pub fn raw<T: DeserializeOwned>(&self) -> T {
-        let (value, rest) = postcard::take_from_bytes::<T>(&self.payload).expect("topic payload must decode");
-        assert!(rest.is_empty(), "topic payload has {} trailing byte(s)", rest.len());
-        value
-    }
-}
-
 /// Device-side Rx: reads whole reports off the pipe and de-frames them into the
 /// byte stream `run_session` reads. Mirrors the firmware de-frame (`ble::rynk`'s
-/// `drop_report_padding` feeding `RYNK_BLE_RX_PIPE`), with `pending`/`pos` standing
+/// `RynkHidFrameTracker` feeding `RYNK_BLE_RX_PIPE`), with `pending`/`pos` standing
 /// in for the pipe's buffering and `remaining` tracking the in-flight frame.
 struct HidRx<'p> {
     link: &'p Link,

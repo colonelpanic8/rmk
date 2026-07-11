@@ -45,8 +45,8 @@ use super::test_block_on::test_block_on;
 /// been polled yet.
 pub type Link = Pipe<NoopRawMutex, RYNK_BUFFER_SIZE>;
 
-/// A frame read off the wire, decoded only as far as its header.
-///
+/// A frame read off the wire, decoded only as far as its header. Shared with
+/// the HID-framed harness ([`super::rynk_hid_link`]).
 pub struct Frame {
     pub header: RynkHeader,
     pub payload: Vec<u8>,

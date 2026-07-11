@@ -1,4 +1,4 @@
-//! Shared context for host-facing services (Vial today, Rynk next).
+//! Shared context for the Vial and Rynk host services.
 
 use embassy_time::Duration;
 use rmk_types::action::{EncoderAction, KeyAction};
@@ -107,26 +107,14 @@ impl<'a> KeyboardContext<'a> {
         self.keymap.num_encoders()
     }
 
-    pub async fn set_encoder_clockwise(&self, layer: u8, idx: u8, action: KeyAction) {
-        let updated = self.keymap.set_encoder_clockwise(layer as usize, idx as usize, action);
-        #[cfg(feature = "storage")]
-        if let Some(encoder) = updated {
-            FLASH_CHANNEL
-                .send(FlashOperationMessage::Encoder {
-                    idx,
-                    layer,
-                    action: encoder,
-                })
-                .await;
-        }
-        #[cfg(not(feature = "storage"))]
-        let _ = updated;
-    }
-
-    pub async fn set_encoder_counter_clockwise(&self, layer: u8, idx: u8, action: KeyAction) {
-        let updated = self
-            .keymap
-            .set_encoder_counter_clockwise(layer as usize, idx as usize, action);
+    /// Write one encoder direction and persist the updated pair.
+    pub async fn set_encoder_direction(&self, layer: u8, idx: u8, clockwise: bool, action: KeyAction) {
+        let updated = if clockwise {
+            self.keymap.set_encoder_clockwise(layer as usize, idx as usize, action)
+        } else {
+            self.keymap
+                .set_encoder_counter_clockwise(layer as usize, idx as usize, action)
+        };
         #[cfg(feature = "storage")]
         if let Some(encoder) = updated {
             FLASH_CHANNEL
