@@ -149,6 +149,16 @@ impl crate::KeyboardTomlConfig {
                 protocol_limits::MAX_MACRO_DATA_SIZE
             ));
         }
+        validate_u8_capability("combo_max_num", rmk.combo_max_num)?;
+        validate_u8_capability("combo_max_length", rmk.combo_max_length)?;
+        validate_u8_capability("fork_max_num", rmk.fork_max_num)?;
+        validate_u8_capability("morse_max_num", rmk.morse_max_num)?;
+        validate_u8_capability("max_patterns_per_key", rmk.max_patterns_per_key)?;
+        validate_u8_capability("split_peripherals_num", split_peripherals_num)?;
+        validate_u8_capability("ble_profiles_num", rmk.ble_profiles_num)?;
+        validate_u16_capability("macro_space_size", rmk.macro_space_size)?;
+        validate_u16_capability("protocol_macro_chunk_size", rmk.protocol_macro_chunk_size)?;
+        validate_u16_capability("rynk_buffer_size", rmk.rynk_buffer_size)?;
         Ok(BuildConstants {
             combo_max_num: rmk.combo_max_num,
             combo_max_length: rmk.combo_max_length,
@@ -171,6 +181,20 @@ impl crate::KeyboardTomlConfig {
             passkey,
         })
     }
+}
+
+fn validate_u8_capability(name: &str, value: usize) -> Result<(), String> {
+    if value > u8::MAX as usize {
+        return Err(format!("{name} ({value}) exceeds Rynk u8 capability field"));
+    }
+    Ok(())
+}
+
+fn validate_u16_capability(name: &str, value: usize) -> Result<(), String> {
+    if value > u16::MAX as usize {
+        return Err(format!("{name} ({value}) exceeds Rynk u16 capability field"));
+    }
+    Ok(())
 }
 
 /// Bump event subscriber counts based on feature flags declared in `subscriber_default.toml`.
@@ -211,7 +235,7 @@ fn resolve_passkey_enabled(ble: &crate::BleConfig) -> Result<Passkey, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_passkey_enabled;
+    use super::{resolve_passkey_enabled, validate_u8_capability, validate_u16_capability};
     use crate::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
 
     #[test]
@@ -242,5 +266,20 @@ mod tests {
 
         assert!(!passkey.enabled);
         assert_eq!(passkey.timeout_secs, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS);
+    }
+
+    #[test]
+    fn validates_rynk_capability_wire_widths() {
+        assert!(validate_u8_capability("combo_max_num", 255).is_ok());
+        assert_eq!(
+            validate_u8_capability("combo_max_num", 256),
+            Err("combo_max_num (256) exceeds Rynk u8 capability field".to_string())
+        );
+
+        assert!(validate_u16_capability("macro_space_size", 65535).is_ok());
+        assert_eq!(
+            validate_u16_capability("macro_space_size", 65536),
+            Err("macro_space_size (65536) exceeds Rynk u16 capability field".to_string())
+        );
     }
 }

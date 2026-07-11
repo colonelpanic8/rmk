@@ -304,9 +304,9 @@ where
     D: de::Deserializer<'de>,
 {
     let value = Deserialize::deserialize(deserializer)?;
-    if value > 256 {
+    if value > u8::MAX as usize {
         return Err(de::Error::custom(format!(
-            "combo_max_num must be between 0 and 256, got {value}"
+            "combo_max_num must be between 0 and 255, got {value}"
         )));
     }
     Ok(value)
@@ -317,9 +317,9 @@ where
     D: de::Deserializer<'de>,
 {
     let value = Deserialize::deserialize(deserializer)?;
-    if value > 256 {
+    if value > u8::MAX as usize {
         return Err(de::Error::custom(format!(
-            "morse_max_num must be between 0 and 256, got {value}"
+            "morse_max_num must be between 0 and 255, got {value}"
         )));
     }
     Ok(value)
@@ -343,9 +343,9 @@ where
     D: de::Deserializer<'de>,
 {
     let value = Deserialize::deserialize(deserializer)?;
-    if value > 256 {
+    if value > u8::MAX as usize {
         return Err(de::Error::custom(format!(
-            "fork_max_num must be between 0 and 256, got {value}"
+            "fork_max_num must be between 0 and 255, got {value}"
         )));
     }
     Ok(value)
@@ -1419,6 +1419,32 @@ channel_size = 32
         assert_eq!(config.event.modifier.channel_size, 8);
         assert_eq!(config.event.modifier.subs, 2);
         assert_eq!(config.event.layer_change.subs, 1);
+    }
+
+    #[test]
+    fn rmk_count_limits_fit_u8_capability_fields() {
+        let ok: KeyboardTomlConfig = toml::from_str(
+            r#"
+[rmk]
+combo_max_num = 255
+morse_max_num = 255
+fork_max_num = 255
+"#,
+        )
+        .unwrap();
+        assert_eq!(ok.rmk.combo_max_num, 255);
+        assert_eq!(ok.rmk.morse_max_num, 255);
+        assert_eq!(ok.rmk.fork_max_num, 255);
+
+        for (field, message) in [
+            ("combo_max_num", "combo_max_num must be between 0 and 255"),
+            ("morse_max_num", "morse_max_num must be between 0 and 255"),
+            ("fork_max_num", "fork_max_num must be between 0 and 255"),
+        ] {
+            let toml = format!("[rmk]\n{field} = 256\n");
+            let err = toml::from_str::<KeyboardTomlConfig>(&toml).unwrap_err();
+            assert!(err.to_string().contains(message), "{err}");
+        }
     }
 
     #[test]

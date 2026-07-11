@@ -12,6 +12,14 @@ use rmk_types::protocol::rynk::{
 use super::super::{RMK_VERSION, RynkService};
 use super::Handle;
 
+fn capability_u8(value: usize) -> Result<u8, RynkError> {
+    u8::try_from(value).map_err(|_| RynkError::Invalid)
+}
+
+fn capability_u16(value: usize) -> Result<u16, RynkError> {
+    u16::try_from(value).map_err(|_| RynkError::Invalid)
+}
+
 impl Handle<GetVersion> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<ProtocolVersion, RynkError> {
         Ok(ProtocolVersion::CURRENT)
@@ -21,20 +29,23 @@ impl Handle<GetVersion> for RynkService<'_> {
 impl Handle<GetCapabilities> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<DeviceCapabilities, RynkError> {
         let (rows, cols, num_layers) = self.ctx.keymap_dimensions();
+        let max_payload_size = constants::RYNK_BUFFER_SIZE
+            .checked_sub(RYNK_HEADER_SIZE)
+            .ok_or(RynkError::Invalid)?;
         Ok(DeviceCapabilities {
             // Layout (live, from the configured keymap)
-            num_layers: num_layers as u8,
-            num_rows: rows as u8,
-            num_cols: cols as u8,
+            num_layers: capability_u8(num_layers)?,
+            num_rows: capability_u8(rows)?,
+            num_cols: capability_u8(cols)?,
 
             // Input device limits (compile-time from keyboard.toml)
-            num_encoders: self.ctx.num_encoders() as u8,
-            max_combos: constants::COMBO_MAX_NUM as u8,
-            max_combo_keys: constants::COMBO_MAX_LENGTH as u8,
-            macro_space_size: constants::MACRO_SPACE_SIZE as u16,
-            max_morse: constants::MORSE_MAX_NUM as u8,
-            max_patterns_per_key: constants::MAX_PATTERNS_PER_KEY as u8,
-            max_forks: constants::FORK_MAX_NUM as u8,
+            num_encoders: capability_u8(self.ctx.num_encoders())?,
+            max_combos: capability_u8(constants::COMBO_MAX_NUM)?,
+            max_combo_keys: capability_u8(constants::COMBO_MAX_LENGTH)?,
+            macro_space_size: capability_u16(constants::MACRO_SPACE_SIZE)?,
+            max_morse: capability_u8(constants::MORSE_MAX_NUM)?,
+            max_patterns_per_key: capability_u8(constants::MAX_PATTERNS_PER_KEY)?,
+            max_forks: capability_u8(constants::FORK_MAX_NUM)?,
 
             // Feature flags
             storage_enabled: cfg!(feature = "storage"),
@@ -42,20 +53,20 @@ impl Handle<GetCapabilities> for RynkService<'_> {
 
             // Connectivity
             is_split: cfg!(feature = "split"),
-            num_split_peripherals: constants::SPLIT_PERIPHERALS_NUM as u8,
+            num_split_peripherals: capability_u8(constants::SPLIT_PERIPHERALS_NUM)?,
             ble_enabled: cfg!(feature = "_ble"),
-            num_ble_profiles: constants::NUM_BLE_PROFILE as u8,
+            num_ble_profiles: capability_u8(constants::NUM_BLE_PROFILE)?,
 
             // Protocol limits
-            max_payload_size: (constants::RYNK_BUFFER_SIZE - RYNK_HEADER_SIZE) as u16,
-            macro_chunk_size: constants::MACRO_DATA_SIZE as u16,
+            max_payload_size: capability_u16(max_payload_size)?,
+            macro_chunk_size: capability_u16(constants::MACRO_DATA_SIZE)?,
             // The BULK_* constants only exist under `bulk`, hence #[cfg] over cfg!().
             #[cfg(feature = "bulk")]
-            max_bulk_keys: constants::BULK_KEYMAP_SIZE as u8,
+            max_bulk_keys: capability_u8(constants::BULK_KEYMAP_SIZE)?,
             #[cfg(not(feature = "bulk"))]
             max_bulk_keys: 0,
             #[cfg(feature = "bulk")]
-            max_bulk_configs: constants::BULK_SIZE as u8,
+            max_bulk_configs: capability_u8(constants::BULK_SIZE)?,
             #[cfg(not(feature = "bulk"))]
             max_bulk_configs: 0,
             bulk_transfer_supported: cfg!(feature = "bulk"),
