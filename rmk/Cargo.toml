@@ -101,7 +101,8 @@ embedded-hal-mock = { version = "0.11.1", features = ["embedded-hal-async"] }
 crc32fast = "1.3"
 
 [package.metadata.docs.rs]
-features = ["split", "vial", "async_matrix", "_ble"]
+no-default-features = true
+features = ["defmt", "storage", "rynk", "watchdog", "split", "async_matrix", "_ble"]
 
 # Architecture specific dependencies
 [target.'cfg(all(target_arch = "arm", target_os = "none"))'.dependencies]
