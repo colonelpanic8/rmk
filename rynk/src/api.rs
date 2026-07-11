@@ -307,15 +307,14 @@ impl<T: Read + Write> Client<T> {
     /// always replies with exactly its build-time chunk size, zero-filling
     /// past the end of its macro space — a short chunk is **not** an
     /// end-of-data signal; parse the macro encoding itself for termination.
-    pub async fn get_macro(&mut self, index: u8, offset: u16) -> Result<MacroData, RynkHostError> {
-        self.request::<command::GetMacro>(&GetMacroRequest { index, offset })
-            .await
+    pub async fn get_macro(&mut self, offset: u16) -> Result<MacroData, RynkHostError> {
+        self.request::<command::GetMacro>(&GetMacroRequest { offset }).await
     }
 
     /// Write one chunk of macro data starting at byte `offset`. Writes past
     /// the end of the device's macro space are truncated by the firmware.
-    pub async fn set_macro(&mut self, index: u8, offset: u16, data: MacroData) -> Result<(), RynkHostError> {
-        self.request::<command::SetMacro>(&SetMacroRequest { index, offset, data })
+    pub async fn set_macro(&mut self, offset: u16, data: MacroData) -> Result<(), RynkHostError> {
+        self.request::<command::SetMacro>(&SetMacroRequest { offset, data })
             .await
     }
 

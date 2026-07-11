@@ -157,8 +157,8 @@ async fn client_against_run_session() {
         // Macro zero-fill chunk contract.
         let mut macro_bytes: heapless::Vec<u8, MACRO_DATA_SIZE> = heapless::Vec::new();
         macro_bytes.extend_from_slice(&[1, 2, 3, 4]).unwrap();
-        client.set_macro(0, 0, MacroData { data: macro_bytes }).await.unwrap();
-        let got = client.get_macro(0, 0).await.unwrap();
+        client.set_macro(0, MacroData { data: macro_bytes }).await.unwrap();
+        let got = client.get_macro(0).await.unwrap();
         assert_eq!(got.data.len(), caps.macro_chunk_size as usize, "reply is a full chunk");
         assert_eq!(&got.data[..4], &[1, 2, 3, 4], "written prefix preserved");
         assert!(got.data[4..].iter().all(|&b| b == 0), "tail zero-filled past the write");

@@ -252,16 +252,15 @@ async fn run_all<T: Read + Write>(mut client: Client<T>, over_ble: bool) -> Resu
     }
 
     info!("── macros ──");
-    if caps.max_macros == 0 {
-        info!("  (no macro slots — exercising dispatch at index 0)");
+    if caps.macro_space_size == 0 {
+        info!("  (no macro storage — exercising dispatch at offset 0)");
     }
-    report(&mut fails, "get_macro 0", client.get_macro(0, 0).await);
+    report(&mut fails, "get_macro 0", client.get_macro(0).await);
     ack(
         &mut fails,
         "set_macro 0",
         client
             .set_macro(
-                0,
                 0,
                 MacroData {
                     data: Default::default(),

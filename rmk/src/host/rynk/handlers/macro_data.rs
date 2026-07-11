@@ -11,7 +11,6 @@ use super::Handle;
 impl Handle<GetMacro> for RynkService<'_> {
     async fn handle(&self, r: GetMacroRequest) -> Result<MacroData, RynkError> {
         // Full chunks are zero-filled; length is not an end signal.
-        let _ = r.index; // reserved for a future per-macro indirection layer
         let mut data: Vec<u8, MACRO_DATA_SIZE> = Vec::new();
         data.resize_default(MACRO_DATA_SIZE).expect("MACRO_DATA_SIZE matches");
         self.ctx.read_macro_buffer(r.offset as usize, &mut data);
@@ -21,7 +20,6 @@ impl Handle<GetMacro> for RynkService<'_> {
 
 impl Handle<SetMacro> for RynkService<'_> {
     async fn handle(&self, r: SetMacroRequest) -> Result<(), RynkError> {
-        let _ = r.index;
         self.ctx.write_macro_buffer(r.offset as usize, &r.data.data).await;
         Ok(())
     }

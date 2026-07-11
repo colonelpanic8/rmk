@@ -220,21 +220,20 @@ fn exemplars() -> Exemplars {
         num_encoders: 4,
         max_combos: 5,
         max_combo_keys: 6,
-        max_macros: 7,
-        macro_space_size: 8,
-        max_morse: 9,
-        max_patterns_per_key: 10,
-        max_forks: 11,
+        macro_space_size: 7,
+        max_morse: 8,
+        max_patterns_per_key: 9,
+        max_forks: 10,
         storage_enabled: true,
         lighting_enabled: false,
         is_split: true,
-        num_split_peripherals: 12,
+        num_split_peripherals: 11,
         ble_enabled: false,
-        num_ble_profiles: 13,
-        max_payload_size: 14,
-        max_bulk_keys: 15,
-        max_bulk_configs: 16,
-        macro_chunk_size: 17,
+        num_ble_profiles: 12,
+        max_payload_size: 13,
+        max_bulk_keys: 14,
+        max_bulk_configs: 15,
+        macro_chunk_size: 16,
         bulk_transfer_supported: true,
     };
     // Ascending version/id values; distinct strings so a field swap shows.
@@ -462,7 +461,7 @@ fn wire_values_locked() {
         ("MacroData{[0x01,0x02,0x03]}", encode(&ex.macro_data)),
         // --- Status / system responses ---
         ("MatrixState{[0x05,0x00,0x20]}", encode(&ex.matrix)),
-        ("DeviceCapabilities{1..17}", encode(&ex.capabilities)),
+        ("DeviceCapabilities{1..16}", encode(&ex.capabilities)),
         ("DeviceInfo{1.2.3,4,5,RMK,..}", encode(&ex.device_info)),
         ("BehaviorConfig{50,500,200,20}", encode(&ex.behavior)),
         ("ConnectionStatus{Configured,{1,Adv},Ble}", encode(&ex.connection)),
@@ -523,14 +522,10 @@ fn wire_values_locked() {
                 action: ex.encoder
             }),
         ),
+        ("GetMacroRequest{256}", encode(&GetMacroRequest { offset: 256 })),
         (
-            "GetMacroRequest{1,256}",
-            encode(&GetMacroRequest { index: 1, offset: 256 })
-        ),
-        (
-            "SetMacroRequest{1,2,[0x01,0x02,0x03]}",
+            "SetMacroRequest{2,[0x01,0x02,0x03]}",
             encode(&SetMacroRequest {
-                index: 1,
                 offset: 2,
                 data: ex.macro_data.clone()
             }),
@@ -626,7 +621,7 @@ fn wire_frames_locked() {
             encode_frame(Cmd::GetCapabilities, SEQ, &())
         ),
         (
-            "GetCapabilities reply Ok(DeviceCapabilities{1..17})",
+            "GetCapabilities reply Ok(DeviceCapabilities{1..16})",
             encode_frame(
                 Cmd::GetCapabilities,
                 SEQ,
@@ -749,20 +744,19 @@ fn wire_frames_locked() {
         ),
         // Macro (0x02xx).
         (
-            "GetMacro request GetMacroRequest{1,256}",
-            encode_frame(Cmd::GetMacro, SEQ, &GetMacroRequest { index: 1, offset: 256 }),
+            "GetMacro request GetMacroRequest{256}",
+            encode_frame(Cmd::GetMacro, SEQ, &GetMacroRequest { offset: 256 }),
         ),
         (
             "GetMacro reply Ok(MacroData{[0x01,0x02,0x03]})",
             encode_frame(Cmd::GetMacro, SEQ, &Ok::<MacroData, RynkError>(ex.macro_data.clone())),
         ),
         (
-            "SetMacro request SetMacroRequest{1,2,[0x01,0x02,0x03]}",
+            "SetMacro request SetMacroRequest{2,[0x01,0x02,0x03]}",
             encode_frame(
                 Cmd::SetMacro,
                 SEQ,
                 &SetMacroRequest {
-                    index: 1,
                     offset: 2,
                     data: ex.macro_data.clone()
                 },
