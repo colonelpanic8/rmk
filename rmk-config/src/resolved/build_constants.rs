@@ -149,6 +149,13 @@ impl crate::KeyboardTomlConfig {
                 protocol_limits::MAX_MACRO_DATA_SIZE
             ));
         }
+        // Host capability fields are u8/u16 on the wire; check the values no deserializer bound
+        // covers (morse_max_num and split_peripherals_num can also be auto-raised past 255).
+        validate_u8_capability("morse_max_num", rmk.morse_max_num)?;
+        validate_u8_capability("split_peripherals_num", split_peripherals_num)?;
+        validate_u8_capability("ble_profiles_num", rmk.ble_profiles_num)?;
+        validate_u16_capability("macro_space_size", rmk.macro_space_size)?;
+        validate_u16_capability("rynk_buffer_size", rmk.rynk_buffer_size)?;
         Ok(BuildConstants {
             combo_max_num: rmk.combo_max_num,
             combo_max_length: rmk.combo_max_length,
@@ -171,6 +178,24 @@ impl crate::KeyboardTomlConfig {
             passkey,
         })
     }
+}
+
+fn validate_u8_capability(name: &str, value: usize) -> Result<(), String> {
+    if value > u8::MAX as usize {
+        return Err(format!(
+            "{name} ({value}) exceeds the u8 host capability field (max 255)"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_u16_capability(name: &str, value: usize) -> Result<(), String> {
+    if value > u16::MAX as usize {
+        return Err(format!(
+            "{name} ({value}) exceeds the u16 host capability field (max 65535)"
+        ));
+    }
+    Ok(())
 }
 
 /// Bump event subscriber counts based on feature flags declared in `subscriber_default.toml`.
@@ -211,7 +236,7 @@ fn resolve_passkey_enabled(ble: &crate::BleConfig) -> Result<Passkey, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_passkey_enabled;
+    use super::{resolve_passkey_enabled, validate_u8_capability, validate_u16_capability};
     use crate::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
 
     #[test]
@@ -242,5 +267,20 @@ mod tests {
 
         assert!(!passkey.enabled);
         assert_eq!(passkey.timeout_secs, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS);
+    }
+
+    #[test]
+    fn validates_capability_wire_widths() {
+        assert!(validate_u8_capability("ble_profiles_num", 255).is_ok());
+        assert_eq!(
+            validate_u8_capability("ble_profiles_num", 256),
+            Err("ble_profiles_num (256) exceeds the u8 host capability field (max 255)".to_string())
+        );
+
+        assert!(validate_u16_capability("macro_space_size", 65535).is_ok());
+        assert_eq!(
+            validate_u16_capability("macro_space_size", 65536),
+            Err("macro_space_size (65536) exceeds the u16 host capability field (max 65535)".to_string())
+        );
     }
 }
