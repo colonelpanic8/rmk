@@ -197,3 +197,30 @@ fn unknown_keys_are_rejected() {
     }
     let _ = std::panic::take_hook();
 }
+
+#[test]
+fn alias_keys_reject_delimiter_characters() {
+    let path = write_temp_keyboard_toml(
+        "alias-bad-key",
+        r#"
+[aliases]
+"bad(name" = "A"
+
+[keymap]
+
+[[keymap.layer]]
+keys = "A A A A"
+"#,
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+    let result = config.keymap();
+    std::fs::remove_file(path).ok();
+
+    let Err(msg) = result else {
+        panic!("alias key with a delimiter must fail keymap resolution");
+    };
+    assert!(
+        msg.contains("bad(name") && msg.contains("must not contain"),
+        "unexpected error: {msg}"
+    );
+}
