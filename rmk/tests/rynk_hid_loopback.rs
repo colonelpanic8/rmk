@@ -18,6 +18,7 @@ use rmk::types::keycode::{HidKeyCode, KeyCode};
 use rmk_types::protocol::rynk::{Cmd, DeviceCapabilities, KeyPosition, ProtocolVersion, SetKeyRequest};
 
 use crate::common::rynk_hid_link::link_session_hid;
+use crate::common::rynk_link::RynkHostClient;
 use crate::common::wrap_keymap;
 
 /// A 2-layer 2×2 `RynkService`, leaked to `'static` (see `rynk_loopback.rs`).

@@ -65,7 +65,17 @@ impl<'a> VialService<'a> {
                         }
                         #[cfg(feature = "host_lock")]
                         ViaKeyboardInfo::SwitchMatrixState if self.locker.is_unlocked() => {
-                            self.ctx.read_matrix_state(&mut report.input_data[2..]);
+                            let bitmap = &mut report.input_data[2..];
+                            self.ctx.read_matrix_state(bitmap);
+                            // Vial wants each row's bytes big-endian (QMK matrix_row_t order).
+                            let (rows, cols, _) = self.ctx.keymap_dimensions();
+                            let row_len = cols.div_ceil(8);
+                            if row_len > 1 {
+                                let len = (rows * row_len).min(bitmap.len());
+                                for row in bitmap[..len].chunks_mut(row_len) {
+                                    row.reverse();
+                                }
+                            }
                         }
                         ViaKeyboardInfo::FirmwareVersion => {
                             BigEndian::write_u32(&mut report.input_data[2..6], VIA_FIRMWARE_VERSION);

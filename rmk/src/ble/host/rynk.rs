@@ -14,7 +14,9 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use embedded_io_async::{ErrorType, Write};
 use heapless::Vec;
-use rmk_types::protocol::rynk::{RYNK_BLE_CHUNK_SIZE, RYNK_HEADER_SIZE, RYNK_HID_REPORT_SIZE};
+#[cfg(test)]
+use rmk_types::protocol::rynk::RYNK_HEADER_SIZE;
+use rmk_types::protocol::rynk::{RYNK_BLE_CHUNK_SIZE, RYNK_HID_REPORT_SIZE, RynkHeader};
 use trouble_host::prelude::*;
 
 use super::HostWriteOutcome;
@@ -158,10 +160,10 @@ impl RynkHidFrameTracker {
     /// LEN comes from the report header; mid-frame reports pass through whole.
     pub(crate) fn take<'r>(&mut self, report: &'r [u8]) -> &'r [u8] {
         if self.remaining == 0 {
-            let (Some(&lo), Some(&hi)) = (report.get(3), report.get(4)) else {
+            let Some(frame_len) = RynkHeader::peek_frame_len(report) else {
                 return &[];
             };
-            self.remaining = RYNK_HEADER_SIZE + u16::from_le_bytes([lo, hi]) as usize;
+            self.remaining = frame_len;
         }
         let n = self.remaining.min(report.len());
         self.remaining -= n;

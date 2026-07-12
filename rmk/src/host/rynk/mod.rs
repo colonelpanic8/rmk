@@ -250,16 +250,13 @@ impl RynkService<'_> {
                     warn!("Rynk: dropping topic-range request {:?}", header.cmd);
                 } else {
                     warn!("Rynk: frame_len {} exceeds buffer {}", frame_len, buf.len());
-                    // Preserve cmd/seq while returning a header-only error.
-                    let n = postcard::to_slice(
-                        &Err::<(), RynkError>(RynkError::Malformed),
-                        &mut buf[RYNK_HEADER_SIZE..],
-                    )
-                    .map(|s| s.len())
-                    .unwrap_or(0);
-                    buf[3..5].copy_from_slice(&(n as u16).to_le_bytes());
-                    if tx.write_all(&buf[..RYNK_HEADER_SIZE + n]).await.is_err() {
-                        return;
+                    // Echo cmd/seq back with a Malformed error; the payload was never read.
+                    let err = Err::<(), RynkError>(RynkError::Malformed);
+                    if let Ok(msg) = RynkMessage::build(&mut buf[..], header.cmd, header.seq, &err) {
+                        let n = msg.frame_len();
+                        if tx.write_all(&buf[..n]).await.is_err() {
+                            return;
+                        }
                     }
                 }
                 let mut remaining = payload_n;
@@ -462,6 +459,37 @@ mod tests {
             Err(RynkError::Locked),
             "relock-on-disconnect: a fresh session is locked again"
         );
+    }
+
+    #[test]
+    fn matrix_state_uses_rynk_column_order() {
+        let mut behavior = BehaviorConfig::default();
+        let positional: PositionalConfig<2, 14> = PositionalConfig::default();
+        let mut data: KeymapData<2, 14, 1, 0> = KeymapData::new([[[KeyAction::No; 14]; 2]]);
+        let keymap = block_on(KeyMap::new(&mut data, &mut behavior, &positional));
+
+        let mut config = RmkConfig::default();
+        config.lock_config.insecure = true;
+        let service = RynkService::new(&keymap, &config);
+
+        keymap.update_matrix_state(&KeyboardEvent::key(0, 0, true));
+        keymap.update_matrix_state(&KeyboardEvent::key(0, 9, true));
+        keymap.update_matrix_state(&KeyboardEvent::key(1, 6, true));
+        keymap.update_matrix_state(&KeyboardEvent::key(1, 13, true));
+
+        let mut chunks = VecDeque::new();
+        chunks.push_back(header(Cmd::GetMatrixState.raw(), 0, 0));
+        let mut rx = ChunkRead { chunks };
+        let mut tx = VecWrite { captured: Vec::new() };
+        block_on(service.run_session(&mut rx, &mut tx));
+
+        let resp = decode_frames(&tx.captured);
+        assert_eq!(resp.len(), 1);
+        let state: MatrixState = postcard::from_bytes::<Result<MatrixState, RynkError>>(resp[0].1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&state.pressed_bitmap[..4], &[0x01, 0x02, 0x40, 0x20]);
+        assert!(state.pressed_bitmap[4..].iter().all(|&b| b == 0));
     }
 
     /// Pipelined frames split across reads must both be dispatched.

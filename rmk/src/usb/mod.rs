@@ -26,6 +26,13 @@ pub(crate) mod rynk;
 #[cfg(feature = "vial")]
 pub(crate) mod vial;
 
+// Both submodules export the same host-transport names; `rynk` and `vial`
+// are mutually exclusive, so exactly one alias set is compiled.
+#[cfg(feature = "rynk")]
+use self::rynk::{HostUsbReader, HostUsbWriter, build_host_usb, run_host_usb};
+#[cfg(feature = "vial")]
+use self::vial::{HostUsbReader, HostUsbWriter, build_host_usb, run_host_usb};
+
 pub(crate) static USB_REMOTE_WAKEUP: Signal<RawMutex, ()> = Signal::new();
 
 /// Borrowed view over the USB HID IN endpoints used by the report writer task.
@@ -218,14 +225,10 @@ pub struct UsbTransport<'a, D: Driver<'static>> {
     logger: Option<embassy_usb::class::cdc_acm::CdcAcmClass<'static, D>>,
     /// Host-protocol transport halves: CDC-ACM under `rynk`, 32-byte HID
     /// reports under `vial`.
-    #[cfg(feature = "rynk")]
-    host_reader: embassy_usb::class::cdc_acm::BufferedReceiver<'static, D>,
-    #[cfg(feature = "rynk")]
-    host_writer: embassy_usb::class::cdc_acm::Sender<'static, D>,
-    #[cfg(feature = "vial")]
-    host_reader: HidReader<'static, D, 32>,
-    #[cfg(feature = "vial")]
-    host_writer: HidWriter<'static, D, 32>,
+    #[cfg(feature = "host")]
+    host_reader: HostUsbReader<D>,
+    #[cfg(feature = "host")]
+    host_writer: HostUsbWriter<D>,
     #[cfg(feature = "host")]
     host_service: Option<&'a crate::host::HostService<'a>>,
     #[cfg(not(feature = "host"))]
@@ -271,7 +274,7 @@ impl<'a, D: Driver<'static>> UsbTransport<'a, D> {
         }
 
         #[cfg(any(feature = "rynk", feature = "vial"))]
-        let (host_reader, host_writer) = crate::host::build_host_usb(&mut builder);
+        let (host_reader, host_writer) = build_host_usb(&mut builder);
 
         let (keyboard_reader, keyboard_writer) = keyboard_rw.split();
         let device = builder.build();
@@ -356,7 +359,7 @@ impl<D: Driver<'static>> Runnable for UsbTransport<'_, D> {
             #[cfg(any(feature = "rynk", feature = "vial"))]
             let host_task = async {
                 if let Some(service) = *host_service {
-                    crate::host::run_host_usb(host_reader, host_writer, service).await
+                    run_host_usb(host_reader, host_writer, service).await
                 } else {
                     core::future::pending::<()>().await
                 }

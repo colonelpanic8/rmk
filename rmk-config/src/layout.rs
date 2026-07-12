@@ -9,10 +9,14 @@
 use std::collections::{HashMap, HashSet};
 
 use pest::Parser;
+use pest_derive::Parser;
 use serde::{Deserialize, Serialize};
 
 use crate::LayoutTomlConfig;
-use crate::keymap::{ConfigParser, Rule};
+
+#[derive(Parser)]
+#[grammar = "keymap.pest"]
+pub(crate) struct ConfigParser;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 struct Rect {
@@ -435,26 +439,6 @@ fn parse_rc(s: &str) -> Result<(u8, u8), String> {
     Ok((r, c))
 }
 
-fn parse_overrides(shapes: &Option<HashMap<String, String>>) -> Result<HashMap<(u8, u8), String>, String> {
-    let mut out = HashMap::new();
-    if let Some(map) = shapes {
-        for (rc, name) in map {
-            out.insert(parse_rc(rc)?, name.trim_start_matches('@').to_string());
-        }
-    }
-    Ok(out)
-}
-
-fn parse_hidden(hidden: &Option<Vec<String>>) -> Result<HashSet<(u8, u8)>, String> {
-    let mut out = HashSet::new();
-    if let Some(list) = hidden {
-        for rc in list {
-            out.insert(parse_rc(rc)?);
-        }
-    }
-    Ok(out)
-}
-
 /// Every f32 dimension of a shape is finite (rejects `nan`/`inf` from TOML).
 fn shape_is_finite(s: &Shape) -> bool {
     [s.w, s.h, s.x, s.y, s.r].iter().all(|v| v.is_finite())
@@ -525,16 +509,30 @@ fn build_layout_info(
     }
 
     // Each variant is complete; hidden keys reflow later keys and encoders.
-    let mut walked: Vec<(String, Vec<Key>, Vec<Encoder>)> = Vec::new();
+    let mut variants: Vec<Variant> = Vec::new();
     if variants_toml.is_empty() {
         let (keys, encoders) = walk(&tokens, &shapes, &HashMap::new(), &HashSet::new())?;
-        walked.push(("default".to_string(), keys, encoders));
+        variants.push(Variant {
+            name: "default".to_string(),
+            keys,
+            encoders,
+        });
     } else {
         for v in variants_toml {
-            let overrides = parse_overrides(&v.shapes)?;
-            let hidden = parse_hidden(&v.hidden)?;
+            let mut overrides = HashMap::new();
+            for (rc, name) in v.shapes.iter().flatten() {
+                overrides.insert(parse_rc(rc)?, name.trim_start_matches('@').to_string());
+            }
+            let mut hidden = HashSet::new();
+            for rc in v.hidden.iter().flatten() {
+                hidden.insert(parse_rc(rc)?);
+            }
             let (keys, encoders) = walk(&tokens, &shapes, &overrides, &hidden)?;
-            walked.push((v.name.clone(), keys, encoders));
+            variants.push(Variant {
+                name: v.name.clone(),
+                keys,
+                encoders,
+            });
         }
     }
 
@@ -542,11 +540,11 @@ fn build_layout_info(
     let default_variant = layout
         .default_variant
         .as_ref()
-        .and_then(|name| walked.iter().position(|(n, ..)| n == name))
+        .and_then(|name| variants.iter().position(|v| &v.name == name))
         .unwrap_or(0) as u8;
 
     // Encoder ids are variant-invariant; validate one dense 0..N list.
-    let encoders = &walked[0].2;
+    let encoders = &variants[0].encoders;
     let mut ids: Vec<u8> = encoders.iter().map(|e| e.id).collect();
     ids.sort_unstable();
     for (expected, &id) in ids.iter().enumerate() {
@@ -567,10 +565,6 @@ fn build_layout_info(
         ));
     }
 
-    let variants = walked
-        .into_iter()
-        .map(|(name, keys, encoders)| Variant { name, keys, encoders })
-        .collect();
     Ok(Some(LayoutInfo {
         default_variant,
         variants,

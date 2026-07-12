@@ -237,7 +237,21 @@ fn resolve_passkey_enabled(ble: &crate::BleConfig) -> Result<Passkey, String> {
 #[cfg(test)]
 mod tests {
     use super::{resolve_passkey_enabled, validate_u8_capability, validate_u16_capability};
-    use crate::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
+    use crate::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, KeyboardTomlConfig, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
+
+    #[test]
+    fn reserves_led_subscribers_for_display_split_and_dual_rynk_sessions() {
+        let config: KeyboardTomlConfig = toml::from_str("").unwrap();
+        let constants = config.build_constants(&["display", "split", "rynk", "_ble"]).unwrap();
+        let led_indicator = constants
+            .events
+            .iter()
+            .find(|event| event.name == "led_indicator")
+            .unwrap();
+
+        // Three indicator processors, the display, two split peripherals, and USB/BLE Rynk sessions.
+        assert_eq!(led_indicator.subs, 8);
+    }
 
     #[test]
     fn validates_passkey_timeout() {

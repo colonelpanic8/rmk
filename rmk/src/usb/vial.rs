@@ -10,18 +10,20 @@ use crate::host::transport::HostTransportError;
 use crate::host::via::VialService;
 use crate::usb::add_usb_reader_writer;
 
+/// Reader/writer halves of the Vial USB transport (32-byte HID reports).
+pub(crate) type HostUsbReader<D> = HidReader<'static, D, 32>;
+pub(crate) type HostUsbWriter<D> = HidWriter<'static, D, 32>;
+
 /// Build the Vial HID interface (32-byte input + 32-byte output reports).
-pub fn build_host_usb<D: Driver<'static>>(
-    builder: &mut Builder<'static, D>,
-) -> (HidReader<'static, D, 32>, HidWriter<'static, D, 32>) {
+pub fn build_host_usb<D: Driver<'static>>(builder: &mut Builder<'static, D>) -> (HostUsbReader<D>, HostUsbWriter<D>) {
     let rw = add_usb_reader_writer!(builder, ViaReport, 32, 32, 32);
     rw.split()
 }
 
 /// Vial session loop.
 pub async fn run_host_usb<D: Driver<'static>>(
-    reader: &mut HidReader<'static, D, 32>,
-    writer: &mut HidWriter<'static, D, 32>,
+    reader: &mut HostUsbReader<D>,
+    writer: &mut HostUsbWriter<D>,
     service: &VialService<'_>,
 ) -> ! {
     loop {

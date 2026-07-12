@@ -15,11 +15,10 @@ use embassy_sync::pipe::Pipe;
 use embedded_io_async::{ErrorType, Read, Write};
 use rmk::host::HostService as RynkService;
 use rmk_types::constants::RYNK_BUFFER_SIZE;
-use rmk_types::protocol::rynk::{Cmd, RYNK_HEADER_SIZE, RYNK_HID_REPORT_SIZE, RynkError, RynkHeader, RynkMessage};
+use rmk_types::protocol::rynk::{Cmd, RYNK_HEADER_SIZE, RYNK_HID_REPORT_SIZE, RynkHeader, RynkMessage};
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 
-use super::rynk_link::Frame;
+use super::rynk_link::{Frame, RynkHostClient};
 use super::test_block_on::test_block_on;
 
 /// One direction of the link, carrying whole HID reports.
@@ -103,9 +102,9 @@ pub struct RynkHidClient<'p> {
     buf: [u8; RYNK_BUFFER_SIZE],
 }
 
-impl RynkHidClient<'_> {
+impl RynkHostClient for RynkHidClient<'_> {
     /// Encode a request frame and write it as fixed 32-byte report fragments.
-    pub async fn send<T: Serialize>(&mut self, cmd: Cmd, seq: u8, payload: &T) {
+    async fn send<T: Serialize>(&mut self, cmd: Cmd, seq: u8, payload: &T) {
         let n = RynkMessage::build(&mut self.buf, cmd, seq, payload)
             .expect("build request frame")
             .frame_len();
@@ -115,7 +114,7 @@ impl RynkHidClient<'_> {
     /// Read whole reports and reassemble exactly one rynk frame — reports carry a
     /// fragment of the frame, so this may consume several; the header LEN delimits
     /// it and the final report's padding is dropped.
-    pub async fn recv_frame(&mut self) -> Frame {
+    async fn recv_frame(&mut self) -> Frame {
         let mut link: &Link = self.rx;
         let mut stream: Vec<u8> = Vec::new();
         let mut remaining = 0usize;
@@ -136,50 +135,6 @@ impl RynkHidClient<'_> {
                 return Frame { header, payload };
             }
         }
-    }
-
-    /// Read frames until one echoes `seq`, skipping any topic pushes (seq 0).
-    pub async fn recv_response(&mut self, seq: u8) -> Frame {
-        debug_assert_ne!(
-            seq, 0,
-            "use a non-zero request seq so topic frames (seq 0) don't alias it"
-        );
-        loop {
-            let frame = self.recv_frame().await;
-            if frame.header.seq == seq {
-                return frame;
-            }
-            assert_eq!(
-                frame.header.seq, 0,
-                "unexpected frame (cmd={:?}, seq={}) while awaiting response seq {}",
-                frame.header.cmd, frame.header.seq, seq,
-            );
-        }
-    }
-
-    /// One full request/response round-trip across the HID framing.
-    pub async fn request<Req: Serialize, Resp: DeserializeOwned>(
-        &mut self,
-        cmd: Cmd,
-        seq: u8,
-        req: &Req,
-    ) -> Result<Resp, RynkError> {
-        self.send(cmd, seq, req).await;
-        let frame = self.recv_response(seq).await;
-        assert_eq!(frame.header.cmd, cmd, "response must echo the request cmd");
-        frame.envelope()
-    }
-
-    /// Await the next unsolicited topic push.
-    pub async fn recv_topic(&mut self) -> Frame {
-        let frame = self.recv_frame().await;
-        assert!(
-            frame.header.cmd.is_topic(),
-            "expected a topic frame, got cmd={:?}",
-            frame.header.cmd
-        );
-        assert_eq!(frame.header.seq, 0, "topic frames use seq 0");
-        frame
     }
 }
 

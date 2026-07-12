@@ -1,14 +1,9 @@
 use std::collections::HashMap;
 
 use pest::Parser;
-use pest_derive::Parser;
 
-use crate::layout::{MapToken, parse_map};
+use crate::layout::{ConfigParser, MapToken, Rule, parse_map};
 use crate::{KeyInfo, KeyboardTomlConfig, KeymapConfig, LayerTomlConfig};
-
-#[derive(Parser)]
-#[grammar = "keymap.pest"]
-pub(crate) struct ConfigParser;
 
 // Prevent alias cycles.
 const MAX_ALIAS_RESOLUTION_DEPTH: usize = 10;
@@ -341,30 +336,21 @@ impl KeyboardTomlConfig {
         // Resolve aliases first, since the grammar below doesn't know about them.
         let layer_keys = Self::alias_resolver(layer_keys, aliases)?;
 
-        let mut key_action_sequence = Vec::new();
+        let pairs =
+            ConfigParser::parse(Rule::key_map, &layer_keys).map_err(|e| format!("Invalid keymap format: {}", e))?;
 
-        match ConfigParser::parse(Rule::key_map, &layer_keys) {
-            Ok(pairs) => {
-                for pair in pairs {
-                    if pair.as_rule() == Rule::key_map {
-                        for inner_pair in pair.into_inner() {
-                            match inner_pair.as_rule() {
-                                Rule::EOI | Rule::WHITESPACE => {}
-                                // Resolve layer names even when nested inside an action.
-                                _ => {
-                                    key_action_sequence.push(Self::resolve_layer_names(
-                                        &inner_pair,
-                                        layer_names,
-                                        num_layers,
-                                    )?);
-                                }
-                            }
+        let mut key_action_sequence = Vec::new();
+        for pair in pairs {
+            if pair.as_rule() == Rule::key_map {
+                for inner_pair in pair.into_inner() {
+                    match inner_pair.as_rule() {
+                        Rule::EOI | Rule::WHITESPACE => {}
+                        // Resolve layer names even when nested inside an action.
+                        _ => {
+                            key_action_sequence.push(Self::resolve_layer_names(&inner_pair, layer_names, num_layers)?);
                         }
                     }
                 }
-            }
-            Err(e) => {
-                return Err(format!("Invalid keymap format: {}", e));
             }
         }
 

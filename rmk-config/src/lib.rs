@@ -698,8 +698,7 @@ impl Default for DependencyConfig {
 }
 
 /// Intermediate resolved keymap grid (rows/cols/layers + per-layer actions).
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Built once by `get_keymap_config` and unpacked into `Keymap`; never (de)serialized.
 pub(crate) struct KeymapConfig {
     pub rows: u8,
     pub cols: u8,
@@ -1384,7 +1383,7 @@ mod tests {
 
         assert_eq!(config.led_indicator.channel_size, 2);
         assert_eq!(config.led_indicator.pubs, 2);
-        assert_eq!(config.led_indicator.subs, 4);
+        assert_eq!(config.led_indicator.subs, 3);
 
         assert_eq!(config.pointing.channel_size, 8);
         assert_eq!(config.pointing.subs, 2);

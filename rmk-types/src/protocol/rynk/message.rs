@@ -47,6 +47,12 @@ impl RynkHeader {
     pub fn frame_len(&self) -> usize {
         RYNK_HEADER_SIZE + self.payload_len as usize
     }
+
+    /// Frame length declared by a raw buffer's leading header bytes;
+    /// `None` when `bytes` is shorter than a header.
+    pub fn peek_frame_len(bytes: &[u8]) -> Option<usize> {
+        bytes.first_chunk().map(|head| Self::parse(head).frame_len())
+    }
 }
 
 /// A RynkMessage is a mutable view over the byte buffer, split at

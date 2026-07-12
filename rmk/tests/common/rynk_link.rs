@@ -72,48 +72,23 @@ impl Frame {
     }
 }
 
-/// Host end of the link. Holds shared handles to both directions: `rx` reads
-/// device→host bytes (responses and topic pushes), `tx` writes host→device
-/// request frames. Encodes/decodes exactly as a real host (Vial tool, …) does.
-pub struct RynkClient<'p> {
-    rx: &'p Link,
-    tx: &'p Link,
-    buf: [u8; RYNK_BUFFER_SIZE],
-}
-
-impl<'p> RynkClient<'p> {
+/// Host-side request/response correlation shared by the two Rynk test clients
+/// ([`RynkClient`] and [`super::rynk_hid_link::RynkHidClient`]). Each client
+/// supplies the two transport primitives — `send` (request framing) and
+/// `recv_frame` (response reassembly) — and inherits the correlation, round-trip,
+/// and topic helpers.
+#[allow(async_fn_in_trait)] // test-only trait, never dyn-erased
+pub trait RynkHostClient {
     /// Encode and send a request frame. `seq` correlates the response.
-    pub async fn send<T: Serialize>(&mut self, cmd: Cmd, seq: u8, payload: &T) {
-        let n = RynkMessage::build(&mut self.buf, cmd, seq, payload)
-            .expect("build request frame")
-            .frame_len();
-        // `Pipe::write_all` is inherent and infallible (the in-memory link
-        // never errors); it just blocks until the device drains enough room.
-        self.tx.write_all(&self.buf[..n]).await;
-    }
+    async fn send<T: Serialize>(&mut self, cmd: Cmd, seq: u8, payload: &T);
 
-    /// Send hand-built bytes verbatim — for malformed / adversarial framing.
-    pub async fn send_raw(&mut self, bytes: &[u8]) {
-        self.tx.write_all(bytes).await;
-    }
-
-    /// Read exactly one frame off the wire: fixed header, then declared payload.
-    pub async fn recv_frame(&mut self) -> Frame {
-        let mut rx = self.rx;
-        let mut bytes = [0u8; RYNK_HEADER_SIZE];
-        rx.read_exact(&mut bytes).await.expect("read header");
-        let header = RynkHeader::parse(&bytes);
-        let mut payload = vec![0u8; header.payload_len as usize];
-        if !payload.is_empty() {
-            rx.read_exact(&mut payload).await.expect("read payload");
-        }
-        Frame { header, payload }
-    }
+    /// Read exactly one frame off the wire.
+    async fn recv_frame(&mut self) -> Frame;
 
     /// Read frames until one echoes `seq`, skipping any topic pushes that arrive
     /// in between. Responses echo the request's `seq`; topic frames use `seq 0`,
     /// so request seqs must be non-zero to stay unambiguous.
-    pub async fn recv_response(&mut self, seq: u8) -> Frame {
+    async fn recv_response(&mut self, seq: u8) -> Frame {
         debug_assert_ne!(
             seq, 0,
             "use a non-zero request seq so topic frames (seq 0) don't alias it"
@@ -133,7 +108,7 @@ impl<'p> RynkClient<'p> {
 
     /// One full request/response round-trip: send, await the correlated reply,
     /// assert the `cmd` echo, and decode the `Result<Resp, RynkError>` envelope.
-    pub async fn request<Req: Serialize, Resp: DeserializeOwned>(
+    async fn request<Req: Serialize, Resp: DeserializeOwned>(
         &mut self,
         cmd: Cmd,
         seq: u8,
@@ -146,7 +121,7 @@ impl<'p> RynkClient<'p> {
     }
 
     /// Await the next unsolicited topic push.
-    pub async fn recv_topic(&mut self) -> Frame {
+    async fn recv_topic(&mut self) -> Frame {
         let frame = self.recv_frame().await;
         assert!(
             frame.header.cmd.is_topic(),
@@ -155,6 +130,46 @@ impl<'p> RynkClient<'p> {
         );
         assert_eq!(frame.header.seq, 0, "topic frames use seq 0");
         frame
+    }
+}
+
+/// Host end of the link. Holds shared handles to both directions: `rx` reads
+/// device→host bytes (responses and topic pushes), `tx` writes host→device
+/// request frames. Encodes/decodes exactly as a real host (Vial tool, …) does.
+pub struct RynkClient<'p> {
+    rx: &'p Link,
+    tx: &'p Link,
+    buf: [u8; RYNK_BUFFER_SIZE],
+}
+
+impl RynkClient<'_> {
+    /// Send hand-built bytes verbatim — for malformed / adversarial framing.
+    pub async fn send_raw(&mut self, bytes: &[u8]) {
+        self.tx.write_all(bytes).await;
+    }
+}
+
+impl RynkHostClient for RynkClient<'_> {
+    async fn send<T: Serialize>(&mut self, cmd: Cmd, seq: u8, payload: &T) {
+        let n = RynkMessage::build(&mut self.buf, cmd, seq, payload)
+            .expect("build request frame")
+            .frame_len();
+        // `Pipe::write_all` is inherent and infallible (the in-memory link
+        // never errors); it just blocks until the device drains enough room.
+        self.tx.write_all(&self.buf[..n]).await;
+    }
+
+    /// Read exactly one frame off the wire: fixed header, then declared payload.
+    async fn recv_frame(&mut self) -> Frame {
+        let mut rx = self.rx;
+        let mut bytes = [0u8; RYNK_HEADER_SIZE];
+        rx.read_exact(&mut bytes).await.expect("read header");
+        let header = RynkHeader::parse(&bytes);
+        let mut payload = vec![0u8; header.payload_len as usize];
+        if !payload.is_empty() {
+            rx.read_exact(&mut payload).await.expect("read payload");
+        }
+        Frame { header, payload }
     }
 }
 
@@ -190,10 +205,11 @@ pub fn link_session<T>(service: &RynkService<'_>, script: impl AsyncFnOnce(&mut 
 
 /// Like [`link_session`] but runs TWO concurrent `run_session`s over the SAME
 /// `service` — the production shape on a board that exposes both BLE-GATT and
-/// BLE-HID (or BLE + USB), where each transport drives its own session against
-/// one shared `RynkService`/`KeyMap` and its own `TopicSubscribers`. Exercises
-/// the dispatch guard and the concurrent-subscriber path. `script` drives both
-/// host ends.
+/// BLE-HID (or BLE + USB), where each transport drives its own session with
+/// its own topic-subscription state against one shared `RynkService`/`KeyMap`,
+/// including the device-wide lock (either session's unlock/relock affects both).
+/// Exercises the dispatch guard and the concurrent-subscriber path. `script`
+/// drives both host ends.
 pub fn link_two_sessions<T>(
     service: &RynkService<'_>,
     script: impl AsyncFnOnce(&mut RynkClient<'_>, &mut RynkClient<'_>) -> T,

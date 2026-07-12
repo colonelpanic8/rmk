@@ -106,8 +106,8 @@ impl MaxSize for DeviceInfo {
         + 3 * crate::heapless_vec_max_size::<u8, DEVICE_INFO_STRING_SIZE>();
 }
 
-/// Current lock/unlock state of the device — the single response type for all
-/// three lock endpoints (`GetLockStatus`, `UnlockPoll`, `Lock`).
+/// Current lock/unlock state of the device, returned by `GetLockStatus`
+/// and `UnlockPoll`. The `Lock` endpoint returns `()`.
 ///
 /// Loses `Copy` and derived `MaxSize` (both forbidden by the `heapless::Vec`
 /// field): handlers return it by value, and the bound is hand-written below.

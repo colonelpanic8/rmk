@@ -329,15 +329,17 @@ fn expand_main(
         quote! {}
     };
 
-    // Bake the physical-layout blob as a compile-time const.
-    let (layout_blob_static, rynk_layout_field) = if host.rynk_enabled {
+    // Rynk-only: bake the physical-layout blob as a compile-time const and enable
+    // the lock gate. Both fields land adjacently in the `RmkConfig` literal below.
+    let (layout_blob_static, rynk_layout_field, lock_config) = if host.rynk_enabled {
         let blob_lit = proc_macro2::Literal::byte_string(&layout.blob);
         (
             quote! { static LAYOUT_BLOB: &[u8] = #blob_lit; },
             quote! { layout_blob: LAYOUT_BLOB, },
+            quote! { lock_config: LOCK_CONFIG, },
         )
     } else {
-        (quote! {}, quote! {})
+        (quote! {}, quote! {}, quote! {})
     };
 
     let host_service_init = if host.rynk_enabled || host.vial_enabled {
@@ -363,12 +365,6 @@ fn expand_main(
 
     let vial_config = if host.vial_enabled {
         quote! { vial_config: VIAL_CONFIG,}
-    } else {
-        quote! {}
-    };
-
-    let lock_config = if host.rynk_enabled {
-        quote! { lock_config: LOCK_CONFIG,}
     } else {
         quote! {}
     };

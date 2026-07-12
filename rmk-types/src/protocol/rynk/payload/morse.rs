@@ -71,21 +71,12 @@ mod bulk {
 
     impl GetMorseBulkResponse {
         /// Build the response, collecting up to the bulk capacity.
-        #[cfg(not(feature = "host"))]
         pub fn from_iter_bounded(configs: impl IntoIterator<Item = Morse>) -> Self {
-            let mut v = BulkMorses::new();
-            for c in configs {
-                if v.push(c).is_err() {
-                    break;
-                }
-            }
-            Self { configs: v }
-        }
-        #[cfg(feature = "host")]
-        pub fn from_iter_bounded(configs: impl IntoIterator<Item = Morse>) -> Self {
-            Self {
-                configs: configs.into_iter().collect(),
-            }
+            #[cfg(not(feature = "host"))]
+            let configs = configs.into_iter().take(BULK_SIZE).collect();
+            #[cfg(feature = "host")]
+            let configs = configs.into_iter().collect();
+            Self { configs }
         }
     }
 }

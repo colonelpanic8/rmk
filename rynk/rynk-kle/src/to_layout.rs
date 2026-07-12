@@ -106,20 +106,16 @@ impl ShapeDesc {
 
     fn toml(&self) -> String {
         let mut parts = Vec::new();
-        if !approx(self.w, 1.0) {
-            parts.push(format!("w = {}", fmt(self.w)));
-        }
-        if !approx(self.h, 1.0) {
-            parts.push(format!("h = {}", fmt(self.h)));
-        }
-        if !approx(self.x, 0.0) {
-            parts.push(format!("x = {}", fmt(self.x)));
-        }
-        if !approx(self.y, 0.0) {
-            parts.push(format!("y = {}", fmt(self.y)));
-        }
-        if !approx(self.r, 0.0) {
-            parts.push(format!("r = {}", fmt(self.r)));
+        for (label, value, default) in [
+            ("w", self.w, 1.0),
+            ("h", self.h, 1.0),
+            ("x", self.x, 0.0),
+            ("y", self.y, 0.0),
+            ("r", self.r, 0.0),
+        ] {
+            if !approx(value, default) {
+                parts.push(format!("{label} = {}", fmt(value)));
+            }
         }
         if let Some((w2, h2, x2, y2)) = self.rect2 {
             parts.push(format!("w2 = {}", fmt(w2)));
@@ -328,6 +324,30 @@ fn synthetic_key(x: f64, y: f64, width: f64, height: f64) -> SerialKey<f64> {
     }
 }
 
+/// Group instance indices by `key(inst)`, preserving first-seen key order.
+/// Returns `(order, groups, index)`: keys in first-seen order, the instances per
+/// key aligned with `order`, and a key → position lookup.
+fn group_first_seen<K: Copy + Eq + std::hash::Hash>(
+    insts: &[usize],
+    key: impl Fn(usize) -> K,
+) -> (Vec<K>, Vec<Vec<usize>>, HashMap<K, usize>) {
+    let mut order: Vec<K> = Vec::new();
+    let mut index: HashMap<K, usize> = HashMap::new();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for &inst in insts {
+        let k = key(inst);
+        match index.get(&k) {
+            Some(&i) => groups[i].push(inst),
+            None => {
+                index.insert(k, order.len());
+                order.push(k);
+                groups.push(vec![inst]);
+            }
+        }
+    }
+    (order, groups, index)
+}
+
 pub fn generate(input: GenInput) -> Result<Generated, String> {
     let mut warnings = Vec::new();
     if input.keys.len() != input.annotations.len() {
@@ -365,20 +385,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
     }
 
     // 2. Group key instances by matrix cell, preserving first-seen order.
-    let mut order: Vec<(u32, u32)> = Vec::new();
-    let mut index: HashMap<(u32, u32), usize> = HashMap::new();
-    let mut cells: Vec<Vec<usize>> = Vec::new();
-    for &ki in &key_insts {
-        let rc = annotation(ki).matrix.unwrap();
-        match index.get(&rc) {
-            Some(&i) => cells[i].push(ki),
-            None => {
-                index.insert(rc, order.len());
-                order.push(rc);
-                cells.push(vec![ki]);
-            }
-        }
-    }
+    let (order, cells, index) = group_first_seen(&key_insts, |ki| annotation(ki).matrix.unwrap());
     // A cell repeated with no layout option is a genuine duplicate; only the first
     // is placed (RMK requires unique coordinates).
     for (i, insts) in cells.iter().enumerate() {
@@ -392,20 +399,7 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
     }
 
     // 3. Collapse Vial CW/CCW switch pairs into one physical encoder knob.
-    let mut enc_order: Vec<u32> = Vec::new();
-    let mut enc_index: HashMap<u32, usize> = HashMap::new();
-    let mut enc_switches: Vec<Vec<usize>> = Vec::new();
-    for &ki in &enc_insts {
-        let id = annotation(ki).encoder.unwrap().0;
-        match enc_index.get(&id) {
-            Some(&i) => enc_switches[i].push(ki),
-            None => {
-                enc_index.insert(id, enc_order.len());
-                enc_order.push(id);
-                enc_switches.push(vec![ki]);
-            }
-        }
-    }
+    let (enc_order, enc_switches, enc_index) = group_first_seen(&enc_insts, |ki| annotation(ki).encoder.unwrap().0);
     let mut encoders: Vec<EncoderRender> = Vec::new();
     for (i, sw) in enc_switches.iter().enumerate() {
         let id = enc_order[i];
@@ -677,24 +671,17 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
     let map_block = map_lines.join("\n");
     let shape_defs: Vec<(String, String)> = reg.generated().map(|(n, d)| (n.clone(), d.toml())).collect();
 
-    let display_toml = render(RenderCtx {
-        display: true,
+    let ctx = RenderCtx {
         rows,
         cols,
         default_variant: &default_variant,
         map_block: &map_block,
         shape_defs: &shape_defs,
         variants: &variants,
-    });
-    let inner_layout_toml = render(RenderCtx {
-        display: false,
-        rows,
-        cols,
-        default_variant: &default_variant,
-        map_block: &map_block,
-        shape_defs: &shape_defs,
-        variants: &variants,
-    });
+    };
+    // `display` selects the full keyboard.toml snippet vs. the bare validated body.
+    let display_toml = render(&ctx, true);
+    let inner_layout_toml = render(&ctx, false);
 
     Ok(Generated {
         display_toml,
@@ -704,7 +691,6 @@ pub fn generate(input: GenInput) -> Result<Generated, String> {
 }
 
 struct RenderCtx<'a> {
-    display: bool,
     rows: u32,
     cols: u32,
     default_variant: &'a str,
@@ -723,16 +709,16 @@ fn rc_list(items: &[(u32, u32)]) -> String {
 
 /// Render either the full keyboard.toml snippet (`display`) or just the
 /// `[layout]` body that `layout_blob_from_toml` validates.
-fn render(ctx: RenderCtx) -> String {
+fn render(ctx: &RenderCtx, display: bool) -> String {
     let mut out = String::new();
     // Section names differ: nested under `[layout]` for display, bare for validation.
-    let (shapes_hdr, variant_hdr) = if ctx.display {
+    let (shapes_hdr, variant_hdr) = if display {
         ("[layout.shapes]", "[[layout.variant]]")
     } else {
         ("[shapes]", "[[variant]]")
     };
 
-    if ctx.display {
+    if display {
         out.push_str("[layout]\n");
     }
     out.push_str(&format!("rows = {}\n", ctx.rows));

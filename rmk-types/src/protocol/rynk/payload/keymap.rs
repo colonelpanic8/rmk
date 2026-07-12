@@ -71,21 +71,12 @@ mod bulk {
 
     impl GetKeymapBulkResponse {
         /// Build the response, collecting up to the bulk capacity.
-        #[cfg(not(feature = "host"))]
         pub fn from_iter_bounded(actions: impl IntoIterator<Item = KeyAction>) -> Self {
-            let mut v = BulkActions::new();
-            for a in actions {
-                if v.push(a).is_err() {
-                    break;
-                }
-            }
-            Self { actions: v }
-        }
-        #[cfg(feature = "host")]
-        pub fn from_iter_bounded(actions: impl IntoIterator<Item = KeyAction>) -> Self {
-            Self {
-                actions: actions.into_iter().collect(),
-            }
+            #[cfg(not(feature = "host"))]
+            let actions = actions.into_iter().take(BULK_KEYMAP_SIZE).collect();
+            #[cfg(feature = "host")]
+            let actions = actions.into_iter().collect();
+            Self { actions }
         }
     }
 

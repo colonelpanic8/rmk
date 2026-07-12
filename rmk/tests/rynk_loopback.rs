@@ -35,7 +35,7 @@ use rmk_types::protocol::rynk::{
     SetEncoderRequest, SetForkRequest, SetKeyRequest, SetMacroRequest, SetMorseRequest, StorageResetMode,
 };
 
-use crate::common::rynk_link::{link_session, link_two_sessions};
+use crate::common::rynk_link::{RynkHostClient, link_session, link_two_sessions};
 use crate::common::{wrap_keymap, wrap_keymap_with_encoders};
 
 /// Leak an always-unlocked config so these cases exercise protocol mechanics.

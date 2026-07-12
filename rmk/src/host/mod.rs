@@ -28,10 +28,3 @@ pub use rynk::RynkService as HostService;
 pub use rynk::run_rynk_uart;
 #[cfg(feature = "vial")]
 pub use via::VialService as HostService;
-
-/// Build and run one host-protocol session over USB. Resolves to the rynk
-/// CDC-ACM transport under `rynk` and the Vial HID transport under `vial`.
-#[cfg(all(feature = "rynk", not(feature = "_no_usb")))]
-pub(crate) use crate::usb::rynk::{build_host_usb, run_host_usb};
-#[cfg(all(feature = "vial", not(feature = "_no_usb")))]
-pub(crate) use crate::usb::vial::{build_host_usb, run_host_usb};

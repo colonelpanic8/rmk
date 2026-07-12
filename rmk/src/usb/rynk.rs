@@ -16,10 +16,12 @@ const RYNK_USB_MAX_PACKET_SIZE: u16 = 64;
 /// sub-packet `Read::read` requests.
 const RX_BUFFER_SIZE: usize = RYNK_USB_MAX_PACKET_SIZE as usize;
 
+/// Reader/writer halves of the Rynk USB transport (CDC-ACM).
+pub(crate) type HostUsbReader<D> = BufferedReceiver<'static, D>;
+pub(crate) type HostUsbWriter<D> = Sender<'static, D>;
+
 /// Build the Rynk CDC-ACM interface.
-pub fn build_host_usb<D: Driver<'static>>(
-    builder: &mut Builder<'static, D>,
-) -> (BufferedReceiver<'static, D>, Sender<'static, D>) {
+pub fn build_host_usb<D: Driver<'static>>(builder: &mut Builder<'static, D>) -> (HostUsbReader<D>, HostUsbWriter<D>) {
     static STATE: StaticCell<State> = StaticCell::new();
     static RX_BUF: StaticCell<[u8; RX_BUFFER_SIZE]> = StaticCell::new();
 
@@ -32,8 +34,8 @@ pub fn build_host_usb<D: Driver<'static>>(
 
 /// Rynk session loop
 pub async fn run_host_usb<D: Driver<'static>>(
-    receiver: &mut BufferedReceiver<'static, D>,
-    sender: &mut Sender<'static, D>,
+    receiver: &mut HostUsbReader<D>,
+    sender: &mut HostUsbWriter<D>,
     service: &RynkService<'_>,
 ) -> ! {
     loop {
