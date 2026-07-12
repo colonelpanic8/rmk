@@ -6,6 +6,11 @@
 //! decodes them into its own `LayoutInfo` (defined in the host crate, not here,
 //! so this `#![no_std]` crate stays alloc-free). Only [`LayoutChunk`] is a wire
 //! type, so only it needs `MaxSize`.
+//!
+//! The blob carries no version byte of its own: its postcard schema (the host
+//! `LayoutInfo` and its `rmk-config` mirror) is part of the wire contract, so
+//! reshaping it — including appending a field — is a protocol **major** bump,
+//! exactly like reshaping any response payload.
 
 use heapless::Vec;
 use postcard::experimental::max_size::MaxSize;

@@ -1,5 +1,5 @@
 //! Rynk config over BLE GATT — a single per-connection session shared by both
-//! transports: the custom 128-bit GATT [`RynkService`] (native bluest hosts) and
+//! transports: the custom 128-bit `RynkGattService` (native bluest hosts) and
 //! the vendor HID-over-GATT `RynkHidService` (browsers via WebHID).
 //!
 //! A connection is one host on one transport, so [`HostGattHandler::run`] runs ONE
@@ -120,7 +120,7 @@ impl HostGattHandler {
 pub(crate) enum RynkBleSource {
     /// No transport yet — drop topic pushes (no subscriber).
     None,
-    /// Custom 128-bit GATT `RynkService` (native hosts).
+    /// Custom 128-bit `RynkGattService` (native hosts).
     Custom,
     /// Vendor HID-over-GATT `RynkHidService` (browsers over WebHID).
     Hid,
