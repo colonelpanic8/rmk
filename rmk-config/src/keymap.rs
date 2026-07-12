@@ -54,11 +54,12 @@ impl KeyboardTomlConfig {
         })?;
         let layers = &keymap_cfg.layer;
 
-        // Aliases are referenced as `@name`, so a name with whitespace can't be matched.
+        // Aliases are referenced as `@name`, and the name ends at whitespace or a
+        // delimiter — a key containing one of those could never be matched.
         for key in aliases.keys() {
-            if key.chars().any(char::is_whitespace) {
+            if key.chars().any(|c| c.is_whitespace() || "(),@".contains(c)) {
                 return Err(format!(
-                    "keyboard.toml: Alias key '{}' must not contain whitespace characters",
+                    "keyboard.toml: Alias key '{}' must not contain whitespace or any of `(`, `)`, `,`, `@`",
                     key
                 ));
             }
@@ -215,36 +216,31 @@ impl KeyboardTomlConfig {
 
                 next_keys.push_str(&current_keys[last_index..start_index]);
 
-                // A bare or trailing `@` is literal, not an alias.
-                if let Some(first_char) = current_keys.as_bytes().get(start_index + 1) {
-                    if !first_char.is_ascii_whitespace() {
-                        let mut end_index = start_index + 2;
-                        while let Some(c) = current_keys.as_bytes().get(end_index) {
-                            if c.is_ascii_whitespace() {
-                                break;
-                            } else {
-                                end_index += 1;
-                            }
-                        }
-
-                        let alias_key = &current_keys[start_index + 1..end_index];
-                        match aliases.get(alias_key) {
-                            Some(value) => {
-                                next_keys.push_str(value);
-                                made_replacement = true;
-                            }
-                            None => return Err(format!("Undefined alias: {}", alias_key)),
-                        }
-                        last_index = end_index;
-                    } else {
-                        next_keys.push('@');
-                        last_index = start_index + 1;
+                // The name ends at the grammar's delimiters, so `LM(1, @mods)`
+                // resolves `mods` — not a bogus `mods)`.
+                let mut end_index = start_index + 1;
+                while let Some(&c) = current_keys.as_bytes().get(end_index) {
+                    if c.is_ascii_whitespace() || matches!(c, b'(' | b')' | b',' | b'@') {
+                        break;
                     }
-                } else {
+                    end_index += 1;
+                }
+
+                let alias_key = &current_keys[start_index + 1..end_index];
+                if alias_key.is_empty() {
+                    // A bare `@` (trailing, or right before a delimiter) is literal.
                     next_keys.push('@');
                     last_index = start_index + 1;
-                    break;
+                    continue;
                 }
+                match aliases.get(alias_key) {
+                    Some(value) => {
+                        next_keys.push_str(value);
+                        made_replacement = true;
+                    }
+                    None => return Err(format!("Undefined alias: {}", alias_key)),
+                }
+                last_index = end_index;
             }
 
             next_keys.push_str(&current_keys[last_index..]);
@@ -795,5 +791,50 @@ mod tests {
         };
         let err = KeyboardTomlConfig::build_layer_grid(0, &layer, &context).unwrap_err();
         assert!(err.contains("has 2 keys but `layout.map` defines 3 positions"), "{err}");
+    }
+
+    #[test]
+    fn alias_ends_at_delimiters() {
+        let aliases = HashMap::from([
+            ("mods".to_string(), "LShift | LGui".to_string()),
+            ("a".to_string(), "A".to_string()),
+            ("b".to_string(), "B".to_string()),
+        ]);
+
+        // The motivating case: an alias directly before `)` resolves.
+        assert_eq!(
+            KeyboardTomlConfig::alias_resolver("LM(1, @mods)", &aliases).unwrap(),
+            "LM(1, LShift | LGui)"
+        );
+        // Aliases directly inside parens and before commas.
+        assert_eq!(
+            KeyboardTomlConfig::alias_resolver("WM(@a, LShift) TH(@a, @b)", &aliases).unwrap(),
+            "WM(A, LShift) TH(A, B)"
+        );
+        // Adjacent aliases resolve independently.
+        assert_eq!(KeyboardTomlConfig::alias_resolver("@a@b", &aliases).unwrap(), "AB");
+    }
+
+    #[test]
+    fn bare_at_is_literal() {
+        let aliases = HashMap::from([("a".to_string(), "A".to_string())]);
+        // Trailing, before whitespace, and before a delimiter: all literal.
+        assert_eq!(KeyboardTomlConfig::alias_resolver("X @", &aliases).unwrap(), "X @");
+        assert_eq!(KeyboardTomlConfig::alias_resolver("@ X", &aliases).unwrap(), "@ X");
+        assert_eq!(KeyboardTomlConfig::alias_resolver("X@)", &aliases).unwrap(), "X@)");
+    }
+
+    #[test]
+    fn undefined_alias_reports_bare_name() {
+        let aliases = HashMap::new();
+        let err = KeyboardTomlConfig::alias_resolver("LM(1, @mods)", &aliases).unwrap_err();
+        assert_eq!(err, "Undefined alias: mods");
+    }
+
+    #[test]
+    fn alias_recursion_depth_is_bounded() {
+        let aliases = HashMap::from([("loop".to_string(), "@loop".to_string())]);
+        let err = KeyboardTomlConfig::alias_resolver("@loop", &aliases).unwrap_err();
+        assert!(err.contains("maximum depth"), "{err}");
     }
 }
