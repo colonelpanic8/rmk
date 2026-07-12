@@ -78,6 +78,7 @@ pub(crate) fn to_via_keycode(key_action: KeyAction) -> u16 {
             Action::KeyboardControl(c) => match c {
                 KeyboardAction::Bootloader => 0x7c00,
                 KeyboardAction::Reboot => 0x7c01,
+                KeyboardAction::ClearEeprom => 0x7c03,
                 KeyboardAction::ComboOn => 0x7c50,
                 KeyboardAction::ComboOff => 0x7c51,
                 KeyboardAction::ComboToggle => 0x7c52,
@@ -228,6 +229,7 @@ pub(crate) fn from_via_keycode(via_keycode: u16) -> KeyAction {
         }
         0x7C00 => KeyAction::Single(Action::KeyboardControl(KeyboardAction::Bootloader)),
         0x7C01 => KeyAction::Single(Action::KeyboardControl(KeyboardAction::Reboot)),
+        0x7C03 => KeyAction::Single(Action::KeyboardControl(KeyboardAction::ClearEeprom)),
         0x7C50 => KeyAction::Single(Action::KeyboardControl(KeyboardAction::ComboOn)),
         0x7C51 => KeyAction::Single(Action::KeyboardControl(KeyboardAction::ComboOff)),
         0x7C52 => KeyAction::Single(Action::KeyboardControl(KeyboardAction::ComboToggle)),
@@ -289,6 +291,13 @@ mod test {
         // User31 (QK_KB_31)
         let via_keycode = 0x7E1F;
         assert_eq!(KeyAction::Single(Action::User(31)), from_via_keycode(via_keycode));
+
+        // ClearEeprom (QK_CLEAR_EEPROM)
+        let via_keycode = 0x7C03;
+        assert_eq!(
+            KeyAction::Single(Action::KeyboardControl(KeyboardAction::ClearEeprom)),
+            from_via_keycode(via_keycode)
+        );
 
         // Mo(3)
         let via_keycode = 0x5223;
@@ -522,6 +531,10 @@ mod test {
         // User31 (QK_KB_31)
         let a = KeyAction::Single(Action::User(31));
         assert_eq!(0x7E1F, to_via_keycode(a));
+
+        // ClearEeprom (QK_CLEAR_EEPROM)
+        let a = KeyAction::Single(Action::KeyboardControl(KeyboardAction::ClearEeprom));
+        assert_eq!(0x7C03, to_via_keycode(a));
 
         // OSL(3)
         let a = KeyAction::Single(Action::OneShotLayer(3));

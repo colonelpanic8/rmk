@@ -1504,6 +1504,16 @@ impl<'a> Keyboard<'a> {
                     boot::reboot_keyboard();
                 }
             }
+            #[cfg(feature = "storage")]
+            KeyboardAction::ClearEeprom => {
+                // When releasing the key, reset the storage — the same operation
+                // `ViaCommand::EepromReset` performs from the host side
+                if !event.pressed {
+                    crate::channel::FLASH_CHANNEL
+                        .send(crate::storage::FlashOperationMessage::Reset)
+                        .await;
+                }
+            }
 
             _ => warn!("KeyboardAction: {:?} is not supported yet", keyboard_control),
         }
