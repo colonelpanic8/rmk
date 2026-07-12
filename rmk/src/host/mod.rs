@@ -1,6 +1,6 @@
 pub(crate) mod context;
-// Physical-presence unlock gate, shared by the Vial (`vial_lock`) and Rynk
-// (`rynk` ⇒ `host_lock`) services. Both features imply `host_lock`.
+// Physical-presence unlock gate, shared by the Vial (`vial` + `host_lock`)
+// and Rynk (`rynk` ⇒ `host_lock`) services.
 #[cfg(feature = "host_lock")]
 pub(crate) mod lock;
 #[cfg(feature = "rynk")]

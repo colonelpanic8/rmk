@@ -94,4 +94,4 @@ For development and testing it can be convenient to skip this step. Setting `ins
 insecure = true
 ```
 
-::: Note `insecure` (formerly `vial_insecure`; the old name still parses) only takes effect for Vial with the `vial_lock` Cargo feature. Since v0.9 `vial_lock` is no longer a default feature, so enable it explicitly in `Cargo.toml` (it also pulls in `vial`). It does not replace `unlock_keys`: the host can still lock and re-unlock a session that started unlocked, so you may keep `unlock_keys` configured alongside it. :::
+::: Note `insecure` (formerly `vial_insecure`; the old name still parses) only takes effect for Vial with the `host_lock` Cargo feature (enabled alongside `vial`). Since v0.9 the lock is no longer a default feature, so enable it explicitly in `Cargo.toml`. It does not replace `unlock_keys`: the host can still lock and re-unlock a session that started unlocked, so you may keep `unlock_keys` configured alongside it. :::
