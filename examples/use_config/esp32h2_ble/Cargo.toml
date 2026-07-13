@@ -11,6 +11,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 rmk = { path = "../../../rmk", default-features = false, features = [
+    "host_lock",
     "esp32h2_ble",
     "log",
     "storage",

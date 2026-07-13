@@ -78,6 +78,10 @@ impl KeyboardTomlConfig {
             }
             ChipSeries::Esp32 => {
                 features.insert(format!("{}_ble", chip.chip));
+                // host_lock is a dep-free marker; include it so esp Vial keyboards
+                // get the same unlock gate as every other chip (the stock esp
+                // template predates host_lock becoming a universal default).
+                features.insert("host_lock".to_string());
                 features.insert("log".to_string());
                 features.insert("storage".to_string());
                 features.insert("vial".to_string());
@@ -218,14 +222,14 @@ mod tests {
     fn esp32c3_matches_template() {
         let f = features(&chip_toml("esp32c3"));
         assert!(!f.use_rmk_default_features, "esp uses default-features = false");
-        assert_eq!(f.rmk_features, vec!["esp32c3_ble", "log", "storage", "vial"]);
+        assert_eq!(f.rmk_features, vec!["esp32c3_ble", "host_lock", "log", "storage", "vial"]);
     }
 
     #[test]
     fn esp32s3_matches_template() {
         let f = features(&chip_toml("esp32s3"));
         assert!(!f.use_rmk_default_features);
-        assert_eq!(f.rmk_features, vec!["esp32s3_ble", "log", "storage", "vial"]);
+        assert_eq!(f.rmk_features, vec!["esp32s3_ble", "host_lock", "log", "storage", "vial"]);
     }
 
     #[test]
