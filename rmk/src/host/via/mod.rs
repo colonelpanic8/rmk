@@ -235,13 +235,13 @@ impl<'a> VialService<'a> {
 impl Runnable for VialService<'_> {
     async fn run(&mut self) -> ! {
         loop {
-            let (transport, output_data) = HOST_REQUEST_CHANNEL.receive().await;
+            let (origin, output_data) = HOST_REQUEST_CHANNEL.receive().await;
             let mut report = ViaReport {
                 input_data: output_data,
                 output_data,
             };
             self.process_via_packet(&mut report).await;
-            try_send_host_reply(transport, report.input_data);
+            try_send_host_reply(origin, report.input_data);
         }
     }
 }

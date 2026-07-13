@@ -15,7 +15,7 @@ pub(crate) const CCCD_TABLE_SIZE: usize = trouble_host::config::CLIENT_ATT_TABLE
 // gating an individual field with `#[cfg(feature = "host")]` doesn't work. So
 // the whole struct is duplicated, with and without `host_service`.
 #[cfg(feature = "host")]
-#[gatt_server]
+#[gatt_server(connections_max = crate::NUM_BLE_PROFILE)]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
     pub(crate) hid_service: HidService,
@@ -26,8 +26,8 @@ pub(crate) struct Server {
 
 /// GATT service exposing the Vial-over-HID protocol. The keyboard writes replies via
 /// `input_data` notify; hosts push requests through `output_data`. `gatt_events_task`
-/// forwards `output_data` writes into `HOST_REQUEST_CHANNEL`, and `host::run_ble_host`
-/// drains `HOST_BLE_REPLY` to notify `input_data`.
+/// forwards `output_data` writes into `HOST_REQUEST_CHANNEL`, and the BLE connection
+/// loop drains `HOST_BLE_REPLY` to notify the originating host's `input_data`.
 #[cfg(feature = "host")]
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub(crate) struct VialService {
@@ -48,7 +48,7 @@ pub(crate) struct VialService {
 }
 
 #[cfg(not(feature = "host"))]
-#[gatt_server]
+#[gatt_server(connections_max = crate::NUM_BLE_PROFILE)]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
     pub(crate) hid_service: HidService,

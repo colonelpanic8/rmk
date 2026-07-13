@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-#[cfg(all(feature = "split", feature = "_ble"))]
+#[cfg(feature = "_ble")]
 use embassy_futures::select::{Either, select};
 use embassy_futures::yield_now;
 #[cfg(feature = "_ble")]
@@ -250,6 +250,11 @@ pub struct Keyboard<'a> {
     /// Passkey entry state for BLE pairing
     #[cfg(feature = "passkey_entry")]
     passkey_entry_state: crate::ble::passkey::PasskeyEntryState,
+
+    /// BLE profile keys use long press for destructive actions. When a long
+    /// press fires, the matching release must not run the short-press action.
+    #[cfg(feature = "_ble")]
+    consumed_user_releases: heapless::Vec<u8, { crate::NUM_BLE_PROFILE + 2 }>,
 }
 
 impl<'a> Keyboard<'a> {
@@ -280,6 +285,8 @@ impl<'a> Keyboard<'a> {
             steno: crate::keyboard::steno::StenoChord::new(),
             #[cfg(feature = "passkey_entry")]
             passkey_entry_state: crate::ble::passkey::PasskeyEntryState::new(),
+            #[cfg(feature = "_ble")]
+            consumed_user_releases: heapless::Vec::new(),
         }
     }
 
@@ -1634,35 +1641,55 @@ impl<'a> Keyboard<'a> {
             use crate::NUM_BLE_PROFILE;
             use crate::ble::profile::BleProfileAction;
             use crate::channel::BLE_PROFILE_CHANNEL;
+            #[cfg(feature = "split")]
+            let is_clear_split_peer = id == NUM_BLE_PROFILE as u8 + 4;
+            #[cfg(not(feature = "split"))]
+            let is_clear_split_peer = false;
+
             if event.pressed {
-                // Clear Peer is processed when pressed
-                if id == NUM_BLE_PROFILE as u8 + 4 {
-                    #[cfg(feature = "split")]
-                    if event.pressed {
-                        // Wait for 5s, if the key is still pressed, clear split peer info
-                        // If there's any other key event received during this period, skip
-                        match select(
-                            embassy_time::Timer::after_millis(5000),
-                            self.keyboard_event_subscriber.next_message_pure(),
-                        )
-                        .await
-                        {
-                            Either::First(_) => {
-                                // Timeout reached, send clear peer message
-                                #[cfg(feature = "split")]
-                                publish_event(ClearPeerEvent);
-                                info!("Clear peer");
+                // Destructive BLE actions require a 5s long press. If another
+                // key event arrives first, keep it for normal processing and let
+                // the eventual release run the short-press behavior.
+                if id < NUM_BLE_PROFILE as u8 || id == NUM_BLE_PROFILE as u8 + 2 || is_clear_split_peer {
+                    match select(
+                        Timer::after_millis(5000),
+                        self.keyboard_event_subscriber.next_message_pure(),
+                    )
+                    .await
+                    {
+                        Either::First(_) => {
+                            if !self.consumed_user_releases.contains(&id)
+                                && self.consumed_user_releases.push(id).is_err()
+                            {
+                                warn!("Consumed BLE user-key release queue is full");
                             }
-                            Either::Second(e) => {
-                                // Received a new key event before timeout, add to unprocessed list
-                                if self.unprocessed_events.push(e).is_err() {
-                                    warn!("Unprocessed event queue is full, dropping event");
+                            if id < NUM_BLE_PROFILE as u8 {
+                                info!("Clear and switch to BLE profile: {}", id);
+                                BLE_PROFILE_CHANNEL.send(BleProfileAction::ClearAndSwitch(id)).await;
+                            } else if id == NUM_BLE_PROFILE as u8 + 2 {
+                                info!("Clear current BLE profile bond");
+                                BLE_PROFILE_CHANNEL.send(BleProfileAction::ClearBond).await;
+                            } else if is_clear_split_peer {
+                                #[cfg(feature = "split")]
+                                {
+                                    publish_event(ClearPeerEvent);
+                                    info!("Clear peer");
                                 }
+                            }
+                        }
+                        Either::Second(e) => {
+                            if self.unprocessed_events.push(e).is_err() {
+                                warn!("Unprocessed event queue is full, dropping event");
                             }
                         }
                     }
                 }
             } else {
+                if let Some(index) = self.consumed_user_releases.iter().position(|consumed| *consumed == id) {
+                    self.consumed_user_releases.remove(index);
+                    return;
+                }
+
                 // Other user keys are processed when released.
                 // Slots 0..NUM_BLE_PROFILE select a profile directly; the next four are
                 // fixed actions stacked on top.
@@ -1676,8 +1703,8 @@ impl<'a> Keyboard<'a> {
                     // Previous profile
                     BLE_PROFILE_CHANNEL.send(BleProfileAction::Previous).await;
                 } else if id == NUM_BLE_PROFILE as u8 + 2 {
-                    // Clear bond on current profile
-                    BLE_PROFILE_CHANNEL.send(BleProfileAction::ClearBond).await;
+                    // Clear BT is destructive, so short press is intentionally ignored.
+                    debug!("Ignoring short press Clear BT");
                 } else if id == NUM_BLE_PROFILE as u8 + 3 {
                     // Toggle preferred transport (USB <-> BLE);
                     // only meaningful when both transports exist in this build.

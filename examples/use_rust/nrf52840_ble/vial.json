@@ -10,32 +10,32 @@
     "customKeycodes": [
         {
             "name": "BT0",
-            "title": "Bluetooth Channel 0",
+            "title": "BT0: tap to use, hold 5s to clear and pair",
             "shortName": "BT0"
         },
         {
             "name": "BT1",
-            "title": "Bluetooth Channel 1",
+            "title": "BT1: tap to use, hold 5s to clear and pair",
             "shortName": "BT1"
         },
         {
             "name": "BT2",
-            "title": "Bluetooth Channel 2",
+            "title": "BT2: tap to use, hold 5s to clear and pair",
             "shortName": "BT2"
         },
         {
             "name": "NEXT_BT",
-            "title": "Switch to the next Bluetooth channel",
+            "title": "Next BT: use next Bluetooth slot",
             "shortName": "Next\nBT"
         },
         {
             "name": "PREV_BT",
-            "title": "Switch to the previous Bluetooth channel",
+            "title": "Prev BT: use previous Bluetooth slot",
             "shortName": "Prev\nBT"
         },
         {
             "name": "CLR_BT",
-            "title": "Clear bond info for current channel",
+            "title": "Clear BT: hold 5s to clear current slot and pair",
             "shortName": "Clear\nBT"
         },
         {

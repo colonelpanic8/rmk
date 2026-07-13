@@ -80,6 +80,20 @@ impl crate::KeyboardTomlConfig {
             rmk.split_peripherals_num
         };
 
+        if rmk.report_channel_size < 4 {
+            return Err(format!(
+                "report_channel_size ({}) must be at least 4 so every HID collection can be released safely",
+                rmk.report_channel_size
+            ));
+        }
+        if active_features.contains(&"_ble") && !(1..=u8::MAX as usize).contains(&rmk.ble_profiles_num) {
+            return Err(format!(
+                "ble_profiles_num ({}) must be between 1 and {} for BLE builds",
+                rmk.ble_profiles_num,
+                u8::MAX
+            ));
+        }
+
         // Build event channels
         macro_rules! event_channels {
             ($($field:ident),* $(,)?) => {
@@ -116,7 +130,7 @@ impl crate::KeyboardTomlConfig {
 
         // Auto-bump subscriber counts based on enabled feature flags.
         // Declarations live in subscriber_default.toml.
-        apply_feature_subscriber_bumps(&mut events, active_features);
+        apply_feature_subscriber_bumps(&mut events, active_features, rmk.ble_profiles_num);
 
         // Only validate passkey settings when the build will emit passkey constants.
         let passkey = if active_features.contains(&"passkey_entry") {
@@ -183,7 +197,7 @@ impl crate::KeyboardTomlConfig {
 /// Bump event subscriber counts based on feature flags declared in `subscriber_default.toml`.
 ///
 /// `active_features` contains lowercase feature names (e.g. `"split"`, `"_ble"`).
-fn apply_feature_subscriber_bumps(events: &mut [EventChannel], active_features: &[&str]) {
+fn apply_feature_subscriber_bumps(events: &mut [EventChannel], active_features: &[&str], ble_profiles_num: usize) {
     let sub_config: SubscriberConfig =
         toml::from_str(SUBSCRIBER_DEFAULT_CONFIG).expect("Failed to parse subscriber_default.toml");
 
@@ -202,6 +216,12 @@ fn apply_feature_subscriber_bumps(events: &mut [EventChannel], active_features: 
             }
         }
     }
+
+    if active_features.contains(&"_ble")
+        && let Some(event) = events.iter_mut().find(|event| event.name == "battery_status")
+    {
+        event.subs += ble_profiles_num;
+    }
 }
 
 fn resolve_passkey_enabled(ble: &crate::BleConfig) -> Result<Passkey, String> {
@@ -218,8 +238,8 @@ fn resolve_passkey_enabled(ble: &crate::BleConfig) -> Result<Passkey, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_passkey_enabled;
-    use crate::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
+    use super::{EventChannel, apply_feature_subscriber_bumps, resolve_passkey_enabled};
+    use crate::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, KeyboardTomlConfig, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
 
     #[test]
     fn validates_passkey_timeout() {
@@ -249,5 +269,43 @@ mod tests {
 
         assert!(!passkey.enabled);
         assert_eq!(passkey.timeout_secs, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS);
+    }
+
+    #[test]
+    fn ble_reserves_battery_subscribers_for_all_default_hosts() {
+        let mut events = [EventChannel {
+            name: "battery_status".to_string(),
+            channel_size: 1,
+            pubs: 1,
+            subs: 2,
+        }];
+
+        apply_feature_subscriber_bumps(&mut events, &["_ble"], 5);
+
+        assert_eq!(events[0].subs, 8);
+    }
+
+    #[test]
+    fn rejects_report_channels_too_small_for_neutral_reports() {
+        let path = std::env::temp_dir().join(format!(
+            "rmk-report-channel-size-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, "[rmk]\nreport_channel_size = 3\n").unwrap();
+        let config = KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path);
+        std::fs::remove_file(path).unwrap();
+
+        let err = match config.build_constants(&[]) {
+            Ok(_) => panic!("expected report channel size validation failure"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            err,
+            "report_channel_size (3) must be at least 4 so every HID collection can be released safely"
+        );
     }
 }

@@ -1,5 +1,3 @@
-#[cfg(feature = "_ble")]
-pub(crate) mod ble;
 pub(crate) mod context;
 #[cfg(feature = "storage")]
 pub(crate) mod storage;

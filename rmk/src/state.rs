@@ -9,39 +9,81 @@ use rmk_types::connection::{ConnectionStatus, ConnectionType, UsbState};
 use crate::RawMutex;
 use crate::event::{ConnectionStatusChangeEvent, publish_event};
 
-/// Single source of truth for transport state and routing. All writes go
-/// through the mutator helpers below so the active-output cascade runs and
-/// change events fire on every transition.
-pub(crate) static CONNECTION_STATUS: Mutex<RawMutex, Cell<ConnectionStatus>> =
-    Mutex::new(Cell::new(ConnectionStatus::new()));
+#[derive(Clone, Copy)]
+struct RuntimeConnectionStatus {
+    status: ConnectionStatus,
+    route_generation: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ReportRoute {
+    pub(crate) active: Option<ConnectionType>,
+    pub(crate) ble_profile: u8,
+    pub(crate) generation: u32,
+}
+
+/// Single source of truth for transport state and routing. The private route
+/// generation prevents a report blocked on a full queue from resurfacing after
+/// an A -> B -> A transport/profile transition.
+static CONNECTION_STATUS: Mutex<RawMutex, Cell<RuntimeConnectionStatus>> =
+    Mutex::new(Cell::new(RuntimeConnectionStatus {
+        status: ConnectionStatus::new(),
+        route_generation: 0,
+    }));
 
 pub(crate) fn active_transport() -> Option<ConnectionType> {
-    CONNECTION_STATUS.lock(|c| c.get().decide_active())
+    CONNECTION_STATUS.lock(|c| c.get().status.decide_active())
 }
 
 pub(crate) fn current_connection_status() -> ConnectionStatus {
-    CONNECTION_STATUS.lock(|c| c.get())
+    CONNECTION_STATUS.lock(|c| c.get().status)
 }
 
 pub(crate) fn current_usb_state() -> UsbState {
-    CONNECTION_STATUS.lock(|c| c.get().usb)
+    CONNECTION_STATUS.lock(|c| c.get().status.usb)
 }
 
 #[cfg(feature = "_ble")]
 pub(crate) fn current_ble_status() -> BleStatus {
-    CONNECTION_STATUS.lock(|c| c.get().ble)
+    CONNECTION_STATUS.lock(|c| c.get().status.ble)
+}
+
+pub(crate) fn report_route_generation() -> u32 {
+    CONNECTION_STATUS.lock(|c| c.get().route_generation)
+}
+
+pub(crate) fn report_route() -> ReportRoute {
+    CONNECTION_STATUS.lock(|c| {
+        let runtime = c.get();
+        ReportRoute {
+            active: runtime.status.decide_active(),
+            ble_profile: runtime.status.ble.profile,
+            generation: runtime.route_generation,
+        }
+    })
 }
 
 /// Read-modify-write the connection status atomically.
 pub(crate) fn update_status(f: impl FnOnce(&mut ConnectionStatus)) {
     let Some((prev, new)) = CONNECTION_STATUS.lock(|c| {
-        let prev = c.get();
+        let mut runtime = c.get();
+        let prev = runtime.status;
         let mut new = prev;
         f(&mut new);
         if prev == new {
             return None;
         }
-        c.set(new);
+        let prev_active = prev.decide_active();
+        let new_active = new.decide_active();
+        if prev_active != new_active
+            || (prev_active == Some(ConnectionType::Ble)
+                && new_active == Some(ConnectionType::Ble)
+                && prev.ble.profile != new.ble.profile)
+        {
+            runtime.route_generation = runtime.route_generation.wrapping_add(1);
+        }
+        runtime.status = new;
+        c.set(runtime);
         Some((prev, new))
     }) else {
         return;
@@ -70,8 +112,9 @@ pub(crate) fn set_ble_state(s: BleState) {
     update_status(|c| c.ble.state = s);
 }
 
-/// Switching profiles always drops the BLE state back to `Inactive`; the
-/// connection loop re-advertises and updates state from there.
+/// Change the active BLE slot when no per-slot runtime connection table is
+/// available. The BLE connection owner uses `update_status` directly so it can
+/// set the selected slot's exact readiness atomically.
 pub(crate) fn set_ble_profile(profile: u8) {
     update_status(|c| {
         c.ble.profile = profile;
@@ -123,7 +166,7 @@ pub(crate) async fn toggle_preferred() {
 
 #[cfg(feature = "_ble")]
 pub(crate) fn current_profile() -> u8 {
-    CONNECTION_STATUS.lock(|c| c.get().ble.profile)
+    CONNECTION_STATUS.lock(|c| c.get().status.ble.profile)
 }
 
 #[cfg(test)]
@@ -134,7 +177,8 @@ mod tests {
     use embassy_time::{Duration, Timer};
 
     use super::{
-        CONNECTION_STATUS, ConnectionStatus, ConnectionType, UsbState, set_preferred_connection, set_usb_state,
+        CONNECTION_STATUS, ConnectionStatus, ConnectionType, RuntimeConnectionStatus, UsbState,
+        set_preferred_connection, set_usb_state,
     };
     use crate::event::{ConnectionStatusChangeEvent, EventSubscriber, SubscribableEvent};
     use crate::hid::{KeyboardReport, Report};
@@ -146,7 +190,12 @@ mod tests {
     }
 
     fn reset_state() {
-        CONNECTION_STATUS.lock(|c| c.set(ConnectionStatus::default()));
+        CONNECTION_STATUS.lock(|c| {
+            c.set(RuntimeConnectionStatus {
+                status: ConnectionStatus::default(),
+                route_generation: 0,
+            })
+        });
         #[cfg(not(feature = "_no_usb"))]
         crate::channel::USB_REPORT_CHANNEL.clear();
         #[cfg(feature = "_ble")]
@@ -162,15 +211,30 @@ mod tests {
         })
     }
 
-    fn assert_all_up_keyboard_report(report: Report) {
-        match report {
-            Report::KeyboardReport(r) => {
+    fn assert_neutral_report(report: Report, index: usize) {
+        match (index, report) {
+            (0, Report::KeyboardReport(r)) => {
                 assert_eq!(r.modifier, 0);
                 assert_eq!(r.reserved, 0);
                 assert_eq!(r.leds, 0);
                 assert_eq!(r.keycodes, [0; 6]);
             }
-            _ => panic!("expected keyboard all-up report"),
+            (1, Report::MouseReport(r)) => {
+                assert_eq!(r.buttons, 0);
+                assert_eq!(r.x, 0);
+                assert_eq!(r.y, 0);
+                assert_eq!(r.wheel, 0);
+                assert_eq!(r.pan, 0);
+            }
+            (2, Report::MediaKeyboardReport(r)) => {
+                let usage_id = r.usage_id;
+                assert_eq!(usage_id, 0);
+            }
+            (3, Report::SystemControlReport(r)) => {
+                let usage_id = r.usage_id;
+                assert_eq!(usage_id, 0);
+            }
+            _ => panic!("unexpected neutral report order"),
         }
     }
 
@@ -238,14 +302,17 @@ mod tests {
 
         set_usb_state(UsbState::Disabled);
         assert!(super::active_transport().is_none());
-        assert_all_up_keyboard_report(
-            USB_REPORT_CHANNEL
-                .try_receive()
-                .expect("USB_REPORT_CHANNEL should contain keyboard all-up report"),
-        );
+        for index in 0..4 {
+            assert_neutral_report(
+                USB_REPORT_CHANNEL
+                    .try_receive()
+                    .expect("USB_REPORT_CHANNEL should contain all neutral reports"),
+                index,
+            );
+        }
         assert!(
             USB_REPORT_CHANNEL.try_receive().is_err(),
-            "USB_REPORT_CHANNEL should contain only the all-up report"
+            "USB_REPORT_CHANNEL should contain only the neutral reports"
         );
     }
 
@@ -274,14 +341,17 @@ mod tests {
             },
         ));
 
-        assert_all_up_keyboard_report(
-            USB_REPORT_CHANNEL
-                .try_receive()
-                .expect("USB_REPORT_CHANNEL should contain keyboard all-up report"),
-        );
+        for index in 0..4 {
+            assert_neutral_report(
+                USB_REPORT_CHANNEL
+                    .try_receive()
+                    .expect("USB_REPORT_CHANNEL should contain all neutral reports"),
+                index,
+            );
+        }
         assert!(
             USB_REPORT_CHANNEL.try_receive().is_err(),
-            "USB_REPORT_CHANNEL should contain only the all-up report"
+            "USB_REPORT_CHANNEL should contain only the neutral reports"
         );
     }
 
@@ -303,15 +373,148 @@ mod tests {
 
         set_usb_state(UsbState::Configured);
         assert_eq!(super::active_transport(), Some(ConnectionType::Usb));
-        assert_all_up_keyboard_report(
-            BLE_REPORT_CHANNEL
-                .try_receive()
-                .expect("BLE_REPORT_CHANNEL should contain keyboard all-up report"),
-        );
+        for index in 0..4 {
+            assert_neutral_report(
+                BLE_REPORT_CHANNEL
+                    .try_receive()
+                    .expect("BLE_REPORT_CHANNEL should contain all neutral reports"),
+                index,
+            );
+        }
         assert!(
             BLE_REPORT_CHANNEL.try_receive().is_err(),
-            "BLE_REPORT_CHANNEL should contain only the all-up report"
+            "BLE_REPORT_CHANNEL should contain only the neutral reports"
         );
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn ble_reports_capture_slot_and_route_generation() {
+        use crate::channel::BLE_REPORT_CHANNEL;
+        use crate::state::{BleState, set_ble_state};
+
+        let _guard = state_test_lock().lock().unwrap();
+        reset_state();
+        set_ble_state(BleState::Connected);
+        BLE_REPORT_CHANNEL.clear();
+
+        BLE_REPORT_CHANNEL
+            .try_send(pressed_keyboard_report())
+            .expect("BLE report channel should have capacity");
+        let routed = BLE_REPORT_CHANNEL
+            .inner
+            .try_receive()
+            .expect("BLE report should retain routing metadata");
+        assert_eq!(routed.slot, 0);
+        assert_eq!(routed.route_generation, super::report_route_generation());
+        assert!(!routed.force);
+
+        let previous_generation = super::report_route_generation();
+        super::update_status(|status| {
+            status.ble.profile = 1;
+            status.ble.state = BleState::Connected;
+        });
+        assert_ne!(super::report_route_generation(), previous_generation);
+    }
+
+    #[cfg(all(feature = "_ble", not(feature = "_no_usb")))]
+    #[test]
+    fn ble_profile_change_does_not_invalidate_active_usb_route() {
+        use crate::state::{BleState, set_ble_state};
+
+        let _guard = state_test_lock().lock().unwrap();
+        reset_state();
+        set_preferred_connection(ConnectionType::Usb);
+        set_usb_state(UsbState::Configured);
+        set_ble_state(BleState::Connected);
+        assert_eq!(super::active_transport(), Some(ConnectionType::Usb));
+        let generation = super::report_route_generation();
+
+        super::update_status(|status| status.ble.profile = 1);
+
+        assert_eq!(super::active_transport(), Some(ConnectionType::Usb));
+        assert_eq!(super::report_route_generation(), generation);
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn wake_reports_are_captured_only_when_armed() {
+        use core::sync::atomic::Ordering;
+
+        use crate::channel::{
+            BLE_REPORT_CHANNEL, BLE_WAKE_REPORT_CAPTURE_ARMED, BLE_WAKE_REPORT_CHANNEL, send_hid_report,
+        };
+
+        let _guard = state_test_lock().lock().unwrap();
+        reset_state();
+        BLE_WAKE_REPORT_CHANNEL.clear();
+        BLE_WAKE_REPORT_CAPTURE_ARMED.store(true, Ordering::Release);
+
+        block_on(send_hid_report(pressed_keyboard_report()));
+
+        assert!(BLE_REPORT_CHANNEL.inner.try_receive().is_err());
+        assert!(BLE_WAKE_REPORT_CHANNEL.try_receive().is_ok());
+        BLE_WAKE_REPORT_CAPTURE_ARMED.store(false, Ordering::Release);
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn blocked_ble_send_does_not_survive_profile_aba() {
+        use embassy_futures::join::join;
+
+        use crate::channel::{BLE_REPORT_CHANNEL, send_hid_report};
+        use crate::state::{BleState, set_ble_state};
+
+        let _guard = state_test_lock().lock().unwrap();
+        reset_state();
+        set_ble_state(BleState::Connected);
+        BLE_REPORT_CHANNEL.clear();
+        for _ in 0..crate::REPORT_CHANNEL_SIZE {
+            BLE_REPORT_CHANNEL
+                .try_send(pressed_keyboard_report())
+                .expect("BLE report channel should have capacity while filling");
+        }
+
+        block_on(join(send_hid_report(pressed_keyboard_report()), async {
+            Timer::after(Duration::from_millis(1)).await;
+            super::update_status(|status| {
+                status.ble.profile = 1;
+                status.ble.state = BleState::Connected;
+            });
+            super::update_status(|status| {
+                status.ble.profile = 0;
+                status.ble.state = BleState::Connected;
+            });
+            let _ = BLE_REPORT_CHANNEL.inner.try_receive();
+        }));
+
+        let mut remaining = 0;
+        while BLE_REPORT_CHANNEL.inner.try_receive().is_ok() {
+            remaining += 1;
+        }
+        assert_eq!(remaining, crate::REPORT_CHANNEL_SIZE - 1);
+    }
+
+    #[cfg(all(feature = "_ble", not(feature = "_no_usb")))]
+    #[test]
+    fn active_usb_does_not_duplicate_into_ble_wake_cache() {
+        use core::sync::atomic::Ordering;
+
+        use crate::channel::{
+            BLE_WAKE_REPORT_CAPTURE_ARMED, BLE_WAKE_REPORT_CHANNEL, USB_REPORT_CHANNEL, send_hid_report,
+        };
+
+        let _guard = state_test_lock().lock().unwrap();
+        reset_state();
+        set_usb_state(UsbState::Configured);
+        BLE_WAKE_REPORT_CHANNEL.clear();
+        BLE_WAKE_REPORT_CAPTURE_ARMED.store(true, Ordering::Release);
+
+        block_on(send_hid_report(pressed_keyboard_report()));
+
+        assert!(USB_REPORT_CHANNEL.try_receive().is_ok());
+        assert!(BLE_WAKE_REPORT_CHANNEL.try_receive().is_err());
+        BLE_WAKE_REPORT_CAPTURE_ARMED.store(false, Ordering::Release);
     }
 
     #[cfg(not(feature = "_no_usb"))]
@@ -340,5 +543,59 @@ mod tests {
         ));
 
         assert_eq!(USB_REPORT_CHANNEL.len(), crate::REPORT_CHANNEL_SIZE);
+    }
+
+    #[cfg(not(feature = "_no_usb"))]
+    #[test]
+    fn blocked_usb_send_does_not_survive_transport_aba() {
+        use embassy_futures::join::join;
+
+        use crate::channel::{USB_REPORT_CHANNEL, send_hid_report};
+
+        let _guard = state_test_lock().lock().unwrap();
+        reset_state();
+        set_usb_state(UsbState::Configured);
+        for _ in 0..crate::REPORT_CHANNEL_SIZE {
+            USB_REPORT_CHANNEL
+                .try_send(pressed_keyboard_report())
+                .expect("USB report channel should have capacity while filling");
+        }
+
+        block_on(join(send_hid_report(pressed_keyboard_report()), async {
+            Timer::after(Duration::from_millis(1)).await;
+            set_usb_state(UsbState::Disabled);
+            set_usb_state(UsbState::Configured);
+        }));
+
+        for index in 0..4 {
+            assert_neutral_report(
+                USB_REPORT_CHANNEL
+                    .try_receive()
+                    .expect("USB_REPORT_CHANNEL should contain all neutral reports"),
+                index,
+            );
+        }
+        assert!(USB_REPORT_CHANNEL.try_receive().is_err());
+    }
+
+    #[cfg(all(feature = "host", feature = "_ble"))]
+    #[test]
+    fn ble_host_replies_preserve_origin_slot_and_generation() {
+        use crate::channel::{HOST_BLE_REPLY, HostRequestOrigin, try_send_host_reply};
+
+        let _guard = state_test_lock().lock().unwrap();
+        HOST_BLE_REPLY.clear();
+        try_send_host_reply(
+            HostRequestOrigin::Ble {
+                slot: 2,
+                generation: 17,
+            },
+            [0x5a; 32],
+        );
+
+        let reply = HOST_BLE_REPLY.try_receive().expect("BLE host reply should be queued");
+        assert_eq!(reply.slot, 2);
+        assert_eq!(reply.generation, 17);
+        assert_eq!(reply.data, [0x5a; 32]);
     }
 }

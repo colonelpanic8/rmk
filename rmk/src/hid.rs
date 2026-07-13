@@ -210,6 +210,21 @@ pub enum Report {
     StenoReport(StenoReport),
 }
 
+pub(crate) fn neutral_reports() -> [Report; 4] {
+    [
+        Report::KeyboardReport(KeyboardReport::default()),
+        Report::MouseReport(MouseReport {
+            buttons: 0,
+            x: 0,
+            y: 0,
+            wheel: 0,
+            pan: 0,
+        }),
+        Report::MediaKeyboardReport(MediaKeyboardReport { usage_id: 0 }),
+        Report::SystemControlReport(SystemControlReport { usage_id: 0 }),
+    ]
+}
+
 impl AsInputReport for Report {
     fn serialize(&self, buffer: &mut [u8]) -> Result<usize, usbd_hid::descriptor::BufferOverflow> {
         match self {

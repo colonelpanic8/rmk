@@ -55,7 +55,14 @@ impl<'a, 'd, D: Driver<'d>> UsbKeyboardWriter<'a, 'd, D> {
 
     pub(crate) async fn run_writer(&mut self) -> ! {
         loop {
-            let report = USB_REPORT_CHANNEL.receive().await;
+            let routed = USB_REPORT_CHANNEL.inner.receive().await;
+            let route = crate::state::report_route();
+            if !routed.force
+                && (route.active != Some(ConnectionType::Usb) || routed.route_generation != route.generation)
+            {
+                debug!("Dropping stale USB report");
+                continue;
+            }
 
             // EndpointError::Disabled never fires on non-OTG STM32/GD32
             // peripherals during suspend, so signal wakeup proactively when a
@@ -64,7 +71,7 @@ impl<'a, 'd, D: Driver<'d>> UsbKeyboardWriter<'a, 'd, D> {
                 USB_REMOTE_WAKEUP.signal(());
             }
 
-            if let Err(e) = self.write_report(&report).await {
+            if let Err(e) = self.write_report(&routed.report).await {
                 error!("Failed to send report: {:?}", e);
 
                 // Belt-and-braces for OTG peripherals where Disabled is the
@@ -73,7 +80,13 @@ impl<'a, 'd, D: Driver<'d>> UsbKeyboardWriter<'a, 'd, D> {
                 if let HidError::UsbEndpointError(EndpointError::Disabled) = e {
                     USB_REMOTE_WAKEUP.signal(());
                     embassy_time::Timer::after_millis(500).await;
-                    if let Err(e) = self.write_report(&report).await {
+                    let route = crate::state::report_route();
+                    if !routed.force
+                        && (route.active != Some(ConnectionType::Usb) || routed.route_generation != route.generation)
+                    {
+                        continue;
+                    }
+                    if let Err(e) = self.write_report(&routed.report).await {
                         error!("Failed to send report after wakeup: {:?}", e);
                     }
                 }

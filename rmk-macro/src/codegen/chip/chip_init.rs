@@ -95,14 +95,17 @@ pub(crate) fn chip_init_default(hardware: &Hardware, peripheral_id: Option<usize
                 quote! {}
             };
             let ble_addr = get_ble_addr(hardware, peripheral_id);
-            // Calculate the size of sdc memory pool.
-            // By default it's 6KB, each peripheral increases 2304 bytes
+            // Calculate the size of the SDC memory pool. Each additional host
+            // peripheral link needs just under 3 KiB with RMK's buffer config.
             let sdc_mem_size = if peripheral_id.is_none() {
                 // For central
-                4096 + peri_num * 2304
+                let base_size = 4096 + peri_num * 2304;
+                quote! {{
+                    #base_size + ::rmk::types::constants::NUM_BLE_PROFILE.saturating_sub(1) * 3072
+                }}
             } else {
                 // For peripheral
-                6144
+                quote! { 6144 }
             };
             let ble_init = match &communication {
                 CommunicationConfig::Ble(_) | CommunicationConfig::Both(_, _) => quote! {

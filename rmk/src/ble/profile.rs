@@ -2,20 +2,21 @@
 
 #[cfg(feature = "_ble")]
 use bt_hci::{cmd::le::LeSetPhy, controller::ControllerCmdAsync};
-use embassy_futures::select::{Either3, select3};
-use embassy_sync::signal::Signal;
+use embassy_sync::channel::Channel;
 use trouble_host::prelude::*;
 use trouble_host::{BondInformation, LongTermKey};
-#[cfg(feature = "storage")]
-use {crate::channel::FLASH_CHANNEL, crate::storage::FLASH_OPERATION_FINISHED};
 
 use super::ble_server::CCCD_TABLE_SIZE;
 use crate::NUM_BLE_PROFILE;
 use crate::channel::BLE_PROFILE_CHANNEL;
-use crate::state::{current_profile, set_ble_profile};
+#[cfg(feature = "storage")]
+use crate::channel::FLASH_CHANNEL;
+use crate::state::current_profile;
+#[cfg(feature = "storage")]
+use crate::state::set_ble_profile;
 
-pub(crate) static UPDATED_PROFILE: Signal<crate::RawMutex, ProfileInfo> = Signal::new();
-pub(crate) static UPDATED_CCCD_TABLE: Signal<crate::RawMutex, heapless::Vec<u8, CCCD_TABLE_SIZE>> = Signal::new();
+pub(crate) static UPDATED_PROFILE: Channel<crate::RawMutex, ProfileInfoUpdate, NUM_BLE_PROFILE> = Channel::new();
+pub(crate) static UPDATED_CCCD_TABLE: Channel<crate::RawMutex, ProfileCccdTable, NUM_BLE_PROFILE> = Channel::new();
 
 /// BLE profile info
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -27,6 +28,21 @@ pub struct ProfileInfo {
     /// Raw bytes of the trouble-host `ClientAttTable` for this peer.
     /// Reconstructed via `ClientAttTableView::try_from_raw` when applied to the stack.
     pub(crate) cccd_table: heapless::Vec<u8, CCCD_TABLE_SIZE>,
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub(crate) struct ProfileInfoUpdate {
+    pub(crate) generation: u32,
+    pub(crate) profile_info: ProfileInfo,
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub(crate) struct ProfileCccdTable {
+    pub(crate) slot_num: u8,
+    pub(crate) generation: u32,
+    pub(crate) table: heapless::Vec<u8, CCCD_TABLE_SIZE>,
 }
 
 /// Returns the maximum number of bytes required to encode T.
@@ -75,7 +91,45 @@ pub(crate) enum BleProfileAction {
     Switch(u8),
     Previous,
     Next,
+    ClearAndSwitch(u8),
     ClearBond,
+}
+
+/// Changes requested by a processed profile action.
+///
+/// Clearing is deliberately deferred to the connection loop so it can tear
+/// down the matching connection before removing the bond from the stack.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub(crate) struct ProfileActionEffect {
+    pub(crate) select_slot: Option<u8>,
+    pub(crate) profile_changed: bool,
+    pub(crate) clear_slot: Option<u8>,
+    pub(crate) reject_slot: Option<u8>,
+}
+
+fn profile_action_effect(action: BleProfileAction, current: u8) -> ProfileActionEffect {
+    let (select_slot, clear_slot) = match action {
+        BleProfileAction::Switch(profile) => (Some(profile), None),
+        BleProfileAction::Previous => (
+            Some(if current == 0 {
+                NUM_BLE_PROFILE as u8 - 1
+            } else {
+                current - 1
+            }),
+            None,
+        ),
+        BleProfileAction::Next => (Some((current + 1) % NUM_BLE_PROFILE as u8), None),
+        BleProfileAction::ClearAndSwitch(profile) => (Some(profile), Some(profile)),
+        BleProfileAction::ClearBond => (None, Some(current)),
+    };
+
+    ProfileActionEffect {
+        select_slot,
+        profile_changed: select_slot.is_some_and(|profile| profile != current),
+        clear_slot,
+        reject_slot: None,
+    }
 }
 
 /// Manage BLE profiles and bonding information
@@ -125,93 +179,118 @@ where
         }
         debug!("Loaded {} bond info", self.bonded_devices.len());
 
-        let profile = if let Some(profile) = read_active_ble_profile().await {
-            debug!("Loaded active profile: {}", profile);
-            profile
-        } else {
-            debug!("Loaded default active profile",);
-            0
+        let profile = match read_active_ble_profile().await {
+            Some(profile) if (profile as usize) < NUM_BLE_PROFILE => {
+                debug!("Loaded active profile: {}", profile);
+                profile
+            }
+            Some(profile) => {
+                warn!("Stored BLE profile {} is invalid, using profile 0", profile);
+                0
+            }
+            None => {
+                debug!("Loaded default active profile");
+                0
+            }
         };
         set_ble_profile(profile);
     }
 
-    /// Cached bond info for the currently active profile, cloned to free the
-    /// caller from borrow conflicts with concurrent `update_profile()`.
-    pub(crate) fn active_bond_info(&self) -> Option<ProfileInfo> {
-        let active_profile = current_profile();
+    /// Cached bond info for a profile, cloned to free the caller from borrow
+    /// conflicts with concurrent `update_profile()`.
+    pub(crate) fn bond_info(&self, slot_num: u8) -> Option<ProfileInfo> {
         self.bonded_devices
             .iter()
-            .find(|bond_info| !bond_info.removed && bond_info.slot_num == active_profile)
+            .find(|bond_info| !bond_info.removed && bond_info.slot_num == slot_num)
             .cloned()
     }
 
-    /// Update bonding information in the stack according to the current active profile
-    pub(crate) fn update_stack_bonds(&self) {
-        let identities: heapless::Vec<Identity, NUM_BLE_PROFILE> = self
-            .stack
-            .with_bond_information(|bonds| bonds.iter().map(|b| b.identity).collect());
-        for identity in identities {
-            if let Err(e) = self.stack.remove_bond_information(identity) {
-                debug!("Remove bond info error: {:?}", e);
-            }
-        }
+    pub(crate) fn bonded_profiles(&self) -> impl Iterator<Item = &ProfileInfo> {
+        self.bonded_devices.iter().filter(|info| !info.removed)
+    }
 
-        if let Some(info) = self.active_bond_info() {
+    /// Restore every persisted BLE host bond into the freshly created stack.
+    pub(crate) fn update_stack_bonds(&self) {
+        for info in self.bonded_devices.iter().filter(|info| !info.removed) {
             debug!("Add bond info of profile {}: {:?}", info.slot_num, info);
-            if let Err(e) = self.stack.add_bond_information(info.info) {
+            if let Err(e) = self.stack.add_bond_information(info.info.clone()) {
                 debug!("Add bond info error: {:?}", e);
             }
         }
     }
 
     /// Add/update bonding information
-    pub(crate) async fn add_profile_info(&mut self, profile_info: ProfileInfo) {
-        // Update profile information in memory
+    pub(crate) async fn add_profile_info(&mut self, mut profile_info: ProfileInfo) -> bool {
+        profile_info.removed = false;
+
         if let Some(index) = self
             .bonded_devices
             .iter()
             .position(|info| info.slot_num == profile_info.slot_num)
         {
-            if self.bonded_devices[index].info == profile_info.info {
+            if !self.bonded_devices[index].removed
+                && self.bonded_devices[index].info == profile_info.info
+                && self.bonded_devices[index].cccd_table == profile_info.cccd_table
+            {
                 info!("Skip saving same bonding info");
-                return;
+                return true;
             }
-            // If the bonding information with the same slot number exists, update it
+        }
+
+        if let Err(e) = self.stack.add_bond_information(profile_info.info.clone()) {
+            error!("Failed to add bond info of profile {}: {:?}", profile_info.slot_num, e);
+            return false;
+        }
+
+        // Update profile information in memory only after the stack accepted
+        // the bond, so persisted state cannot claim an unusable profile.
+        if let Some(index) = self
+            .bonded_devices
+            .iter()
+            .position(|info| info.slot_num == profile_info.slot_num)
+        {
+            let old_identity = self.bonded_devices[index].info.identity;
+            if !old_identity.match_identity(&profile_info.info.identity)
+                && let Err(e) = self.stack.remove_bond_information(old_identity)
+            {
+                debug!("Remove old bond info of profile {}: {:?}", profile_info.slot_num, e);
+            }
             self.bonded_devices[index] = profile_info.clone();
         } else {
             // If there is no bonding information with the same slot number, add it
             if let Err(e) = self.bonded_devices.push(profile_info.clone()) {
                 error!("Failed to add bond info: {:?}", e);
+                if let Err(remove_error) = self.stack.remove_bond_information(profile_info.info.identity) {
+                    debug!("Rollback rejected bond info error: {:?}", remove_error);
+                }
+                return false;
             }
         }
-
-        self.update_stack_bonds();
 
         #[cfg(feature = "storage")]
         // Send bonding information to the flash task for saving
         FLASH_CHANNEL
             .send(crate::storage::FlashOperationMessage::ProfileInfo(profile_info))
             .await;
+
+        true
     }
 
     /// Update CCCD table in the stack
-    pub(crate) async fn update_profile_cccd_table(&mut self, table: heapless::Vec<u8, CCCD_TABLE_SIZE>) {
-        // Get current active profile
-        let active_profile = current_profile();
-
+    pub(crate) async fn update_profile_cccd_table(&mut self, update: ProfileCccdTable) {
         // Update profile information in memory
         if let Some(index) = self
             .bonded_devices
             .iter()
-            .position(|info| info.slot_num == active_profile)
+            .position(|info| info.slot_num == update.slot_num)
         {
-            if self.bonded_devices[index].cccd_table == table {
+            if self.bonded_devices[index].cccd_table == update.table {
                 debug!("Skip updating same CCCD table");
                 return;
             }
 
-            debug!("Updating profile {} CCCD table: {:?}", active_profile, table);
-            self.bonded_devices[index].cccd_table = table;
+            debug!("Updating profile {} CCCD table: {:?}", update.slot_num, update.table);
+            self.bonded_devices[index].cccd_table = update.table;
 
             #[cfg(feature = "storage")]
             FLASH_CHANNEL
@@ -229,101 +308,107 @@ where
         info!("Clearing bonding information on profile: {}", slot_num);
 
         // Update bonding information in memory
-        for bond_info in self.bonded_devices.iter_mut() {
-            if bond_info.slot_num == slot_num {
-                bond_info.removed = true;
+        if let Some(bond_info) = self
+            .bonded_devices
+            .iter_mut()
+            .find(|bond_info| bond_info.slot_num == slot_num && !bond_info.removed)
+        {
+            bond_info.removed = true;
+            if let Err(e) = self.stack.remove_bond_information(bond_info.info.identity) {
+                debug!("Remove bond info of profile {}: {:?}", slot_num, e);
             }
         }
 
-        // Update the active bonding information in the stack
-        self.update_stack_bonds();
-
         #[cfg(feature = "storage")]
-        // Send the clear slot message to the flash task
         FLASH_CHANNEL
             .send(crate::storage::FlashOperationMessage::ClearSlot(slot_num))
             .await;
     }
 
-    /// Switch to the specified profile, return true if the profile is switched
-    pub(crate) async fn switch_profile(&mut self, profile: u8) -> bool {
-        let current = current_profile();
-        if profile == current {
-            return false;
+    async fn apply_profile_action(&mut self, action: BleProfileAction) -> ProfileActionEffect {
+        let effect = profile_action_effect(action, current_profile());
+        if effect
+            .select_slot
+            .is_some_and(|profile| profile as usize >= NUM_BLE_PROFILE)
+        {
+            warn!("Ignoring invalid BLE profile selection");
+            return ProfileActionEffect::default();
+        }
+        if let Some(profile) = effect.select_slot
+            && effect.profile_changed
+        {
+            #[cfg(feature = "storage")]
+            FLASH_CHANNEL
+                .send(crate::storage::FlashOperationMessage::ActiveBleProfile(profile))
+                .await;
+            info!("Selected BLE profile: {}", profile);
         }
 
-        set_ble_profile(profile);
-
-        // Update the active bonding information in the stack
-        self.update_stack_bonds();
-
-        #[cfg(feature = "storage")]
-        FLASH_CHANNEL
-            .send(crate::storage::FlashOperationMessage::ActiveBleProfile(profile))
-            .await;
-
-        info!("Switched to BLE profile: {}", profile);
-
-        true
+        info!("Update profile done");
+        effect
     }
 
-    /// Wait for profile switch event and update active profile
-    ///
-    /// This function will wait for profile switch operation, then update the active profile
-    /// based on the operation type. After completing the operation, it will wait for a period
-    /// to ensure the flash operation is completed.
-    pub(crate) async fn update_profile(&mut self) {
-        // Wait for profile switch or updated profile event
-        loop {
-            match select3(
-                BLE_PROFILE_CHANNEL.receive(),
-                UPDATED_PROFILE.wait(),
-                UPDATED_CCCD_TABLE.wait(),
-            )
-            .await
-            {
-                Either3::First(action) => {
-                    #[cfg(feature = "storage")]
-                    FLASH_OPERATION_FINISHED.reset();
-                    match action {
-                        BleProfileAction::Switch(profile) => {
-                            if !self.switch_profile(profile).await {
-                                // If the profile is the same as the current profile, do nothing
-                                continue;
-                            }
-                        }
-                        BleProfileAction::Previous => {
-                            let mut profile = current_profile();
-                            profile = if profile == 0 {
-                                NUM_BLE_PROFILE as u8 - 1
-                            } else {
-                                profile - 1
-                            };
+    /// Process one pending profile update without parking the caller.
+    pub(crate) async fn poll_profile_update(
+        &mut self,
+        slot_generations: &[u32; NUM_BLE_PROFILE],
+    ) -> ProfileActionEffect {
+        if let Ok(action) = BLE_PROFILE_CHANNEL.try_receive() {
+            return self.apply_profile_action(action).await;
+        }
 
-                            self.switch_profile(profile).await;
-                        }
-                        BleProfileAction::Next => {
-                            let mut profile = current_profile() + 1;
-                            profile %= NUM_BLE_PROFILE as u8;
+        if let Ok(update) = UPDATED_PROFILE.try_receive() {
+            let slot_num = update.profile_info.slot_num;
+            if slot_generations.get(slot_num as usize).copied() == Some(update.generation) {
+                if !self.add_profile_info(update.profile_info).await {
+                    return ProfileActionEffect {
+                        reject_slot: Some(slot_num),
+                        ..Default::default()
+                    };
+                }
+            } else {
+                warn!(
+                    "Ignoring stale BLE profile update for slot {}, generation {}",
+                    slot_num, update.generation
+                );
+            }
+            return ProfileActionEffect::default();
+        }
 
-                            self.switch_profile(profile).await;
-                        }
-                        BleProfileAction::ClearBond => {
-                            self.clear_bond(current_profile()).await;
-                        }
-                    }
-                    #[cfg(feature = "storage")]
-                    FLASH_OPERATION_FINISHED.wait().await;
-                    info!("Update profile done");
-                    break;
-                }
-                Either3::Second(profile_info) => {
-                    self.add_profile_info(profile_info).await;
-                }
-                Either3::Third(table) => {
-                    self.update_profile_cccd_table(table).await;
-                }
+        if let Ok(table) = UPDATED_CCCD_TABLE.try_receive() {
+            if slot_generations.get(table.slot_num as usize).copied() == Some(table.generation) {
+                self.update_profile_cccd_table(table).await;
+            } else {
+                warn!(
+                    "Ignoring stale BLE CCCD update for slot {}, generation {}",
+                    table.slot_num, table.generation
+                );
             }
         }
+
+        ProfileActionEffect::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BleProfileAction, profile_action_effect};
+
+    #[test]
+    fn selecting_current_profile_does_not_report_a_change() {
+        let effect = profile_action_effect(BleProfileAction::Switch(2), 2);
+
+        assert_eq!(effect.select_slot, Some(2));
+        assert!(!effect.profile_changed);
+        assert_eq!(effect.clear_slot, None);
+    }
+
+    #[test]
+    fn clearing_current_profile_still_requests_a_clear() {
+        let effect = profile_action_effect(BleProfileAction::ClearAndSwitch(2), 2);
+
+        assert_eq!(effect.select_slot, Some(2));
+        assert!(!effect.profile_changed);
+        assert_eq!(effect.clear_slot, Some(2));
     }
 }

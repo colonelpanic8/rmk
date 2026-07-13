@@ -183,7 +183,7 @@ pub(crate) fn bind_interrupt_default(hardware: &Hardware, item_mod: &ItemMod) ->
                         #use_2m_phy
                         #tx_power
                         .central_count(#num_peri)?
-                        .peripheral_count(1)?
+                        .peripheral_count(::rmk::types::constants::NUM_BLE_PROFILE as u8)?
                         .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
                         .build(p, rng, mpsl, mem)
                     }
@@ -196,7 +196,7 @@ pub(crate) fn bind_interrupt_default(hardware: &Hardware, item_mod: &ItemMod) ->
                     .support_phy_update_peripheral()
                     #use_2m_phy
                     #tx_power
-                    .peripheral_count(1)?
+                    .peripheral_count(::rmk::types::constants::NUM_BLE_PROFILE as u8)?
                     .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
                     .build(p, rng, mpsl, mem)
                 },

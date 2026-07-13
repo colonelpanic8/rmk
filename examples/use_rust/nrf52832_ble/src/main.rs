@@ -53,6 +53,9 @@ const L2CAP_RXQ: u8 = 3;
 /// Size of L2CAP packets
 const L2CAP_MTU: usize = 251;
 
+/// SDC memory reserved for each host link after the first one.
+const SDC_MEM_PER_ADDITIONAL_HOST: usize = 3072;
+
 fn build_sdc<'d, const N: usize>(
     p: nrf_sdc::Peripherals<'d>,
     rng: &'d mut rng::Rng<Async>,
@@ -65,7 +68,7 @@ fn build_sdc<'d, const N: usize>(
         .support_dle_peripheral()
         .support_phy_update_peripheral()
         .support_le_2m_phy()
-        .peripheral_count(1)?
+        .peripheral_count(rmk::types::constants::NUM_BLE_PROFILE as u8)?
         .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
         .build(p, rng, mpsl, mem)
 }
@@ -105,7 +108,9 @@ async fn main(spawner: Spawner) {
         p.PPI_CH27, p.PPI_CH28, p.PPI_CH29,
     );
     let mut rng = rng::Rng::new(p.RNG, Irqs);
-    let mut sdc_mem = sdc::Mem::<3072>::new();
+    let mut sdc_mem = sdc::Mem::<
+        { 3072 + rmk::types::constants::NUM_BLE_PROFILE.saturating_sub(1) * SDC_MEM_PER_ADDITIONAL_HOST },
+    >::new();
     let sdc = unwrap!(build_sdc(sdc_p, &mut rng, mpsl, &mut sdc_mem));
     let mut host_resources = HostResources::new();
     let stack = build_ble_stack(sdc, ble_addr(), &mut host_resources).await;

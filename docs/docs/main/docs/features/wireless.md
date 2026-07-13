@@ -40,15 +40,34 @@ RMK has multiple BLE profile support. The number of profiles can be set in the [
 
 Vial user keycodes can be configured to operate wireless profiles. Suppose that you have N BLE profiles, then:
 
-- `User0` - `User(N-1)`: switch to a specific profile
+- `User0` - `User(N-1)`: tap to use a specific profile; hold for 5 seconds to clear that profile and pair it again
 - `UserN`: switch to the next profile
 - `User(N+1)`: switch to the previous profile
-- `User(N+2)`: clear current profile bond info
+- `User(N+2)`: `Clear BT`; hold for 5 seconds to clear the current active profile and pair it again
 - `User(N+3)`: switch default output between USB/BLE
 
-Vial also provides a way to customize the displayed keycode, see `customKeycodes` in [this example](https://github.com/HaoboGu/rmk/blob/main/examples/use_rust/nrf52840_ble/vial.json). If `customKeycodes` are configured, the `User0` ~ `User(N+3)` will be displayed as `BT0`, ..., `Switch Output`.
+Vial also provides a way to customize the displayed keycode, see `customKeycodes` in [this example](https://github.com/HaoboGu/rmk/blob/main/examples/use_rust/nrf52840_ble/vial.json). Recommended labels are:
 
-If you've connected a host to a profile, other devices will not be able to connect to this profile without manually clearing it first.
+- `BT0: tap to use, hold 5s to clear and pair`
+- `BT1: tap to use, hold 5s to clear and pair`
+- `BT2: tap to use, hold 5s to clear and pair`
+- `Clear BT: hold 5s to clear current slot and pair`
+- `Next BT: use next Bluetooth slot`
+- `Prev BT: use previous Bluetooth slot`
+- `Switch Output: switch default output between USB/BLE`
+- `Clear Split: hold 5s to forget split peer`
+
+If the current BLE profile is empty, RMK advertises as a normal named keyboard and can be paired from the host Bluetooth Add Device UI. If the pairing window times out, the keyboard sleeps; press any key to wake it and start the current profile again.
+
+If a profile already remembers a host, tapping its `BTn` key selects that profile and reconnects to that remembered host when needed. Tapping a remembered profile is safe and does not clear the bond. During reconnect, RMK does not advertise as a normal named pairable keyboard to unrelated hosts.
+
+To pair a different host to a remembered profile, hold that profile's `BTn` key for 5 seconds. To recover when the host forgot the keyboard and you do not remember the current profile, hold `Clear BT` for 5 seconds. The host-side device record and the keyboard-side profile must both be cleared before pairing again.
+
+Multiple remembered BLE profiles may stay connected at the same time when the controller and stack support it. The active profile is the output target: keyboard reports are sent only to the active connected profile and are not broadcast to every connected host. Switching profiles does not disconnect the other connected hosts.
+
+RMK BLE profiles are peer-host slots under one consistent keyboard local BLE identity. They are not separate local advertised identities, and changing only the advertised address is not a supported way to create independent BLE profiles.
+
+When upgrading from an older RMK firmware that used the previous shared-address multi-profile behavior, existing host Bluetooth records may conflict with the new slot state. If a remembered host no longer reconnects, remove the keyboard from that host, hold the corresponding `BTn` key (or `Clear BT` for the current slot) for 5 seconds, and pair it again. Only the selected RMK peer slot is cleared; the keyboard continues to use one consistent local BLE identity for all slots.
 
 ## BLE Passkey Entry
 

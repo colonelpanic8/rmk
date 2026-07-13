@@ -49,7 +49,10 @@ async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
     mpsl.run().await
 }
 
-const SDC_MEM_SIZE: usize = 5788;
+/// SDC memory reserved for each host link after the first one.
+const SDC_MEM_PER_ADDITIONAL_HOST: usize = 3072;
+const SDC_MEM_SIZE: usize =
+    5788 + rmk::types::constants::NUM_BLE_PROFILE.saturating_sub(1) * SDC_MEM_PER_ADDITIONAL_HOST;
 const FLASH_START_ADDR: usize = 0x120000;
 const FLASH_SECTORS: u8 = 6;
 
@@ -70,7 +73,7 @@ fn build_sdc<'d, const N: usize>(
         // .support_dle_peripheral()
         // .support_phy_update_peripheral()
         // .support_le_2m_phy()
-        .peripheral_count(1)?
+        .peripheral_count(rmk::types::constants::NUM_BLE_PROFILE as u8)?
         .buffer_cfg(
             DefaultPacketPool::MTU as u16,
             DefaultPacketPool::MTU as u16,

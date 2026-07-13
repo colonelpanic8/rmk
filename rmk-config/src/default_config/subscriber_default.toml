@@ -45,9 +45,9 @@ events = [
 [[subscriber]]
 features = ["_ble"]
 events = [
-    # ble/battery_service.rs: BatteryStatusEvent::subscriber()
+    # ble/mod.rs: BleBatteryNotifier::new() is added dynamically per BLE host profile
     # processor/builtin/battery_led.rs: subscribe = [BatteryStatusEvent] (user-optional but _ble-gated)
-    { name = "battery_status", count = 2 },
+    { name = "battery_status" },
 ]
 
 # --- Split-gated internal subscribers ---
