@@ -3,7 +3,7 @@
 //! These types represent the final, validated, defaults-applied output of the
 //! 3-layer TOML merge (event defaults → chip defaults → user config).
 //!
-//! There are seven resolved entry points, each consumed at a different stage:
+//! There are eight resolved entry points, each consumed at a different stage:
 //!
 //! - [`BuildConstants`] — compile-time constants emitted by `rmk-types/build.rs`
 //! - [`Identity`] — keyboard identity for USB descriptors and BLE advertising
@@ -12,6 +12,7 @@
 //! - [`Behavior`] — behavioral config (combos, macros, morse, forks, etc.)
 //! - [`Keymap`] — keymap and encoder data for keymap generation
 //! - [`Layout`] — the physical layout blob streamed over `GetLayout`
+//! - [`FirmwareFeatures`] — the `rmk` cargo features a firmware project needs
 //!
 //! Consumers call resolution methods on [`KeyboardTomlConfig`](crate::KeyboardTomlConfig):
 //! - `.build_constants(active_features)` → `Result<BuildConstants, String>`
@@ -21,12 +22,14 @@
 //! - `.behavior()` → `Result<Behavior, String>`
 //! - `.keymap()` → `Result<Keymap, String>`
 //! - `.layout()` → `Result<Layout, String>`
+//! - `.firmware_features()` → `Result<FirmwareFeatures, String>`
 //!
 //! Supporting types stay namespaced under their module to avoid flattening the
 //! public API with overly generic names.
 
 pub mod behavior;
 pub mod build_constants;
+pub mod features;
 pub mod hardware;
 pub mod host;
 pub mod identity;
@@ -35,6 +38,7 @@ pub mod layout;
 
 pub use behavior::Behavior;
 pub use build_constants::BuildConstants;
+pub use features::{FirmwareFeatures, RMK_DEFAULT_FEATURES};
 pub use hardware::Hardware;
 pub use host::Host;
 pub use identity::Identity;

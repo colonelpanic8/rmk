@@ -25,14 +25,12 @@ pub(crate) fn get_rmk_features() -> Option<Vec<String>> {
 
                 let mut feature_set = dep.req_features().to_vec();
 
-                // Add default features to the feature list.
-                // Must mirror `default = [...]` in rmk/Cargo.toml.
+                // Add default features. Sourced from rmk-config so the set is
+                // never hand-copied — `rmk/Cargo.toml` stays the single source.
                 if default_features {
-                    feature_set.push("defmt".to_string());
-                    feature_set.push("storage".to_string());
-                    feature_set.push("vial".to_string());
-                    feature_set.push("host_lock".to_string());
-                    feature_set.push("watchdog".to_string());
+                    feature_set.extend(
+                        rmk_config::resolved::RMK_DEFAULT_FEATURES.iter().map(|s| s.to_string()),
+                    );
                 }
                 feature_set
             }),
