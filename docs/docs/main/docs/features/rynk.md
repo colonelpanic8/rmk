@@ -6,10 +6,10 @@ firmware. It plays the same role as [Vial](./vial_support), but it is built
 natively for RMK and understands every RMK feature.
 
 ::: tip Rynk or Vial — which should I use?
-Rynk speaks RMK's full feature set and is enabled by default, but its host tools
-are still young: today you use it from a browser demo or a small Rust library —
-there is no packaged desktop app yet. [Vial](./vial_support) has a polished
-cross-platform app, but only supports the features in the Vial standard.
+Rynk speaks RMK's full feature set, but it is opt-in and its host tools are still
+young. [Vial](./vial_support) is enabled by default and
+has a polished cross-platform app, but only supports the features in the Vial
+standard.
 
 If you want a click-and-go app today, choose Vial. If you want access to every
 RMK feature and don't mind newer tooling, choose Rynk.
@@ -40,14 +40,8 @@ vial_enabled = false
 rynk_enabled = true
 ```
 
-Then make sure the `rmk` dependency enables the `rynk` feature. It's on by
-default, so keeping RMK's default features is enough:
-
-```toml title="Cargo.toml"
-rmk = { version = "...", features = ["rp2040"] }
-```
-
-If you turn default features off, add the ones you need back explicitly:
+Then disable RMK's default features, which include Vial, and enable `rynk`
+explicitly. Add the other features your keyboard needs:
 
 ```toml title="Cargo.toml"
 rmk = { version = "...", default-features = false, features = [

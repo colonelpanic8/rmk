@@ -37,15 +37,7 @@ write_requires_unlock = false
 
 ## Common Setups
 
-Use Rynk with the `rmk` default Cargo features:
-
-```toml title="keyboard.toml"
-[host]
-vial_enabled = false
-rynk_enabled = true
-```
-
-Use Vial instead:
+Use Vial with the `rmk` default Cargo features:
 
 ```toml title="keyboard.toml"
 [host]
@@ -54,11 +46,20 @@ rynk_enabled = false
 unlock_keys = [[0, 0], [0, 1]]
 ```
 
+Use Rynk instead:
+
+```toml title="keyboard.toml"
+[host]
+vial_enabled = false
+rynk_enabled = true
+unlock_keys = [[0, 0], [0, 1]]
+```
+
 ```toml title="Cargo.toml"
 rmk = { version = "...", default-features = false, features = [
     "defmt",
     "storage",
-    "vial",
+    "rynk",
     "watchdog",
     "rp2040",
 ] }

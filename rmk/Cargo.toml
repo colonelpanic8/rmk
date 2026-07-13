@@ -101,15 +101,14 @@ embedded-hal-mock = { version = "0.11.1", features = ["embedded-hal-async"] }
 crc32fast = "1.3"
 
 [package.metadata.docs.rs]
-no-default-features = true
-features = ["defmt", "storage", "rynk", "watchdog", "split", "async_matrix", "_ble"]
+features = ["split", "vial", "async_matrix", "_ble"]
 
 # Architecture specific dependencies
 [target.'cfg(all(target_arch = "arm", target_os = "none"))'.dependencies]
 cortex-m = { version = "0.7" }
 
 [features]
-default = ["defmt", "storage", "rynk", "watchdog"]
+default = ["defmt", "storage", "vial", "host_lock", "watchdog"]
 
 ## Enable hardware watchdog support
 watchdog = ["rmk-macro/watchdog"]

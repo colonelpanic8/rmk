@@ -2,7 +2,7 @@
 
 RMK can expose the [Vial](https://get.vial.today/) protocol for compatibility with the Vial app. Vial allows you to change your keymapping in real-time without flashing new firmware.
 
-::: warning Vial and [Rynk](./rynk) are mutually exclusive firmware protocols. The `rmk` crate's default Cargo features enable Rynk, not Vial. To build Vial firmware, disable default features and enable the `vial` feature explicitly. :::
+::: warning Vial and [Rynk](./rynk) are mutually exclusive firmware protocols. Vial is enabled by the `rmk` crate's default Cargo features; enable Rynk explicitly only after disabling those defaults. :::
 
 ::: warning Vial requires the [storage feature](./storage) to persist your keymap data. Without storage feature enabled, any changes to your keymap will be lost after the keyboard reboots. :::
 
@@ -16,16 +16,10 @@ vial_enabled = true
 rynk_enabled = false
 ```
 
-In `Cargo.toml`, disable RMK default features and enable `vial` explicitly:
+In `Cargo.toml`, keep RMK's default features and add the features your keyboard needs:
 
 ```toml title="Cargo.toml"
-rmk = { version = "...", default-features = false, features = [
-  "defmt",
-  "storage",
-  "vial",
-  "watchdog",
-  "rp2040",
-] }
+rmk = { version = "...", features = ["rp2040"] }
 ```
 
 Add any chip, BLE, split, display, or other features your board needs.
@@ -65,7 +59,13 @@ rynk_enabled = true
 ```
 
 ```toml title="Cargo.toml"
-rmk = { version = "...", features = ["rp2040"] }
+rmk = { version = "...", default-features = false, features = [
+  "defmt",
+  "storage",
+  "rynk",
+  "watchdog",
+  "rp2040",
+] }
 ```
 
 To remove all host configurator support, set both host protocols to `false` and use `default-features = false` without `vial` or `rynk`.
@@ -94,4 +94,6 @@ For development and testing it can be convenient to skip this step. Setting `ins
 insecure = true
 ```
 
-::: Note `insecure` (formerly `vial_insecure`; the old name still parses) only takes effect for Vial with the `host_lock` Cargo feature (enabled alongside `vial`). Since v0.9 the lock is no longer a default feature, so enable it explicitly in `Cargo.toml`. It does not replace `unlock_keys`: the host can still lock and re-unlock a session that started unlocked, so you may keep `unlock_keys` configured alongside it. :::
+::: Note
+`insecure` (formerly `vial_insecure`; the old name still parses) only takes effect for Vial with the `host_lock` Cargo feature, which is enabled by default. If you disable default features and select Vial explicitly, add both `vial` and `host_lock`. `insecure` does not replace `unlock_keys`: the host can still lock and re-unlock a session that started unlocked, so you may keep `unlock_keys` configured alongside it. 
+:::
