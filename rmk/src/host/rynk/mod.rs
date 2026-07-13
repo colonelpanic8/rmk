@@ -227,8 +227,7 @@ impl RynkService<'_> {
                 Either::Second(event) => {
                     match event.encode(&mut buf) {
                         Ok(msg) => {
-                            let total = msg.frame_len();
-                            if tx.write_all(&buf[..total]).await.is_err() {
+                            if tx.write_all(msg.frame()).await.is_err() {
                                 return;
                             }
                         }
@@ -253,8 +252,7 @@ impl RynkService<'_> {
                     // Echo cmd/seq back with a Malformed error; the payload was never read.
                     let err = Err::<(), RynkError>(RynkError::Malformed);
                     if let Ok(msg) = RynkMessage::build(&mut buf[..], header.cmd, header.seq, &err) {
-                        let n = msg.frame_len();
-                        if tx.write_all(&buf[..n]).await.is_err() {
+                        if tx.write_all(msg.frame()).await.is_err() {
                             return;
                         }
                     }
@@ -281,8 +279,7 @@ impl RynkService<'_> {
             };
 
             self.dispatch(&mut msg).await;
-            let resp_len = msg.frame_len();
-            if tx.write_all(&buf[..resp_len]).await.is_err() {
+            if tx.write_all(msg.frame()).await.is_err() {
                 return;
             }
         }

@@ -171,9 +171,8 @@ mod tests {
     /// Header + postcard payload, framed as the firmware sends it.
     fn frame<T: Serialize>(cmd: Cmd, seq: u8, value: &T) -> Vec<u8> {
         let mut buf = vec![0u8; RYNK_MIN_BUFFER_SIZE];
-        let len = RynkMessage::build(&mut buf, cmd, seq, value).unwrap().frame_len();
-        buf.truncate(len);
-        buf
+        let msg = RynkMessage::build(&mut buf, cmd, seq, value).unwrap();
+        msg.frame().to_vec()
     }
 
     // Representative device; omitted fields take their zero/false default.

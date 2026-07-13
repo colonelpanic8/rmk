@@ -55,18 +55,18 @@ impl RynkHeader {
     }
 }
 
-/// A RynkMessage is a mutable view over the byte buffer, split at
-/// construction into the fixed header bytes and the body after them.
+/// A RynkMessage is a mutable view over the byte buffer holding one frame:
+/// the fixed header followed by the payload (plus response scratch on receive).
 pub struct RynkMessage<'a> {
-    header: &'a mut [u8; RYNK_HEADER_SIZE],
-    body: &'a mut [u8],
+    // Invariant: both constructors reject buffers shorter than the header.
+    buf: &'a mut [u8],
 }
 
 impl<'a> RynkMessage<'a> {
     /// Build an outbound message: postcard-encode `value` into the payload,
     /// then write `cmd`, `seq`, and `payload_len` into the header.
     pub fn build<T: Serialize>(buf: &'a mut [u8], cmd: Cmd, seq: u8, value: &T) -> Result<Self, RynkError> {
-        let Some((header, body)) = buf.split_first_chunk_mut() else {
+        let Some((header, body)) = buf.split_first_chunk_mut::<RYNK_HEADER_SIZE>() else {
             // Outbound encode: a buffer too small for the header is a
             // firmware-side fault, not a malformed host request.
             return Err(RynkError::Internal);
@@ -74,11 +74,10 @@ impl<'a> RynkMessage<'a> {
         let n = postcard::to_slice(value, body)
             .map(|s| s.len())
             .map_err(|_| RynkError::Internal)?;
-        let mut msg = Self { header, body };
-        msg.header[0..2].copy_from_slice(&cmd.to_le_bytes());
-        msg.header[2] = seq;
-        msg.set_payload_len(n as u16);
-        Ok(msg)
+        header[0..2].copy_from_slice(&cmd.to_le_bytes());
+        header[2] = seq;
+        header[3..5].copy_from_slice(&(n as u16).to_le_bytes());
+        Ok(Self { buf })
     }
 
     /// Build a topic push frame.
@@ -88,7 +87,7 @@ impl<'a> RynkMessage<'a> {
 
     /// The decoded header.
     pub const fn header(&self) -> RynkHeader {
-        RynkHeader::parse(self.header)
+        RynkHeader::parse(self.buf.first_chunk().unwrap())
     }
 
     /// Total frame length in bytes — header + payload.
@@ -96,12 +95,18 @@ impl<'a> RynkMessage<'a> {
         self.header().frame_len()
     }
 
+    /// The encoded frame: header + payload, ready to transmit.
+    pub fn frame(&self) -> &[u8] {
+        &self.buf[..self.frame_len()]
+    }
+
     fn payload(&self) -> &[u8] {
-        &self.body[..self.header().payload_len as usize]
+        let payload_len = self.header().payload_len as usize;
+        &self.buf[RYNK_HEADER_SIZE..RYNK_HEADER_SIZE + payload_len]
     }
 
     fn set_payload_len(&mut self, len: u16) {
-        self.header[3..5].copy_from_slice(&len.to_le_bytes());
+        self.buf[3..5].copy_from_slice(&len.to_le_bytes());
     }
 
     /// Decode the request payload.
@@ -112,7 +117,7 @@ impl<'a> RynkMessage<'a> {
 
     /// Encode `Ok(value)` into the payload and update `LEN`.
     pub fn encode_response<T: Serialize>(&mut self, value: &T) -> Result<(), RynkError> {
-        let n = postcard::to_slice(&Ok::<&T, RynkError>(value), self.body)
+        let n = postcard::to_slice(&Ok::<&T, RynkError>(value), &mut self.buf[RYNK_HEADER_SIZE..])
             .map(|s| s.len())
             .map_err(|_| RynkError::Internal)?;
         self.set_payload_len(n as u16);
@@ -121,7 +126,7 @@ impl<'a> RynkMessage<'a> {
 
     /// Encode `Err(err)` into the payload and update `LEN`.
     pub fn encode_error(&mut self, err: RynkError) {
-        let n = postcard::to_slice(&Err::<(), RynkError>(err), self.body)
+        let n = postcard::to_slice(&Err::<(), RynkError>(err), &mut self.buf[RYNK_HEADER_SIZE..])
             .map(|s| s.len())
             .unwrap_or(0);
         self.set_payload_len(n as u16);
@@ -133,13 +138,13 @@ impl<'a> TryFrom<&'a mut [u8]> for RynkMessage<'a> {
 
     /// Build [`RynkMessage`] from buffer.
     fn try_from(buf: &'a mut [u8]) -> Result<Self, RynkError> {
-        let Some((header, body)) = buf.split_first_chunk_mut() else {
+        let Some(header) = buf.first_chunk::<RYNK_HEADER_SIZE>() else {
             return Err(RynkError::Malformed);
         };
-        if body.len() < RynkHeader::parse(header).payload_len as usize {
+        if buf.len() < RynkHeader::parse(header).frame_len() {
             return Err(RynkError::Malformed);
         }
-        Ok(Self { header, body })
+        Ok(Self { buf })
     }
 }
 
@@ -168,6 +173,7 @@ mod tests {
         assert_eq!(msg.header().payload_len, 4);
         assert_eq!(&msg.payload()[..4], &[1, 2, 3, 4]);
         assert_eq!(msg.frame_len(), RYNK_HEADER_SIZE + 4);
+        assert_eq!(msg.frame(), &[0x01, 0x00, 0x42, 0x04, 0x00, 1, 2, 3, 4]);
     }
 
     #[test]

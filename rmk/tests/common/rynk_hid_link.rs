@@ -105,10 +105,8 @@ pub struct RynkHidClient<'p> {
 impl RynkHostClient for RynkHidClient<'_> {
     /// Encode a request frame and write it as fixed 32-byte report fragments.
     async fn send<T: Serialize>(&mut self, cmd: Cmd, seq: u8, payload: &T) {
-        let n = RynkMessage::build(&mut self.buf, cmd, seq, payload)
-            .expect("build request frame")
-            .frame_len();
-        write_framed(self.tx, &self.buf[..n]).await;
+        let msg = RynkMessage::build(&mut self.buf, cmd, seq, payload).expect("build request frame");
+        write_framed(self.tx, msg.frame()).await;
     }
 
     /// Read whole reports and reassemble exactly one rynk frame — reports carry a
