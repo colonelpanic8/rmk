@@ -32,7 +32,7 @@ This step only applies when you build with the [Vial](https://get.vial.today/) p
 
 Fortunately, RMK does most of the heavy lifting for you. All you need to do is create your own keymap definition and convert it to `vial.json` following **[Vial's documentation here](https://get.vial.today/docs/porting-to-via.html)**, and place it at the root of the firmware project, replacing the default one. RMK will handle all the rest for you.
 
-If you use the default [Rynk](./rynk) protocol instead of Vial, you don't need a `vial.json` — skip this step.
+If you opt into [Rynk](./rynk) instead of the default Vial protocol, you don't need a `vial.json` — skip this step.
 
 ### Add your default keymap
 

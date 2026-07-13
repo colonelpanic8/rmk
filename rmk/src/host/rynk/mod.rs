@@ -251,10 +251,10 @@ impl RynkService<'_> {
                     warn!("Rynk: frame_len {} exceeds buffer {}", frame_len, buf.len());
                     // Echo cmd/seq back with a Malformed error; the payload was never read.
                     let err = Err::<(), RynkError>(RynkError::Malformed);
-                    if let Ok(msg) = RynkMessage::build(&mut buf[..], header.cmd, header.seq, &err) {
-                        if tx.write_all(msg.frame()).await.is_err() {
-                            return;
-                        }
+                    if let Ok(msg) = RynkMessage::build(&mut buf[..], header.cmd, header.seq, &err)
+                        && tx.write_all(msg.frame()).await.is_err()
+                    {
+                        return;
                     }
                 }
                 let mut remaining = payload_n;

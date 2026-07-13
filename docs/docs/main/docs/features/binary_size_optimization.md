@@ -56,10 +56,10 @@ RMK provides several options that you can use to reduce the binary size:
 
 2. You can also fully remove `defmt` by removing `defmt` feature from `rmk` crate and similar feature gates from all other dependencies.
 
-3. If you don't need on-the-fly configuration, you can disable the host configurator feature by disabling default features of the `rmk` crate. Rynk (`rynk`) is the default host protocol, so dropping default features removes it. If you switched to Vial, disable the `vial` feature the same way.
+3. If you don't need on-the-fly configuration, you can disable the host configurator feature by disabling default features of the `rmk` crate.
 
 ```toml
-# The default features `defmt`, `storage`, `rynk`, and `watchdog` are all disabled
+# The default features `defmt`, `storage`, `vial`, `host_lock`, and `watchdog` are all disabled
 rmk = { version = "...", default-features = false }
 ```
 
@@ -131,10 +131,10 @@ In this case, you have to implement an empty defmt logger.
 
 ### Totally remove storage and host configurator support
 
-You can disable the `storage` and host protocol (`rynk`, or `vial` if you enabled it) features in `Cargo.toml`:
+You can disable the `storage` and host protocol (`vial`, or `rynk` if you enabled it) features in `Cargo.toml`:
 
 ```toml
-# The default features `defmt`, `storage`, `rynk`, and `watchdog` are all disabled
+# The default features `defmt`, `storage`, `vial`, `host_lock`, and `watchdog` are all disabled
 rmk = { version = "...", default-features = false }
 ```
 
