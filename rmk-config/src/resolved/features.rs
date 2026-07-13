@@ -151,8 +151,9 @@ impl KeyboardTomlConfig {
 mod tests {
     use super::*;
 
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
     /// Resolve through the real layered pipeline (chip defaults applied), exactly
     /// as rmkit does. `new_from_toml_path` takes a path, so write to a temp file;
@@ -162,9 +163,10 @@ mod tests {
     }
 
     fn try_features(body: &str) -> Result<FirmwareFeatures, String> {
-        let mut hasher = DefaultHasher::new();
-        body.hash(&mut hasher);
-        let path = std::env::temp_dir().join(format!("rmk_ff_{:016x}.toml", hasher.finish()));
+        // Unique per call (pid + atomic counter) so parallel tests using the same
+        // config body don't collide on the temp path and race on write/remove.
+        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("rmk_ff_{}_{}.toml", std::process::id(), seq));
         std::fs::write(&path, body).expect("write temp keyboard.toml");
         let cfg = KeyboardTomlConfig::new_from_toml_path(&path);
         let _ = std::fs::remove_file(&path);
@@ -311,6 +313,65 @@ mod tests {
         assert_eq!(
             actual, expected,
             "RMK_DEFAULT_FEATURES is out of sync with rmk/Cargo.toml [features].default"
+        );
+    }
+
+    /// Every feature name `firmware_features()` can emit must be a real key in
+    /// `rmk/Cargo.toml` `[features]`. This runs the derivation over a chip ×
+    /// toggle matrix and checks each emitted name against rmk's actual feature
+    /// table — the guard that binds rmk-config's feature vocabulary to rmk, and
+    /// that would have caught both the `controller` (nonexistent) and the
+    /// `vial_lock`→`host_lock` rename bugs the moment they were introduced.
+    #[test]
+    fn every_derived_feature_exists_in_rmk() {
+        let manifest = std::fs::read_to_string("../rmk/Cargo.toml").expect("read ../rmk/Cargo.toml");
+        let value: toml::Value = toml::from_str(&manifest).expect("parse rmk/Cargo.toml");
+        let keys: BTreeSet<String> = value["features"]
+            .as_table()
+            .expect("[features] table")
+            .keys()
+            .cloned()
+            .collect();
+
+        let split = format!(
+            "{base}\n[split]\nconnection = \"serial\"\n\
+             [split.central]\nrows = 1\ncols = 1\nrow_offset = 0\ncol_offset = 0\nmatrix = {{ matrix_type = \"normal\", row_pins = [\"PIN_0\"], col_pins = [\"PIN_1\"] }}\n\
+             [[split.peripheral]]\nrows = 1\ncols = 1\nrow_offset = 0\ncol_offset = 0\nmatrix = {{ matrix_type = \"normal\", row_pins = [\"PIN_2\"], col_pins = [\"PIN_3\"] }}\n",
+            base = chip_toml("rp2040"),
+        );
+
+        let configs: Vec<String> = vec![
+            // One config per chip → exercises every chip feature + the defaults.
+            chip_toml("rp2040"),
+            chip_toml("nrf52840"),
+            chip_toml("nrf52832"),
+            chip_toml("esp32c3"),
+            chip_toml("esp32c6"),
+            chip_toml("esp32s3"),
+            chip_toml("esp32h2"),
+            chip_toml("stm32f411ce"),
+            "[keyboard]\nname = \"t\"\nvendor_id = 1\nproduct_id = 1\nboard = \"pico_w\"\n".to_string(),
+            // Toggles → exercises every derived-toggle feature.
+            format!("{}\n[storage]\nenabled = false\n", chip_toml("rp2040")),
+            format!("{}\n[dependency]\ndefmt_log = false\n", chip_toml("rp2040")),
+            format!("{}\n[host]\nvial_enabled = false\n", chip_toml("rp2040")),
+            format!("{}\n[host]\nvial_enabled = false\nrynk_enabled = true\n", chip_toml("rp2040")),
+            format!("{}\n[ble]\nenabled = true\npasskey_entry = true\n", chip_toml("nrf52840")),
+            format!("{}\n[light]\ncapslock = {{ pin = \"PIN_0\", low_active = true }}\n", chip_toml("rp2040")),
+            split,
+        ];
+
+        // Implicit defaults count too (they must exist in rmk when default-features stays on).
+        let mut emitted: BTreeSet<String> = RMK_DEFAULT_FEATURES.iter().map(|s| s.to_string()).collect();
+        for cfg in &configs {
+            let f = try_features(cfg).unwrap_or_else(|e| panic!("derive failed for config:\n{cfg}\nerror: {e}"));
+            emitted.extend(f.rmk_features);
+        }
+
+        let missing: Vec<&String> = emitted.iter().filter(|n| !keys.contains(*n)).collect();
+        assert!(
+            missing.is_empty(),
+            "firmware_features() emits features absent from rmk/Cargo.toml [features]: {missing:?}"
         );
     }
 }
