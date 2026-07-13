@@ -45,26 +45,21 @@ pub(crate) use rmk_types::constants::*;
 // This mod MUST go first, so that the others see its macros.
 pub(crate) mod fmt;
 
-pub use embassy_futures;
 #[cfg(not(any(cortex_m)))]
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as RawMutex;
 #[cfg(cortex_m)]
 pub use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex as RawMutex;
-pub use embassy_time;
-pub use futures;
-pub use heapless;
 // Re-exported here so generated code from `#[rmk_keyboard]` and pure-Rust API
 // users can spawn the auto mouse layer task without depending on internal
 // module paths.
 pub use keyboard::auto_mouse_layer::AutoMouseLayerRunner;
 use keymap::KeyMap;
 pub use keymap::KeymapData;
-pub use rmk_macro as macros;
-pub use rmk_types as types;
 #[cfg(all(feature = "storage", feature = "host"))]
 use rmk_types::action::EncoderAction;
 #[cfg(feature = "_ble")]
 pub use trouble_host::prelude::*;
+pub use {embassy_futures, embassy_time, futures, heapless, rmk_macro as macros, rmk_types as types};
 #[cfg(feature = "storage")]
 use {embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash, storage::Storage};
 
