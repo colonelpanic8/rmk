@@ -66,9 +66,9 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install rmkit, flip-link and cargo-make
         run: cargo binstall cargo-make rmkit flip-link -y
-      # esp32s3 is the only Xtensa target; it needs the espup toolchain. RISC-V
-      # esp32 chips (c3/c6/h2) build with the standard toolchain and let
-      # cargo-make pull cargo-espflash on demand.
+      # esp32s3 is the only Xtensa esp chip RMK builds, so it alone needs the
+      # espup toolchain. RISC-V esp32 chips (c3/c6/h2) build with the standard
+      # toolchain and let cargo-make pull cargo-espflash on demand.
       - name: Install esp toolchain (esp32s3 / Xtensa)
         if: ${{ needs.get_chip_name.outputs.chip_name == 'esp32s3' }}
         run: cargo binstall cargo-espflash espup -y
