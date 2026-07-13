@@ -91,7 +91,10 @@ impl KeyboardTomlConfig {
         if is_split {
             features.insert("split".to_string());
         }
-        if self.ble.as_ref().and_then(|b| b.passkey_entry).unwrap_or(false) {
+        // passkey_entry pulls in `_ble`; only honor it on a chip that actually has BLE.
+        if self.ble.as_ref().and_then(|b| b.passkey_entry).unwrap_or(false)
+            && features.iter().any(|f| f.ends_with("_ble"))
+        {
             features.insert("passkey_entry".to_string());
         }
         if !host.vial_enabled {
@@ -106,13 +109,17 @@ impl KeyboardTomlConfig {
             features.insert("host_lock".to_string());
         }
         if !self.get_storage_config().enabled {
+            // `_ble` ⇒ storage, and the proc-macro hard-panics if keyboard.toml's
+            // `storage.enabled` disagrees with the `storage` cargo feature. So a
+            // storage-off BLE config cannot produce a buildable project — reject it
+            // here with a clear message instead of emitting one that won't compile.
             if features.iter().any(|f| f.ends_with("_ble")) {
-                eprintln!(
-                    "warning: `[storage].enabled = false` ignored — BLE requires storage; keeping `storage`."
+                return Err(
+                    "[storage].enabled = false is not supported on a BLE keyboard — BLE requires storage; remove the [storage] override."
+                        .to_string(),
                 );
-            } else {
-                features.remove("storage");
             }
+            features.remove("storage");
         }
         if !self.get_dependency_config().defmt_log {
             features.remove("defmt");
@@ -287,11 +294,43 @@ mod tests {
     }
 
     #[test]
-    fn storage_off_ble_chip_keeps_storage() {
-        // BLE implies storage; the toggle is ignored with a warning.
-        let toml = format!("{}\n[storage]\nenabled = false\n", chip_toml("nrf52840"));
+    fn storage_off_ble_chip_is_rejected() {
+        // BLE requires storage and the macro panics on a mismatch, so this must be a
+        // clear generation-time error, not a project that fails to compile.
+        for chip in ["nrf52840", "esp32c3"] {
+            let toml = format!("{}\n[storage]\nenabled = false\n", chip_toml(chip));
+            assert!(try_features(&toml).is_err(), "storage-off on {chip} should be rejected");
+        }
+    }
+
+    #[test]
+    fn passkey_ignored_without_ble() {
+        // passkey_entry pulls in `_ble`; on a USB-only chip it must not be emitted.
+        let toml = format!("{}\n[ble]\nenabled = true\npasskey_entry = true\n", chip_toml("rp2040"));
         let f = features(&toml);
-        assert!(f.rmk_features.contains(&"storage".to_string()) || f.use_rmk_default_features);
+        assert!(!f.rmk_features.iter().any(|x| x == "passkey_entry"));
+    }
+
+    #[test]
+    fn nrf52840_board_matches_template() {
+        let f = features("[keyboard]\nname = \"t\"\nvendor_id = 1\nproduct_id = 1\nboard = \"nice!nano_v2\"\n");
+        assert_eq!(f.chip, "nrf52840");
+        assert_eq!(f.rmk_features, vec!["adafruit_bl", "async_matrix", "nrf52840_ble"]);
+    }
+
+    #[test]
+    fn split_on_nrf_and_stm32() {
+        let matrix = "matrix = { matrix_type = \"normal\", row_pins = [\"P0_02\"], col_pins = [\"P0_03\"] }";
+        for chip in ["nrf52840", "stm32f411ce"] {
+            let toml = format!(
+                "{base}\n[split]\nconnection = \"serial\"\n\
+                 [split.central]\nrows = 1\ncols = 1\nrow_offset = 0\ncol_offset = 0\n{matrix}\n\
+                 [[split.peripheral]]\nrows = 1\ncols = 1\nrow_offset = 0\ncol_offset = 0\n{matrix}\n",
+                base = chip_toml(chip),
+            );
+            let f = features(&toml);
+            assert!(f.is_split && f.rmk_features.contains(&"split".to_string()), "split missing for {chip}");
+        }
     }
 
     #[test]
