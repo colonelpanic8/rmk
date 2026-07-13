@@ -151,12 +151,10 @@ impl RynkClient<'_> {
 
 impl RynkHostClient for RynkClient<'_> {
     async fn send<T: Serialize>(&mut self, cmd: Cmd, seq: u8, payload: &T) {
-        let n = RynkMessage::build(&mut self.buf, cmd, seq, payload)
-            .expect("build request frame")
-            .frame_len();
+        let msg = RynkMessage::build(&mut self.buf, cmd, seq, payload).expect("build request frame");
         // `Pipe::write_all` is inherent and infallible (the in-memory link
         // never errors); it just blocks until the device drains enough room.
-        self.tx.write_all(&self.buf[..n]).await;
+        self.tx.write_all(msg.frame()).await;
     }
 
     /// Read exactly one frame off the wire: fixed header, then declared payload.

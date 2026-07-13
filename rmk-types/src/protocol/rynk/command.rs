@@ -197,7 +197,7 @@ macro_rules! topics {
             }
 
             /// Encode this event into `buf` as a topic frame.
-            /// Returns the message view; the caller sends `&buf[..msg.frame_len()]`.
+            /// Returns the message view; the caller sends `msg.frame()`.
             pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<RynkMessage<'a>, RynkError> {
                 match self {
                     $( $(#[$meta])* TopicEvent::$name(v) => RynkMessage::build_topic::<$name>(buf, v), )*
@@ -354,7 +354,7 @@ mod tests {
     use postcard::experimental::max_size::MaxSize;
 
     use super::*;
-    use crate::protocol::rynk::{RYNK_HEADER_SIZE, RYNK_MIN_BUFFER_SIZE, RynkError, RynkHeader};
+    use crate::protocol::rynk::{RYNK_HEADER_SIZE, RYNK_MIN_BUFFER_SIZE, RynkError};
 
     #[test]
     fn topic_mask_is_the_high_bit() {
@@ -392,14 +392,14 @@ mod tests {
         // the same variant — the producer and consumer halves share one table.
         let mut buf = [0u8; RYNK_MIN_BUFFER_SIZE];
         let ev = TopicEvent::LayerChange(7);
-        let frame_len = ev.encode(&mut buf).unwrap().frame_len();
+        let msg = ev.encode(&mut buf).unwrap();
 
-        let header = RynkHeader::parse(buf.first_chunk::<RYNK_HEADER_SIZE>().unwrap());
+        let header = msg.header();
         assert_eq!(header.cmd, Cmd::LayerChange);
         assert_eq!(header.cmd, ev.cmd());
         assert_eq!(header.seq, 0, "topics push with SEQ 0");
 
-        let decoded = TopicEvent::decode(header.cmd, &buf[RYNK_HEADER_SIZE..frame_len]);
+        let decoded = TopicEvent::decode(header.cmd, &msg.frame()[RYNK_HEADER_SIZE..]);
         assert!(matches!(decoded, Some(TopicEvent::LayerChange(7))));
     }
 

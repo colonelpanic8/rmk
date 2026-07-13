@@ -326,16 +326,15 @@ impl<T: Read + Write> Client<T> {
         }
         let seq = self.next_seq;
         self.next_seq = self.next_seq.checked_add(1).unwrap_or(1);
-        let frame_len = RynkMessage::build(&mut self.tx_buf, cmd, seq, req)
-            .map_err(|_| RynkHostError::Encode(cmd))?
-            .frame_len();
         let max = self.max_frame_size();
+        let msg = RynkMessage::build(&mut self.tx_buf, cmd, seq, req).map_err(|_| RynkHostError::Encode(cmd))?;
+        let frame_len = msg.frame_len();
         if frame_len > max {
             return Err(RynkHostError::TooLarge { cmd, frame_len, max });
         }
         // If dropped mid-write, the next wire op marks the link dead.
         self.send_in_flight = true;
-        let result = self.transport.write_all(&self.tx_buf[..frame_len]).await;
+        let result = self.transport.write_all(msg.frame()).await;
         self.send_in_flight = false;
         if let Err(e) = result {
             self.dead = true;
@@ -475,9 +474,8 @@ mod tests {
     /// A bare frame: header + postcard(value). Used for raw headers and topics.
     fn frame<T: Serialize>(cmd: Cmd, seq: u8, value: &T) -> Vec<u8> {
         let mut buf = vec![0u8; RYNK_MIN_BUFFER_SIZE];
-        let len = RynkMessage::build(&mut buf, cmd, seq, value).unwrap().frame_len();
-        buf.truncate(len);
-        buf
+        let msg = RynkMessage::build(&mut buf, cmd, seq, value).unwrap();
+        msg.frame().to_vec()
     }
 
     /// An `Ok` response frame, enveloped as the firmware sends it.
