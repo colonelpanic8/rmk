@@ -1,53 +1,73 @@
-//! Utilities of check cargo feature
-//!
+//! RMK feature state forwarded to this proc-macro crate by Cargo.
 
-/// Get enabled RMK features list
-pub(crate) fn get_rmk_features() -> Option<Vec<String>> {
-    // Use an absolute path. `cargo_toml::Manifest::from_path` resolves the
-    // workspace root by walking ancestors of the given path; passing a
-    // relative `"./Cargo.toml"` makes its fallback canonicalize an empty
-    // path and fail with ENOENT inside workspace members.
-    let manifest_path = std::path::Path::new(
-        &std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set"),
-    )
-    .join("Cargo.toml");
-    match cargo_toml::Manifest::from_path(&manifest_path) {
-        Ok(manifest) => manifest
-            .dependencies
-            .iter()
-            .find(|(name, _dep)| *name == "rmk")
-            .map(|(_name, dep)| {
-                let default_features = if let Some(d) = dep.detail() {
-                    d.default_features
-                } else {
-                    true
-                };
+macro_rules! define_rmk_features {
+    ($($feature:literal),+ $(,)?) => {
+        const TRACKED_RMK_FEATURES: &[&str] = &[$($feature),+];
 
-                let mut feature_set = dep.req_features().to_vec();
-
-                // Add default features to the feature list.
-                // Must mirror `default = [...]` in rmk/Cargo.toml.
-                if default_features {
-                    feature_set.push("defmt".to_string());
-                    feature_set.push("storage".to_string());
-                    feature_set.push("vial".to_string());
-                    feature_set.push("host_lock".to_string());
-                    feature_set.push("watchdog".to_string());
-                }
-                feature_set
-            }),
-        Err(_e) => None,
-    }
+        /// RMK features enabled after Cargo resolves defaults and transitive dependencies.
+        pub(crate) fn get_rmk_features() -> Vec<&'static str> {
+            [$(($feature, cfg!(feature = $feature))),+]
+                .into_iter()
+                .filter_map(|(feature, enabled)| enabled.then_some(feature))
+                .collect()
+        }
+    };
 }
 
-/// Check whether the given feature is enabled
-pub(crate) fn is_feature_enabled(feature_list: &Option<Vec<String>>, feature: &str) -> bool {
-    if let Some(rmk_features) = feature_list {
-        for f in rmk_features {
-            if f == feature {
-                return true;
-            }
+define_rmk_features!(
+    "async_matrix",
+    "dfu_lock",
+    "dfu_nrf",
+    "dfu_rp",
+    "rynk",
+    "split",
+    "storage",
+    "vial",
+);
+
+/// Check whether the given RMK feature is enabled.
+pub(crate) fn is_feature_enabled(feature_list: &[&str], feature: &str) -> bool {
+    assert!(
+        TRACKED_RMK_FEATURES.contains(&feature),
+        "rmk-macro queried untracked feature `{feature}`"
+    );
+    feature_list.contains(&feature)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::TRACKED_RMK_FEATURES;
+
+    #[test]
+    fn tracked_features_are_forwarded_by_rmk() {
+        let macro_manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let rmk_manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rmk/Cargo.toml");
+
+        // The sibling crate is present in the repository but not in the
+        // standalone package published to crates.io.
+        if !rmk_manifest_path.exists() {
+            return;
+        }
+
+        let macro_manifest = cargo_toml::Manifest::from_path(macro_manifest_path).unwrap();
+        let rmk_manifest = cargo_toml::Manifest::from_path(rmk_manifest_path).unwrap();
+
+        for feature in TRACKED_RMK_FEATURES {
+            assert!(
+                macro_manifest.features.contains_key(*feature),
+                "rmk-macro is missing the `{feature}` marker feature"
+            );
+
+            let forwarding = format!("rmk-macro/{feature}");
+            assert!(
+                rmk_manifest
+                    .features
+                    .get(*feature)
+                    .is_some_and(|members| members.contains(&forwarding)),
+                "rmk feature `{feature}` must forward `{forwarding}`"
+            );
         }
     }
-    false
 }

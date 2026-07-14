@@ -14,7 +14,7 @@ use super::feature::is_feature_enabled;
 
 pub(crate) fn expand_matrix_config(
     hardware: &Hardware,
-    rmk_features: &Option<Vec<String>>,
+    rmk_features: &[&str],
 ) -> proc_macro2::TokenStream {
     let async_matrix = is_feature_enabled(rmk_features, "async_matrix");
     let mut matrix_config = proc_macro2::TokenStream::new();

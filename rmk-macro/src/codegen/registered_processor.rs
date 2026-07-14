@@ -12,7 +12,7 @@ use crate::codegen::feature::is_feature_enabled;
 pub(crate) fn expand_registered_processor_init(
     hardware: &Hardware,
     item_mod: &ItemMod,
-    rmk_features: &Option<Vec<String>>,
+    rmk_features: &[&str],
 ) -> (TokenStream, Vec<TokenStream>) {
     let mut initializers = TokenStream::new();
     let mut executors = vec![];

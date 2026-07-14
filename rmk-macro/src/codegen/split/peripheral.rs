@@ -108,7 +108,7 @@ fn expand_bind_interrupt_for_split_peripheral(
     chip: &ChipModel,
     hardware: &Hardware,
     peripheral_id: usize,
-    rmk_features: &Option<Vec<String>>,
+    rmk_features: &[&str],
 ) -> TokenStream2 {
     let communication = &hardware.communication;
 
@@ -307,7 +307,7 @@ fn expand_split_peripheral(
     _identity: &Identity,
     hardware: &Hardware,
     item_mod: ItemMod,
-    rmk_features: &Option<Vec<String>>,
+    rmk_features: &[&str],
 ) -> TokenStream2 {
     // Check whether keyboard.toml contains split section
     let split_config = match &hardware.board {

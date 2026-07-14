@@ -20,11 +20,18 @@ cargo_toml = "1"
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 
 [features]
+## Marker features forwarded by rmk for compile-time code generation.
+async_matrix = []
+dfu_lock = []
 ## Enable hardware watchdog code generation
 watchdog = []
 dfu_rp = []
 ## Enable nRF DFU firmware update code generation
 dfu_nrf = []
+rynk = []
+split = []
+storage = []
+vial = []
 
 [lib]
 proc-macro = true

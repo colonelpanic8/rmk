@@ -117,10 +117,10 @@ watchdog = ["rmk-macro/watchdog"]
 host = ["dep:byteorder"]
 
 ## Enable vial support
-vial = ["host"]
+vial = ["host", "rmk-macro/vial"]
 
 ## Enable DFU lock feature — physical key unlock for DFU firmware download
-dfu_lock = ["host_lock"]
+dfu_lock = ["host_lock", "rmk-macro/dfu_lock"]
 
 ## Enable physical key unlock and matrix state tracking — the shared base of the
 ## lock features (`dfu_lock` and `rynk` imply it; combine with `vial` for the
@@ -129,7 +129,7 @@ host_lock = []
 
 ## Enable Rynk protocol support (RMK-native protocol, mutually exclusive with vial).
 ## Includes `host_lock` so the lock gate always has matrix-state tracking.
-rynk = ["host", "host_lock", "rmk-types/rynk"]
+rynk = ["host", "host_lock", "rmk-types/rynk", "rmk-macro/rynk"]
 
 ## Enable bulk transfer endpoints for the Rynk protocol on MCUs with sufficient RAM
 bulk = ["rynk", "rmk-types/bulk"]
@@ -139,6 +139,7 @@ storage = [
     "dep:embedded-storage",
     "dep:embedded-storage-async",
     "dep:embassy-embedded-hal",
+    "rmk-macro/storage",
 ]
 
 ## Enable defmt support
@@ -200,11 +201,12 @@ st7789 = ["lcd_async"]
 st7796 = ["lcd_async"]
 
 ## Enable async matrix scanning
-async_matrix = []
+async_matrix = ["rmk-macro/async_matrix"]
 
 ## Enable split keyboard support.
 split = [
     "trouble-host?/gatt-client-notification-queue-size-4",
+    "rmk-macro/split",
     "rmk-types/split",
 ]
 
