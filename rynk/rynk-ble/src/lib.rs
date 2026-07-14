@@ -171,7 +171,8 @@ impl BleDevice {
     async fn attach(&self, input: Characteristic, output: Characteristic) -> Result<BleTransport, RynkHostError> {
         // Cap writes to the characteristic's capacity.
         let write_chunk = output
-            .max_write_len()
+            .max_write_len_async()
+            .await
             .unwrap_or(BLE_SAFE_WRITE)
             .clamp(BLE_SAFE_WRITE, RYNK_BLE_CHUNK_SIZE);
 
