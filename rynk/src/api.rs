@@ -466,14 +466,14 @@ impl<T: Read + Write> Client<T> {
         self.request::<command::GetBatteryStatus>(&()).await
     }
 
-    /// Read one split peripheral's status by slot. Split BLE keyboards only
-    /// ([`DeviceCapabilities::is_split`] and `ble_enabled`); returns
+    /// Read one split peripheral's status by slot. Split keyboards only
+    /// ([`DeviceCapabilities::is_split`]); returns
     /// [`RynkHostError::Unsupported`] otherwise, without touching the wire.
     pub async fn get_peripheral_status(&mut self, slot: u8) -> Result<PeripheralStatus, RynkHostError> {
-        if !(self.capabilities().is_split && self.capabilities().ble_enabled) {
+        if !self.capabilities().is_split {
             return Err(RynkHostError::Unsupported(
                 Cmd::GetPeripheralStatus,
-                "not a split BLE keyboard",
+                "not a split keyboard",
             ));
         }
         self.request::<command::GetPeripheralStatus>(&slot).await
