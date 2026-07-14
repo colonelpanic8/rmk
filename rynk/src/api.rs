@@ -39,7 +39,8 @@ pub enum IncomingTopic {
 
 impl<T: Read + Write> Client<T> {
     /// Read the next topic push, decoded into a typed [`IncomingTopic`].
-    /// Queued topics are returned first. Cancel-safe.
+    /// Queued topics are returned first. Cancelling this poisons the client:
+    /// drop it and reconnect rather than calling again.
     pub async fn next_event(&mut self) -> Result<IncomingTopic, RynkHostError> {
         let frame = self.next_topic_frame().await?;
         Ok(match TopicEvent::decode(frame.cmd, &frame.payload) {
