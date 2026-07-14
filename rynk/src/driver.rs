@@ -231,9 +231,10 @@ impl<T: Read + Write> Client<T> {
         &self.transport
     }
 
-    /// `false` once the link is dead — drop the client and reconnect.
+    /// `false` once the link is unusable. A cancelled read or write poisons the
+    /// client — this reads `false` immediately, before the next call latches `dead`.
     pub fn is_alive(&self) -> bool {
-        !self.dead
+        !self.dead && !self.send_in_flight && !self.receive_in_flight
     }
 
     /// Topics evicted while [`next_event`](crate::Client::next_event) lagged.
@@ -378,7 +379,6 @@ impl<T: Read + Write> Client<T> {
                 }
             }
 
-            // Commit scratch only after `read` returns for cancel safety.
             let n = match self.transport.read(&mut self.read_scratch[..]).await {
                 Ok(0) => {
                     self.dead = true;
@@ -601,7 +601,7 @@ mod tests {
         let mut c = raw_client(vec![Step::Chunk(header(Cmd::GetWpm.raw(), 0xEE, 100)), Step::Hang]);
         let r1 = timeout(Duration::from_millis(10), c.get_wpm()).await;
         assert!(r1.is_err());
-        assert!(c.is_alive(), "cancellation is detected by the next operation");
+        assert!(!c.is_alive(), "a cancelled read poisons the link");
         let r2 = c.get_wpm().await;
         assert!(matches!(r2, Err(RynkHostError::Disconnected)));
         assert!(!c.is_alive());
@@ -654,10 +654,7 @@ mod tests {
         c.transport.hang_send = true;
         let cancelled = timeout(Duration::from_millis(10), c.get_wpm()).await;
         assert!(cancelled.is_err(), "the hung send must be cancelled by the timeout");
-        assert!(
-            c.is_alive(),
-            "death is detected on the next op, not from the drop itself"
-        );
+        assert!(!c.is_alive(), "a cancelled send poisons the link");
 
         c.transport.hang_send = false;
         let r = c.get_wpm().await;
@@ -724,7 +721,7 @@ mod tests {
         let mut c = raw_client(vec![Step::Hang]);
         let cancelled = timeout(Duration::from_millis(10), c.get_wpm()).await;
         assert!(cancelled.is_err(), "outer timeout cancels request 1 mid-wait");
-        assert!(c.is_alive());
+        assert!(!c.is_alive(), "the cancelled read poisons the link immediately");
         assert!(matches!(c.get_wpm().await, Err(RynkHostError::Disconnected)));
         assert!(!c.is_alive());
     }
@@ -737,6 +734,7 @@ mod tests {
         ]);
         let cancelled = timeout(Duration::from_millis(10), c.next_event()).await;
         assert!(cancelled.is_err());
+        assert!(!c.is_alive(), "a cancelled next_event poisons the link");
         assert!(matches!(c.get_wpm().await, Err(RynkHostError::Disconnected)));
         assert!(!c.is_alive());
     }
