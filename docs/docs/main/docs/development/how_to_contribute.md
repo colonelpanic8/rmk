@@ -23,7 +23,7 @@ There are four crates in the RMK project: `rmk`, `rmk-config`, `rmk-types` and `
 - `rmk-config`: Contains the configuration data structures and parsing logic shared between `rmk-macro` and `rmk`, defining how keyboard configurations are represented in memory.
 - `rmk-types`: Provides common type definitions used across all RMK crates, such as keyboard actions, key events, and other shared data structures.
 
-So, if you want to contribute new features to RMK, look into the `rmk` core crate. If you want to add support for a new chip, both `rmk` and `rmk-macro` should be updated so that users can use `keyboard.toml` to configure keyboards with your new chip. If you want to add new configurations, look into both `rmk-macro/config` and `rmk/config`.
+So, if you want to contribute new features to RMK, look into the `rmk` core crate. If you want to add support for a new chip, both `rmk` and `rmk-macro` should be updated so that users can use `keyboard.toml` to configure keyboards with your new chip. If you want to add a new configuration or capability — or wonder when to gate code on `rmk_*` cfgs vs Cargo features — read [The capability system](./capability_system) first.
 
 ### RMK Core
 
