@@ -331,8 +331,16 @@ impl Capabilities {
         // `watchdog` is exempt: it is a default feature, and the toml must be
         // able to disable it without `default-features = false`.
         let contradictions = [
-            ("storage", caps.storage, "set `enabled = true` in [storage]"),
-            ("vial", caps.vial, "set `vial_enabled = true` in [host]"),
+            (
+                "storage",
+                caps.storage,
+                "set `enabled = true` in [storage]; storage is a default feature, so dropping it needs `default-features = false`",
+            ),
+            (
+                "vial",
+                caps.vial,
+                "set `vial_enabled = true` in [host]; vial is a default feature, so dropping it needs `default-features = false`",
+            ),
             ("rynk", caps.rynk, "set `rynk_enabled = true` in [host]"),
             ("split", caps.split, "add a [split] section"),
             (
@@ -403,7 +411,8 @@ impl Capabilities {
                     .to_string(),
             );
         }
-        let missing_display: HashSet<&'static str> = facts
+        // BTreeSet keeps multi-family error output deterministic.
+        let missing_display: std::collections::BTreeSet<&'static str> = facts
             .display_drivers
             .iter()
             .map(display_family_feature)
