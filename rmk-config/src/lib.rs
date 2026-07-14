@@ -117,8 +117,8 @@ pub struct KeyboardTomlConfig {
     #[serde(default)]
     pub(crate) rmk: RmkConstantsConfig,
     /// Event channel configuration
-    /// Default values are loaded from event_default.toml in new_from_toml_path()
-    /// build.rs also loads event defaults via new_from_toml_path_with_event_defaults()
+    /// Default values are loaded from event_default.toml by all loaders
+    /// (new_from_toml_path for the macro, load_for_build for build scripts)
     #[serde(default)]
     pub(crate) event: EventConfig,
     /// Whether the user explicitly set a [storage] section in keyboard.toml.
@@ -127,11 +127,14 @@ pub struct KeyboardTomlConfig {
 }
 
 impl KeyboardTomlConfig {
-    fn parse_from_toml_path<P: AsRef<Path>>(config_toml_path: P, chip_default_config: Option<&str>) -> Self {
+    fn try_parse_from_toml_path<P: AsRef<Path>>(
+        config_toml_path: P,
+        chip_default_config: Option<&str>,
+    ) -> Result<Self, String> {
         let path = config_toml_path.as_ref();
         let path_str = path
             .to_str()
-            .unwrap_or_else(|| panic!("Config path is not valid UTF-8: {:?}", path));
+            .ok_or_else(|| format!("Config path is not valid UTF-8: {:?}", path))?;
 
         let mut builder = Config::builder().add_source(File::from_str(EVENT_DEFAULT_CONFIG, FileFormat::Toml));
         if let Some(default_config) = chip_default_config {
@@ -140,23 +143,38 @@ impl KeyboardTomlConfig {
         builder
             .add_source(File::with_name(path_str))
             .build()
-            .unwrap_or_else(|e| panic!("Parse {:?} error: {}", path, e))
+            .map_err(|e| format!("Parse {:?} error: {}", path, e))?
             .try_deserialize()
-            .unwrap_or_else(|e| panic!("Deserialize {:?} error: {}", path, e))
+            .map_err(|e| format!("Deserialize {:?} error: {}", path, e))
     }
 
-    /// Load keyboard.toml with event defaults only.
-    ///
-    /// This is used in build.rs where we only need [rmk] and [event] constants,
-    /// and should not require `[keyboard.board]`/`[keyboard.chip]`.
-    pub fn new_from_toml_path_with_event_defaults<P: AsRef<Path>>(config_toml_path: P) -> Self {
-        let mut config = Self::parse_from_toml_path(config_toml_path, None);
-        config.storage_user_set = config
+    fn parse_from_toml_path<P: AsRef<Path>>(config_toml_path: P, chip_default_config: Option<&str>) -> Self {
+        Self::try_parse_from_toml_path(config_toml_path, chip_default_config).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// Load for build scripts. Chip defaults are merged when `[keyboard]` is
+    /// present (capability resolution needs them); a constants-only toml
+    /// without `[keyboard]` loads with event defaults alone. Errors return to
+    /// the caller so rust-analyzer runs can degrade instead of failing.
+    pub fn load_for_build<P: AsRef<Path>>(config_toml_path: P) -> Result<Self, String> {
+        let path = config_toml_path.as_ref();
+        let user_config = Self::try_parse_from_toml_path(path, None)?;
+        let storage_user_set = user_config
             .storage
             .as_ref()
             .is_some_and(|s| s.start_addr.is_some() || s.num_sectors.is_some());
+        let mut config = if user_config.keyboard.is_some() {
+            let default_config_str = user_config
+                .get_chip_model()
+                .and_then(|chip| chip.get_default_config_str())
+                .map_err(|e| format!("keyboard.toml error: {e}"))?;
+            Self::try_parse_from_toml_path(path, Some(default_config_str))?
+        } else {
+            user_config
+        };
+        config.storage_user_set = storage_user_set;
         config.auto_calculate_parameters();
-        config
+        Ok(config)
     }
 
     pub fn new_from_toml_path<P: AsRef<Path>>(config_toml_path: P) -> Self {
@@ -542,6 +560,22 @@ pub(crate) struct KeyboardInfo {
     pub chip: Option<String>,
     /// enable usb
     pub usb_enable: Option<bool>,
+    /// Use async matrix scanning (requires input pins with wait support)
+    pub async_matrix: Option<bool>,
+    /// Enable the hardware watchdog (default: true)
+    pub watchdog: Option<bool>,
+    /// Enable Plover HID stenography support
+    pub steno: Option<bool>,
+    /// Bootloader integration (bootloader jump key handling)
+    pub bootloader: Option<BootloaderType>,
+}
+
+/// Bootloaders with dedicated jump/DFU integration
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BootloaderType {
+    Adafruit,
+    ZsaVoyager,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -579,7 +613,7 @@ pub struct MatrixConfig {
 }
 
 /// Config for storage
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StorageConfig {
     /// Start address of local storage, MUST BE start of a sector.
@@ -595,12 +629,30 @@ pub(crate) struct StorageConfig {
     pub clear_layout: Option<bool>,
 }
 
+// Storage defaults to enabled whether the [storage] section is present or not;
+// a derived Default would silently disagree with the serde default.
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            start_addr: None,
+            num_sectors: None,
+            enabled: true,
+            clear_storage: None,
+            clear_layout: None,
+        }
+    }
+}
+
 /// Config for DFU partition layout (embassy-boot).
 ///
 /// These values must match the bootloader's `memory.x` / linker script.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DfuTomlConfig {
+    /// Enable DFU firmware update support. Chip default configs ship a [dfu]
+    /// partition layout, so section presence cannot mean activation.
+    #[serde(default)]
+    pub enabled: bool,
     /// Offset of the boot state partition
     pub state_offset: Option<u32>,
     /// Size of the boot state partition
@@ -1462,7 +1514,7 @@ subs = 2
         ));
         std::fs::write(&path, user_toml).unwrap();
 
-        let config = KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path);
+        let config = KeyboardTomlConfig::load_for_build(&path).unwrap();
         std::fs::remove_file(path).unwrap();
 
         assert_eq!(config.event.layer_change.channel_size, 1);

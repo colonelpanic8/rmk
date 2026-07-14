@@ -1,7 +1,10 @@
+#[path = "./build_common.rs"]
+mod common;
+
 use std::path::Path;
 use std::{env, fs};
 
-use rmk_config::resolved::BuildConstants;
+use rmk_config::resolved::{ActiveFeatures, BuildConstants, Capabilities};
 use rmk_config::{KeyboardTomlConfig, protocol_limits};
 
 fn main() {
@@ -9,30 +12,66 @@ fn main() {
     println!("cargo:rerun-if-env-changed=KEYBOARD_TOML_PATH");
     println!("cargo:rerun-if-env-changed=VIAL_JSON_PATH");
 
-    // Build-time constants only need [rmk] + [event], so load event defaults
-    // without requiring [keyboard.board]/[keyboard.chip].
-    let config: KeyboardTomlConfig = if let Ok(toml_path) = std::env::var("KEYBOARD_TOML_PATH") {
-        println!("cargo:rerun-if-changed={toml_path}");
-        KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&toml_path)
-    } else {
-        toml::from_str("").expect("Failed to parse empty keyboard config\n")
+    let mut cfgs = common::CfgSet::new();
+    common::set_target_cfgs(&mut cfgs);
+
+    // rust-analyzer runs must degrade to warnings instead of failing the build
+    // script while the user edits keyboard.toml.
+    let ra = env::var("RUSTC_WRAPPER").is_ok_and(|w| w.contains("rust-analyzer"));
+
+    let config = match env::var("KEYBOARD_TOML_PATH") {
+        Ok(toml_path) => {
+            println!("cargo:rerun-if-changed={toml_path}");
+            match KeyboardTomlConfig::load_for_build(&toml_path) {
+                Ok(config) => Some(config),
+                Err(e) if ra => {
+                    println!("cargo:warning=RMK: {e}");
+                    None
+                }
+                Err(e) => panic!("\n\n❌ RMK: failed to load {toml_path}:\n{e}\n"),
+            }
+        }
+        Err(_) => None,
     };
 
-    // Enabled features drive constant resolution (notably event subscriber counts).
-    let active_features = collect_active_features();
-    let feature_refs: Vec<&str> = active_features.iter().map(|s| s.as_str()).collect();
+    // Forwarded resolution: rmk-types only sees the features rmk forwards, so
+    // full feature validation happens in rmk/build.rs, not here.
+    let features = ActiveFeatures::from_cargo_env();
+    let caps = match Capabilities::resolve_forwarded(config.as_ref(), &features) {
+        Ok(caps) => caps,
+        Err(errs) if ra => {
+            for e in &errs {
+                println!("cargo:warning=RMK config: {e}");
+            }
+            Capabilities::resolve_forwarded(None, &features).unwrap_or_default()
+        }
+        Err(errs) => panic!("\n\n❌ RMK configuration errors:\n  - {}\n", errs.join("\n  - ")),
+    };
 
-    let bc = config
-        .build_constants(&feature_refs)
-        .unwrap_or_else(|err| panic!("Failed to resolve build constants: {err}"));
-    let output = generate_constants(&bc);
+    for (name, on) in caps.cfgs() {
+        cfgs.set(name, on);
+    }
+
+    let config = config.unwrap_or_else(|| toml::from_str("").expect("Failed to parse empty keyboard config\n"));
+    let bc = match config.build_constants(&caps) {
+        Ok(bc) => bc,
+        Err(e) if ra => {
+            println!("cargo:warning=RMK constants: {e}");
+            let defaults: KeyboardTomlConfig = toml::from_str("").expect("Failed to parse empty keyboard config\n");
+            defaults
+                .build_constants(&caps)
+                .expect("default build constants are always valid")
+        }
+        Err(e) => panic!("Failed to resolve build constants: {e}"),
+    };
+    let output = generate_constants(&bc, &caps);
 
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("constants.rs");
     fs::write(&dest_path, output).expect("Failed to write constants.rs file");
 }
 
-fn generate_constants(bc: &BuildConstants) -> String {
+fn generate_constants(bc: &BuildConstants, caps: &Capabilities) -> String {
     let mut lines = Vec::new();
 
     // Direct constants
@@ -82,7 +121,6 @@ fn generate_constants(bc: &BuildConstants) -> String {
 
     // Host uses protocol ceilings; firmware uses keyboard.toml/default capacities.
     let is_host = env::var("CARGO_FEATURE_HOST").is_ok();
-    let is_bulk = env::var("CARGO_FEATURE_BULK").is_ok();
 
     // Protocol ceilings — always emitted so rmk-types source code can reference them.
     lines.push(format!(
@@ -121,7 +159,7 @@ fn generate_constants(bc: &BuildConstants) -> String {
             bc.protocol_macro_chunk_size
         ));
         // Firmware Vec sizes must not exceed protocol ceilings (rynk builds only).
-        if env::var("CARGO_FEATURE_RYNK").is_ok() {
+        if caps.rynk {
             lines.push("const _: () = assert!(COMBO_SIZE <= MAX_COMBO_SIZE, \"firmware COMBO_SIZE exceeds protocol ceiling MAX_COMBO_SIZE\");".to_string());
             lines.push("const _: () = assert!(MORSE_SIZE <= MAX_MORSE_SIZE, \"firmware MORSE_SIZE exceeds protocol ceiling MAX_MORSE_SIZE\");".to_string());
             lines.push("const _: () = assert!(MACRO_DATA_SIZE <= MAX_MACRO_DATA_SIZE, \"firmware MACRO_DATA_SIZE exceeds protocol ceiling MAX_MACRO_DATA_SIZE\");".to_string());
@@ -129,7 +167,7 @@ fn generate_constants(bc: &BuildConstants) -> String {
     }
 
     // Bulk counts derive from the buffer and must hold at least one element.
-    if is_bulk {
+    if caps.bulk {
         lines.push(
             "pub const BULK_SIZE: usize = \
              crate::protocol::rynk::bulk_size_for_buffer(RYNK_BUFFER_SIZE);"
@@ -145,7 +183,7 @@ fn generate_constants(bc: &BuildConstants) -> String {
     }
 
     // Bulk defaults higher because its counts scale with the buffer.
-    if env::var("CARGO_FEATURE_RYNK").is_ok() {
+    if caps.rynk {
         lines.push(format!("pub const RYNK_BUFFER_SIZE: usize = {};", bc.rynk_buffer_size));
     }
 
@@ -160,8 +198,8 @@ fn generate_constants(bc: &BuildConstants) -> String {
         lines.push(format!("pub const {upper}_EVENT_SUB_SIZE: usize = {};", ev.subs));
     }
 
-    // Passkey (feature-gated)
-    if env::var("CARGO_FEATURE_PASSKEY_ENTRY").is_ok() {
+    // Passkey (capability-gated)
+    if caps.passkey_entry {
         if let Some(passkey) = &bc.passkey {
             lines.push(format!("pub const PASSKEY_ENTRY_ENABLED: bool = {};", passkey.enabled));
             lines.push(format!(
@@ -169,7 +207,7 @@ fn generate_constants(bc: &BuildConstants) -> String {
                 passkey.timeout_secs
             ));
         } else {
-            // No [ble] section but passkey_entry feature enabled: use defaults
+            // No [ble] section but passkey_entry active: use defaults
             lines.push("pub const PASSKEY_ENTRY_ENABLED: bool = false;".to_string());
             lines.push(format!(
                 "pub const PASSKEY_ENTRY_TIMEOUT_SECS: u32 = {};",
@@ -179,14 +217,4 @@ fn generate_constants(bc: &BuildConstants) -> String {
     }
 
     lines.join("\n")
-}
-
-/// Active Cargo feature flags, lowercased to match `subscriber_default.toml`.
-///
-/// Cargo exposes each enabled feature as `CARGO_FEATURE_<NAME>` (uppercased,
-/// `-` → `_`); we reverse that.
-fn collect_active_features() -> Vec<String> {
-    env::vars()
-        .filter_map(|(key, _)| key.strip_prefix("CARGO_FEATURE_").map(|f| f.to_lowercase()))
-        .collect()
 }

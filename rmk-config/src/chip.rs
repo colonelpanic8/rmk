@@ -16,6 +16,12 @@ pub struct ChipModel {
     pub board: Option<String>,
 }
 
+/// 480 Mbps-capable USB chips; drives the 512-byte bulk packet cfg.
+/// Only the nRF54LM20 today — extend as high-speed chips gain toml support.
+pub fn usb_high_speed(chip: &str) -> bool {
+    chip.starts_with("nrf54lm20")
+}
+
 impl ChipModel {
     pub fn get_default_config_str(&self) -> Result<&'static str, String> {
         if let Some(board) = self.board.clone() {

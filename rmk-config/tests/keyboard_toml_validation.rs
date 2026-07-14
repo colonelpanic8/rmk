@@ -177,25 +177,18 @@ fn unknown_keys_are_rejected() {
         ),
     ];
 
-    std::panic::set_hook(Box::new(|_| {}));
     for (case, toml, typo) in cases {
         let path = std::env::temp_dir().join(format!("rmk-deny-{}-{typo}.toml", std::process::id()));
         std::fs::write(&path, toml).unwrap();
-        let result = std::panic::catch_unwind(|| KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path));
+        let result = KeyboardTomlConfig::load_for_build(&path);
         std::fs::remove_file(&path).ok();
 
-        let payload = result.err().unwrap_or_else(|| panic!("{case}: accepted silently"));
-        let msg = payload
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| payload.downcast_ref::<&str>().copied())
-            .unwrap_or("<panic>");
+        let msg = result.err().unwrap_or_else(|| panic!("{case}: accepted silently"));
         assert!(
             msg.contains("unknown field") && msg.contains(typo),
             "{case}: error should name `{typo}`, got: {msg}"
         );
     }
-    let _ = std::panic::take_hook();
 }
 
 #[test]

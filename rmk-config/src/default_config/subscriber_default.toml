@@ -1,11 +1,11 @@
-# Feature-based event subscriber declarations.
+# Capability-based event subscriber declarations.
 #
-# When all `features` listed in an entry are enabled (checked via
-# CARGO_FEATURE_* env vars at build time), each event's `subs` is
-# bumped by the specified amount.
+# When all `capabilities` listed in an entry are active (resolved from
+# keyboard.toml and cargo features at build time), each event's `subs`
+# is bumped by the specified amount.
 #
 # This keeps event_default.toml at base counts and avoids wasting
-# static memory when a feature is disabled.
+# static memory when a capability is disabled.
 #
 # Format per event: { name = "event_name", count = N }
 # `count` defaults to 1 if omitted.
@@ -13,7 +13,7 @@
 # --- Display-gated internal subscribers ---
 
 [[subscriber]]
-features = ["display"]
+capabilities = ["display"]
 events = [
     # display/mod.rs: DisplayProcessor subscribes to these events
     { name = "wpm_update" },
@@ -25,14 +25,14 @@ events = [
 ]
 
 [[subscriber]]
-features = ["display", "_ble"]
+capabilities = ["display", "ble"]
 events = [
     # display/mod.rs: DisplayProcessor subscribes when _ble is enabled
     { name = "connection_status_change" },
 ]
 
 [[subscriber]]
-features = ["display", "split"]
+capabilities = ["display", "split"]
 events = [
     # split/driver.rs: each PeripheralManager subscribes when display is enabled
     # (gated on #[cfg(feature = "display")] in driver.rs)
@@ -44,7 +44,7 @@ events = [
 # --- BLE-gated internal subscribers ---
 
 [[subscriber]]
-features = ["_ble"]
+capabilities = ["ble"]
 events = [
     # ble/battery_service.rs: BatteryStatusEvent::subscriber()
     # processor/builtin/battery_led.rs: subscribe = [BatteryStatusEvent] (user-optional but _ble-gated)
@@ -54,7 +54,7 @@ events = [
 # Rynk sessions subscribe to these topics; USB+BLE boards need two slots.
 
 [[subscriber]]
-features = ["rynk"]
+capabilities = ["rynk"]
 events = [
     { name = "layer_change" },
     { name = "wpm_update" },
@@ -64,7 +64,7 @@ events = [
 ]
 
 [[subscriber]]
-features = ["rynk", "_ble"]
+capabilities = ["rynk", "ble"]
 events = [
     # battery_status is only subscribed under `_ble`; needs one slot per
     # concurrent session (USB + BLE = 2).
@@ -80,7 +80,7 @@ events = [
 # --- Split-gated internal subscribers ---
 
 [[subscriber]]
-features = ["split"]
+capabilities = ["split"]
 events = [
     # split/peripheral.rs: KeyboardEvent::subscriber()
     { name = "keyboard" },
@@ -99,7 +99,7 @@ events = [
 # --- Split + BLE-gated internal subscribers ---
 
 [[subscriber]]
-features = ["split", "_ble"]
+capabilities = ["split", "ble"]
 events = [
     # split/ble/peripheral.rs: KeyboardEvent::subscriber() (temporary, on timeout)
     { name = "keyboard" },

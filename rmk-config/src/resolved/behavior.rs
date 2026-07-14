@@ -311,7 +311,7 @@ hold_timeout = "200ms"
         let path = std::env::temp_dir().join(format!("rmk-config-flow-tap-{}-{}.toml", std::process::id(), unique));
 
         fs::write(&path, toml).unwrap();
-        let config = KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path);
+        let config = KeyboardTomlConfig::load_for_build(&path).unwrap();
         let _ = fs::remove_file(&path);
 
         let behavior = config.behavior().unwrap();

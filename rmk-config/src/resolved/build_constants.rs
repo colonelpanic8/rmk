@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+use crate::resolved::Capabilities;
 use crate::{DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
 
 const SUBSCRIBER_DEFAULT_CONFIG: &str = include_str!("../default_config/subscriber_default.toml");
@@ -10,10 +11,10 @@ struct SubscriberConfig {
     subscriber: Vec<SubscriberEntry>,
 }
 
-/// A single entry: bump `subs` for each listed event when all `features` are enabled.
+/// A single entry: bump `subs` for each listed event when all `capabilities` are active.
 #[derive(Deserialize)]
 struct SubscriberEntry {
-    features: Vec<String>,
+    capabilities: Vec<String>,
     events: Vec<SubscriberEventEntry>,
 }
 
@@ -68,14 +69,13 @@ pub struct Passkey {
 impl crate::KeyboardTomlConfig {
     /// Build compile-time constants from the configuration.
     ///
-    /// `active_features` contains feature names enabled on the
-    /// **downstream crate** (e.g. `["split", "_ble"]`). These are matched
-    /// against `subscriber_default.toml` to auto-bump event subscriber counts.
-    pub fn build_constants(&self, active_features: &[&str]) -> Result<BuildConstants, String> {
+    /// Active capabilities are matched against `subscriber_default.toml` to
+    /// auto-bump event subscriber counts.
+    pub fn build_constants(&self, caps: &Capabilities) -> Result<BuildConstants, String> {
         let rmk = &self.rmk;
 
-        // Fix split_peripherals_num: when split feature is enabled, ensure at least 1
-        let split_peripherals_num = if active_features.contains(&"split") && rmk.split_peripherals_num < 1 {
+        // Fix split_peripherals_num: when split is active, ensure at least 1
+        let split_peripherals_num = if caps.split && rmk.split_peripherals_num < 1 {
             1
         } else {
             rmk.split_peripherals_num
@@ -115,12 +115,12 @@ impl crate::KeyboardTomlConfig {
             action,
         );
 
-        // Auto-bump subscriber counts based on enabled feature flags.
+        // Auto-bump subscriber counts based on active capabilities.
         // Declarations live in subscriber_default.toml.
-        apply_feature_subscriber_bumps(&mut events, active_features);
+        apply_capability_subscriber_bumps(&mut events, &caps.active_names());
 
         // Only validate passkey settings when the build will emit passkey constants.
-        let passkey = if active_features.contains(&"passkey_entry") {
+        let passkey = if caps.passkey_entry {
             self.ble.as_ref().map(resolve_passkey_enabled).transpose()?
         } else {
             None
@@ -198,15 +198,13 @@ fn validate_u16_capability(name: &str, value: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Bump event subscriber counts based on feature flags declared in `subscriber_default.toml`.
-///
-/// `active_features` contains lowercase feature names (e.g. `"split"`, `"_ble"`).
-fn apply_feature_subscriber_bumps(events: &mut [EventChannel], active_features: &[&str]) {
+/// Bump event subscriber counts based on capabilities declared in `subscriber_default.toml`.
+fn apply_capability_subscriber_bumps(events: &mut [EventChannel], active_names: &[&str]) {
     let sub_config: SubscriberConfig =
         toml::from_str(SUBSCRIBER_DEFAULT_CONFIG).expect("Failed to parse subscriber_default.toml");
 
     for entry in &sub_config.subscriber {
-        let all_enabled = entry.features.iter().all(|f| active_features.contains(&f.as_str()));
+        let all_enabled = entry.capabilities.iter().all(|c| active_names.contains(&c.as_str()));
         if all_enabled {
             for sub_event in &entry.events {
                 if let Some(event) = events.iter_mut().find(|e| e.name == sub_event.name) {
@@ -242,7 +240,14 @@ mod tests {
     #[test]
     fn reserves_led_subscribers_for_display_split_and_dual_rynk_sessions() {
         let config: KeyboardTomlConfig = toml::from_str("").unwrap();
-        let constants = config.build_constants(&["display", "split", "rynk", "_ble"]).unwrap();
+        let caps = crate::resolved::Capabilities {
+            display: true,
+            split: true,
+            rynk: true,
+            ble: true,
+            ..Default::default()
+        };
+        let constants = config.build_constants(&caps).unwrap();
         let led_indicator = constants
             .events
             .iter()
