@@ -36,7 +36,7 @@ pub struct LedIndicator {
 }
 
 // u8 on the wire (postcard); named bools on serde-wasm-bindgen / serde_json (TS).
-crate::bitfield_named_serde!(LedIndicator, {
+crate::bitfield_named_serde!(LedIndicator, "LedIndicator", {
     num_lock = with_num_lock,
     caps_lock = with_caps_lock,
     scroll_lock = with_scroll_lock,

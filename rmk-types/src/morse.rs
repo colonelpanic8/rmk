@@ -275,7 +275,7 @@ const _: () = {
     #[::wasm_bindgen::prelude::wasm_bindgen(typescript_custom_section)]
     const TS_APPEND_CONTENT: &'static str = "export type MorseProfile = { unilateral_tap: boolean | undefined; enable_flow_tap: boolean | undefined; mode: MorseMode | undefined; hold_timeout_ms: number | undefined; gap_timeout_ms: number | undefined; };";
 };
-crate::wasm_object_abi!(MorseProfile);
+crate::wasm_object_abi!(MorseProfile, "MorseProfile");
 
 // ---------------------------------------------------------------------------
 // MorsePattern & Morse — pattern encoding and key definition
