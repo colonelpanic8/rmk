@@ -5,12 +5,52 @@ use std::path::Path;
 use std::process::Command;
 use std::{env, fs};
 
+use rmk_config::KeyboardTomlConfig;
+use rmk_config::resolved::{ActiveFeatures, Capabilities};
+
 fn main() {
     // Set the compilation target configuration
     let mut cfgs = common::CfgSet::new();
     common::set_target_cfgs(&mut cfgs);
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=KEYBOARD_TOML_PATH");
+
+    // rust-analyzer runs must degrade to warnings instead of failing the build
+    // script while the user edits keyboard.toml.
+    let ra = env::var("RUSTC_WRAPPER").is_ok_and(|w| w.contains("rust-analyzer"));
+
+    let config = match env::var("KEYBOARD_TOML_PATH") {
+        Ok(toml_path) => {
+            println!("cargo:rerun-if-changed={toml_path}");
+            match KeyboardTomlConfig::load_for_build(&toml_path) {
+                Ok(config) => Some(config),
+                Err(e) if ra => {
+                    println!("cargo:warning=RMK: {e}");
+                    None
+                }
+                Err(e) => panic!("\n\n❌ RMK: failed to load {toml_path}:\n{e}\n"),
+            }
+        }
+        // No toml (pure-Rust users, tests, docs.rs): features activate capabilities.
+        Err(_) => None,
+    };
+
+    let features = ActiveFeatures::from_cargo_env();
+    let caps = match Capabilities::resolve(config.as_ref(), &features) {
+        Ok(caps) => caps,
+        Err(errs) if ra => {
+            for e in &errs {
+                println!("cargo:warning=RMK config: {e}");
+            }
+            Capabilities::resolve(None, &features).unwrap_or_default()
+        }
+        Err(errs) => panic!("\n\n❌ RMK configuration errors:\n  - {}\n", errs.join("\n  - ")),
+    };
+
+    for (name, on) in caps.cfgs() {
+        cfgs.set(name, on);
+    }
 
     // Compute build hash and write to constants.rs
     let build_hash = compute_build_hash();
