@@ -33,7 +33,7 @@
 
 use embassy_time::Timer;
 use embedded_hal::digital::{InputPin, OutputPin};
-#[cfg(feature = "async_matrix")]
+#[cfg(rmk_async_matrix)]
 use embedded_hal_async::digital::Wait;
 use embedded_hal_async::spi::SpiDevice;
 use rmk_macro::input_device;
@@ -50,8 +50,8 @@ const SR_COLUMN_SETTLE_US: u64 = 40;
 pub struct Hc595Matrix<
     SPI: SpiDevice<u8>,
     LATCH: OutputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
     const COL: usize,
@@ -64,15 +64,15 @@ pub struct Hc595Matrix<
     debouncer: D,
     key_states: [[KeyState; ROW]; COL],
     scan_pos: (usize, usize),
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     rescan_needed: bool,
 }
 
 impl<
     SPI: SpiDevice<u8>,
     LATCH: OutputPin,
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
     const COL: usize,
@@ -95,7 +95,7 @@ impl<
             debouncer,
             key_states: [[KeyState::new(); ROW]; COL],
             scan_pos: (0, 0),
-            #[cfg(feature = "async_matrix")]
+            #[cfg(rmk_async_matrix)]
             rescan_needed: false,
         };
         matrix.clear_columns().await;
@@ -148,7 +148,7 @@ impl<
                     if let DebounceState::Debounced = debounce_state {
                         self.key_states[col_idx][row_idx].toggle_pressed();
                         self.scan_pos = (col_idx, row_idx);
-                        #[cfg(feature = "async_matrix")]
+                        #[cfg(rmk_async_matrix)]
                         {
                             self.rescan_needed = true;
                         }
@@ -160,7 +160,7 @@ impl<
                         );
                     }
 
-                    #[cfg(feature = "async_matrix")]
+                    #[cfg(rmk_async_matrix)]
                     if self.key_states[col_idx][row_idx].pressed {
                         self.rescan_needed = true;
                     }
@@ -169,7 +169,7 @@ impl<
 
             self.clear_columns().await;
 
-            #[cfg(feature = "async_matrix")]
+            #[cfg(rmk_async_matrix)]
             {
                 if !self.rescan_needed {
                     self.wait_for_key().await;
@@ -187,8 +187,8 @@ impl<
 impl<
     SPI: SpiDevice<u8>,
     LATCH: OutputPin,
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
     const COL: usize,
@@ -196,7 +196,7 @@ impl<
     const COL_OFFSET: usize,
 > MatrixTrait<ROW, COL> for Hc595Matrix<SPI, LATCH, In, D, ROW, COL, ROW_OFFSET, COL_OFFSET>
 {
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     async fn wait_for_key(&mut self) {
         self.clear_columns().await;
         Timer::after_millis(1).await;

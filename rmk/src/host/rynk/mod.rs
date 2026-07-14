@@ -99,7 +99,7 @@ impl<'a> RynkService<'a> {
         match cmd {
             Cmd::BootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => true,
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             Cmd::ClearBleProfile => true,
             Cmd::SetKeyAction
             | Cmd::SetDefaultLayer
@@ -109,7 +109,7 @@ impl<'a> RynkService<'a> {
             | Cmd::SetMorse
             | Cmd::SetFork
             | Cmd::SetBehaviorConfig => self.write_requires_unlock,
-            #[cfg(feature = "bulk")]
+            #[cfg(rmk_bulk)]
             Cmd::SetKeymapBulk | Cmd::SetComboBulk | Cmd::SetMorseBulk => self.write_requires_unlock,
             _ => false,
         }
@@ -144,9 +144,9 @@ impl<'a> RynkService<'a> {
             Cmd::SetDefaultLayer => Handle::<command::SetDefaultLayer>::handle_message(self, msg).await,
             Cmd::GetEncoderAction => Handle::<command::GetEncoderAction>::handle_message(self, msg).await,
             Cmd::SetEncoderAction => Handle::<command::SetEncoderAction>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
+            #[cfg(rmk_bulk)]
             Cmd::GetKeymapBulk => Handle::<command::GetKeymapBulk>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
+            #[cfg(rmk_bulk)]
             Cmd::SetKeymapBulk => Handle::<command::SetKeymapBulk>::handle_message(self, msg).await,
 
             Cmd::GetMacro => Handle::<command::GetMacro>::handle_message(self, msg).await,
@@ -154,16 +154,16 @@ impl<'a> RynkService<'a> {
 
             Cmd::GetCombo => Handle::<command::GetCombo>::handle_message(self, msg).await,
             Cmd::SetCombo => Handle::<command::SetCombo>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
+            #[cfg(rmk_bulk)]
             Cmd::GetComboBulk => Handle::<command::GetComboBulk>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
+            #[cfg(rmk_bulk)]
             Cmd::SetComboBulk => Handle::<command::SetComboBulk>::handle_message(self, msg).await,
 
             Cmd::GetMorse => Handle::<command::GetMorse>::handle_message(self, msg).await,
             Cmd::SetMorse => Handle::<command::SetMorse>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
+            #[cfg(rmk_bulk)]
             Cmd::GetMorseBulk => Handle::<command::GetMorseBulk>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
+            #[cfg(rmk_bulk)]
             Cmd::SetMorseBulk => Handle::<command::SetMorseBulk>::handle_message(self, msg).await,
 
             Cmd::GetFork => Handle::<command::GetFork>::handle_message(self, msg).await,
@@ -174,18 +174,18 @@ impl<'a> RynkService<'a> {
 
             Cmd::GetConnectionType => Handle::<command::GetConnectionType>::handle_message(self, msg).await,
             Cmd::GetConnectionStatus => Handle::<command::GetConnectionStatus>::handle_message(self, msg).await,
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             Cmd::GetBleStatus => Handle::<command::GetBleStatus>::handle_message(self, msg).await,
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             Cmd::SwitchBleProfile => Handle::<command::SwitchBleProfile>::handle_message(self, msg).await,
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             Cmd::ClearBleProfile => Handle::<command::ClearBleProfile>::handle_message(self, msg).await,
 
             Cmd::GetCurrentLayer => Handle::<command::GetCurrentLayer>::handle_message(self, msg).await,
             Cmd::GetMatrixState => Handle::<command::GetMatrixState>::handle_message(self, msg).await,
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             Cmd::GetBatteryStatus => Handle::<command::GetBatteryStatus>::handle_message(self, msg).await,
-            #[cfg(feature = "split")]
+            #[cfg(rmk_split)]
             Cmd::GetPeripheralStatus => Handle::<command::GetPeripheralStatus>::handle_message(self, msg).await,
             Cmd::GetWpm => Handle::<command::GetWpm>::handle_message(self, msg).await,
             Cmd::GetSleepState => Handle::<command::GetSleepState>::handle_message(self, msg).await,

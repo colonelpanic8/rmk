@@ -1,33 +1,33 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(feature = "passkey_entry")]
+#[cfg(rmk_passkey_entry)]
 use embassy_futures::select::{Either, select};
 use embassy_sync::signal::Signal;
-#[cfg(feature = "passkey_entry")]
+#[cfg(rmk_passkey_entry)]
 use embassy_time::{Duration, Instant, with_deadline};
 use rmk_types::keycode::HidKeyCode;
-#[cfg(feature = "passkey_entry")]
+#[cfg(rmk_passkey_entry)]
 use trouble_host::prelude::{DefaultPacketPool, GattConnection, GattConnectionEvent};
 
 #[doc(hidden)]
 pub fn passkey_entry_enabled() -> bool {
-    #[cfg(feature = "passkey_entry")]
+    #[cfg(rmk_passkey_entry)]
     {
         crate::PASSKEY_ENTRY_ENABLED
     }
-    #[cfg(not(feature = "passkey_entry"))]
+    #[cfg(not(rmk_passkey_entry))]
     {
         false
     }
 }
 
-#[cfg(feature = "passkey_entry")]
+#[cfg(rmk_passkey_entry)]
 pub(crate) struct PasskeyInputState {
     pub(crate) deadline: Option<Instant>,
     cleanup: Option<PasskeyCleanupGuard>,
 }
 
-#[cfg(feature = "passkey_entry")]
+#[cfg(rmk_passkey_entry)]
 impl PasskeyInputState {
     pub(crate) const fn new() -> Self {
         Self {
@@ -49,7 +49,7 @@ impl PasskeyInputState {
     }
 }
 
-#[cfg(feature = "passkey_entry")]
+#[cfg(rmk_passkey_entry)]
 pub(crate) async fn next_gatt_event<'a, 'b>(
     conn: &GattConnection<'a, 'b, DefaultPacketPool>,
     passkey_state: &mut PasskeyInputState,

@@ -71,14 +71,14 @@ pub const ICON_SIZE: u32 = 8;
 /// .##..###.
 /// ..#####..
 /// ```
-#[cfg_attr(not(feature = "_ble"), allow(dead_code))]
+#[cfg_attr(not(rmk_ble), allow(dead_code))]
 pub const BT_ICON: [u8; 28] = [
     0x3E, 0x00, 0x67, 0x00, 0xE3, 0x80, 0xE9, 0x80, 0x8C, 0x80, 0xC9, 0x80, 0xE3, 0x80, 0xE3, 0x80, 0xC9, 0x80, 0x8C,
     0x80, 0xE9, 0x80, 0xE3, 0x80, 0x67, 0x00, 0x3E, 0x00,
 ];
-#[cfg_attr(not(feature = "_ble"), allow(dead_code))]
+#[cfg_attr(not(rmk_ble), allow(dead_code))]
 pub const BT_ICON_W: u32 = 9;
-#[cfg_attr(not(feature = "_ble"), allow(dead_code))]
+#[cfg_attr(not(rmk_ble), allow(dead_code))]
 pub const BT_ICON_H: u32 = 14;
 
 /// Checkmark (✓) — 7 active rows to match CROSS visual weight

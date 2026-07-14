@@ -1,18 +1,18 @@
 //! Morse handlers.
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use rmk_types::constants::BULK_SIZE;
 use rmk_types::morse::Morse;
 use rmk_types::protocol::rynk::command::{GetMorse, SetMorse};
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use rmk_types::protocol::rynk::command::{GetMorseBulk, SetMorseBulk};
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use rmk_types::protocol::rynk::{GetMorseBulkRequest, GetMorseBulkResponse, SetMorseBulkRequest};
 use rmk_types::protocol::rynk::{RynkError, SetMorseRequest};
 
 use super::super::RynkService;
 use super::Handle;
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use super::bulk::{bulk_page, bulk_write_start};
 
 impl Handle<GetMorse> for RynkService<'_> {
@@ -35,7 +35,7 @@ impl Handle<SetMorse> for RynkService<'_> {
     }
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 impl Handle<GetMorseBulk> for RynkService<'_> {
     async fn handle(&self, req: GetMorseBulkRequest) -> Result<GetMorseBulkResponse, RynkError> {
         // `bulk_page` keeps every index in range, so `get_morse` is always
@@ -47,7 +47,7 @@ impl Handle<GetMorseBulk> for RynkService<'_> {
     }
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 impl Handle<SetMorseBulk> for RynkService<'_> {
     async fn handle(&self, req: SetMorseBulkRequest) -> Result<(), RynkError> {
         // Validate the whole run first, so it applies whole or not at all.

@@ -13,7 +13,7 @@ use crate::host::via::keycode_convert::{from_via_keycode, to_via_keycode};
 pub(crate) async fn process_vial<'a>(
     report: &mut ViaReport,
     vial_config: &VialConfig<'a>,
-    #[cfg(feature = "host_lock")] locker: &crate::host::lock::HostLock<'_>,
+    #[cfg(rmk_host_lock)] locker: &crate::host::lock::HostLock<'_>,
     ctx: &KeyboardContext<'_>,
 ) {
     // report.output_data[0] == 0xFE -> vial commands
@@ -51,7 +51,7 @@ pub(crate) async fn process_vial<'a>(
         VialCommand::GetUnlockStatus => {
             // Reset all data to 0xFF(it's required!)
             report.input_data.fill(0xFF);
-            #[cfg(feature = "host_lock")]
+            #[cfg(rmk_host_lock)]
             {
                 // Unlocked
                 report.input_data[0] = locker.is_unlocked() as u8;
@@ -63,7 +63,7 @@ pub(crate) async fn process_vial<'a>(
                     report.input_data[3 + idx * 2] = *col;
                 }
             }
-            #[cfg(not(feature = "host_lock"))]
+            #[cfg(not(rmk_host_lock))]
             {
                 // Unlocked
                 report.input_data[0] = 1;
@@ -73,26 +73,26 @@ pub(crate) async fn process_vial<'a>(
             }
         }
         VialCommand::UnlockStart => {
-            #[cfg(feature = "host_lock")]
+            #[cfg(rmk_host_lock)]
             locker.unlocking();
-            #[cfg(not(feature = "host_lock"))]
+            #[cfg(not(rmk_host_lock))]
             error!("Vial lock feature is not enabled");
         }
         VialCommand::UnlockPoll => {
-            #[cfg(feature = "host_lock")]
+            #[cfg(rmk_host_lock)]
             {
                 locker.unlocking();
                 report.input_data[0] = locker.is_unlocked() as u8;
                 report.input_data[1] = locker.is_unlocking() as u8;
                 report.input_data[2] = locker.check_unlock();
             }
-            #[cfg(not(feature = "host_lock"))]
+            #[cfg(not(rmk_host_lock))]
             error!("Vial lock feature is not enabled");
         }
         VialCommand::Lock => {
-            #[cfg(feature = "host_lock")]
+            #[cfg(rmk_host_lock)]
             locker.lock();
-            #[cfg(not(feature = "host_lock"))]
+            #[cfg(not(rmk_host_lock))]
             error!("Vial lock feature is not enabled");
         }
         VialCommand::BehaviorSettingQuery => {
@@ -413,7 +413,7 @@ pub(crate) async fn process_vial<'a>(
 }
 
 #[cfg(test)]
-#[cfg(feature = "storage")]
+#[cfg(rmk_storage)]
 mod tests {
     use rmk_types::action::Action;
     use rmk_types::combo::Combo as ComboConfig;

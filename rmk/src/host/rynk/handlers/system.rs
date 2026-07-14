@@ -37,28 +37,28 @@ impl Handle<GetCapabilities> for RynkService<'_> {
             max_forks: constants::FORK_MAX_NUM as u8,
 
             // Feature flags
-            storage_enabled: cfg!(feature = "storage"),
+            storage_enabled: cfg!(rmk_storage),
             lighting_enabled: false, // TODO Phase 6: surface light_service
 
             // Connectivity
-            is_split: cfg!(feature = "split"),
+            is_split: cfg!(rmk_split),
             num_split_peripherals: constants::SPLIT_PERIPHERALS_NUM as u8,
-            ble_enabled: cfg!(feature = "_ble"),
+            ble_enabled: cfg!(rmk_ble),
             num_ble_profiles: constants::NUM_BLE_PROFILE as u8,
 
             // Protocol limits
             max_payload_size: (constants::RYNK_BUFFER_SIZE - RYNK_HEADER_SIZE) as u16,
             macro_chunk_size: constants::MACRO_DATA_SIZE as u16,
             // The BULK_* constants only exist under `bulk`, hence #[cfg] over cfg!().
-            #[cfg(feature = "bulk")]
+            #[cfg(rmk_bulk)]
             max_bulk_keys: constants::BULK_KEYMAP_SIZE as u8,
-            #[cfg(not(feature = "bulk"))]
+            #[cfg(not(rmk_bulk))]
             max_bulk_keys: 0,
-            #[cfg(feature = "bulk")]
+            #[cfg(rmk_bulk)]
             max_bulk_configs: constants::BULK_SIZE as u8,
-            #[cfg(not(feature = "bulk"))]
+            #[cfg(not(rmk_bulk))]
             max_bulk_configs: 0,
-            bulk_transfer_supported: cfg!(feature = "bulk"),
+            bulk_transfer_supported: cfg!(rmk_bulk),
         })
     }
 }

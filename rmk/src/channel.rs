@@ -3,40 +3,40 @@
 use core::future::poll_fn;
 
 use embassy_sync::channel::{Channel, TrySendError};
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use embassy_sync::signal::Signal;
 pub use embassy_sync::{blocking_mutex, channel, pubsub, zerocopy_channel};
 use rmk_types::connection::ConnectionType;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use {crate::ble::profile::BleProfileAction, rmk_types::led_indicator::LedIndicator};
 
-#[cfg(all(feature = "vial", feature = "_ble"))]
+#[cfg(all(rmk_vial, rmk_ble))]
 use crate::VIAL_CHANNEL_SIZE;
 use crate::hid::{KeyboardReport, Report};
-#[cfg(feature = "storage")]
+#[cfg(rmk_storage)]
 use crate::{FLASH_CHANNEL_SIZE, storage::FlashOperationMessage};
 use crate::{REPORT_CHANNEL_SIZE, RawMutex};
 
 type ReportChannel = Channel<RawMutex, Report, REPORT_CHANNEL_SIZE>;
 
 /// Signal for LED indicator, used in BLE keyboards only since BLE receiving is not async
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) static LED_SIGNAL: Signal<RawMutex, LedIndicator> = Signal::new();
 
 /// Drained by the USB HID writer task. Routed through `send_hid_report`
 /// from the keyboard task and ad-hoc producers (e.g. steno chord output).
-#[cfg(not(feature = "_no_usb"))]
+#[cfg(rmk_usb)]
 pub static USB_REPORT_CHANNEL: ReportChannel = Channel::new();
 
 /// Drained by the BLE HID writer task. Routed through `send_hid_report`.
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub static BLE_REPORT_CHANNEL: ReportChannel = Channel::new();
 
 fn report_channel(transport: ConnectionType) -> Option<&'static ReportChannel> {
     match transport {
-        #[cfg(not(feature = "_no_usb"))]
+        #[cfg(rmk_usb)]
         ConnectionType::Usb => Some(&USB_REPORT_CHANNEL),
-        #[cfg(feature = "_ble")]
+        #[cfg(rmk_ble)]
         ConnectionType::Ble => Some(&BLE_REPORT_CHANNEL),
         #[allow(unreachable_patterns)]
         _ => None,
@@ -87,7 +87,7 @@ pub(crate) fn clear_and_release_report_channel(transport: ConnectionType) {
 }
 
 // Sync messages from server to flash
-#[cfg(feature = "storage")]
+#[cfg(rmk_storage)]
 pub(crate) static FLASH_CHANNEL: Channel<RawMutex, FlashOperationMessage, FLASH_CHANNEL_SIZE> = Channel::new();
 
 /// Test-only: continuously drain [`FLASH_CHANNEL`] so host-service integration
@@ -96,21 +96,21 @@ pub(crate) static FLASH_CHANNEL: Channel<RawMutex, FlashOperationMessage, FLASH_
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub async fn drain_flash_channel_for_test() {
-    #[cfg(feature = "storage")]
+    #[cfg(rmk_storage)]
     loop {
         FLASH_CHANNEL.receive().await;
     }
-    #[cfg(not(feature = "storage"))]
+    #[cfg(not(rmk_storage))]
     core::future::pending::<()>().await
 }
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) static BLE_PROFILE_CHANNEL: Channel<RawMutex, BleProfileAction, 1> = Channel::new();
 
 /// Vial RX from BLE GATT `output_data` writes — one 32-byte chunk per write.
 /// Pushed by `gatt_events_task`, drained by [`crate::ble::host::HostGattHandler::run`].
-#[cfg(all(feature = "vial", feature = "_ble"))]
+#[cfg(all(rmk_vial, rmk_ble))]
 pub(crate) static VIAL_BLE_RX_CHANNEL: Channel<RawMutex, [u8; 32], VIAL_CHANNEL_SIZE> = Channel::new();
 
 /// Rynk RX from the BLE `output_data` writes. The 512 B ring is ~2× one MTU's maximal payload.
-#[cfg(all(feature = "rynk", feature = "_ble"))]
+#[cfg(all(rmk_rynk, rmk_ble))]
 pub(crate) static RYNK_BLE_RX_PIPE: embassy_sync::pipe::Pipe<RawMutex, 512> = embassy_sync::pipe::Pipe::new();

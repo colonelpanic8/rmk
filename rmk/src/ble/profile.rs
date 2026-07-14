@@ -1,12 +1,12 @@
 //! Manage BLE profiles and bonding information
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use bt_hci::{cmd::le::LeSetPhy, controller::ControllerCmdAsync};
 use embassy_futures::select::{Either3, select3};
 use embassy_sync::signal::Signal;
 use trouble_host::prelude::*;
 use trouble_host::{BondInformation, LongTermKey};
-#[cfg(feature = "storage")]
+#[cfg(rmk_storage)]
 use {crate::channel::FLASH_CHANNEL, crate::storage::FLASH_OPERATION_FINISHED};
 
 use super::ble_server::CCCD_TABLE_SIZE;
@@ -89,7 +89,7 @@ pub(crate) enum BleProfileAction {
 /// 2. Storing and loading bonding information for each profile
 /// 3. Updating the bonding information of the active profile to the BLE stack
 /// 4. Handling profile switch, clear, and save operations
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) struct ProfileManager<'b, 's, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool>
 where
     's: 'b,
@@ -100,7 +100,7 @@ where
     stack: &'b Stack<'s, C, P>,
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 impl<'b, 's, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool> ProfileManager<'b, 's, C, P>
 where
     's: 'b,
@@ -114,7 +114,7 @@ where
     }
 
     /// Load stored bonding information
-    #[cfg(feature = "storage")]
+    #[cfg(rmk_storage)]
     pub(crate) async fn load_bonded_devices(&mut self) {
         use crate::storage::{read_active_ble_profile, read_bond_info};
 
@@ -191,7 +191,7 @@ where
 
         self.update_stack_bonds();
 
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         // Send bonding information to the flash task for saving
         FLASH_CHANNEL
             .send(crate::storage::FlashOperationMessage::ProfileInfo(profile_info))
@@ -217,7 +217,7 @@ where
             debug!("Updating profile {} CCCD table: {:?}", active_profile, table);
             self.bonded_devices[index].cccd_table = table;
 
-            #[cfg(feature = "storage")]
+            #[cfg(rmk_storage)]
             FLASH_CHANNEL
                 .send(crate::storage::FlashOperationMessage::ProfileInfo(
                     self.bonded_devices[index].clone(),
@@ -242,7 +242,7 @@ where
         // Update the active bonding information in the stack
         self.update_stack_bonds();
 
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         // Send the clear slot message to the flash task
         FLASH_CHANNEL
             .send(crate::storage::FlashOperationMessage::ClearSlot(slot_num))
@@ -261,7 +261,7 @@ where
         // Update the active bonding information in the stack
         self.update_stack_bonds();
 
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL
             .send(crate::storage::FlashOperationMessage::ActiveBleProfile(profile))
             .await;
@@ -287,7 +287,7 @@ where
             .await
             {
                 Either3::First(action) => {
-                    #[cfg(feature = "storage")]
+                    #[cfg(rmk_storage)]
                     FLASH_OPERATION_FINISHED.reset();
                     match action {
                         BleProfileAction::Switch(profile) => {
@@ -319,7 +319,7 @@ where
                             self.clear_bond(slot).await;
                         }
                     }
-                    #[cfg(feature = "storage")]
+                    #[cfg(rmk_storage)]
                     FLASH_OPERATION_FINISHED.wait().await;
                     info!("Update profile done");
                     break;

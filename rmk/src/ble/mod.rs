@@ -15,10 +15,10 @@ use trouble_host::prelude::*;
 use crate::ble::battery_service::BleBatteryServer;
 use crate::ble::ble_server::{BleHidServer, Server};
 use crate::ble::device_info::{PnPID, VidSource};
-#[cfg(feature = "host")]
+#[cfg(rmk_host)]
 use crate::ble::host::{HOST_WRITE_BUFFER_SIZE, HostGattHandler, HostWriteOutcome};
 use crate::ble::led::BleLedReader;
-#[cfg(feature = "passkey_entry")]
+#[cfg(rmk_passkey_entry)]
 use crate::ble::passkey::{PasskeyInputState, next_gatt_event};
 use crate::ble::profile::{ProfileInfo, ProfileManager, UPDATED_CCCD_TABLE, UPDATED_PROFILE};
 use crate::channel::{BLE_REPORT_CHANNEL, LED_SIGNAL};
@@ -26,14 +26,14 @@ use crate::config::{BleBatteryConfig, RmkConfig};
 use crate::core_traits::Runnable;
 use crate::event::SubscribableEvent;
 use crate::hid::{HidWriterTrait, run_led_reader};
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 use crate::split::ble::central::CENTRAL_SLEEP;
 use crate::state::set_ble_state;
 
 pub(crate) mod battery_service;
 pub(crate) mod ble_server;
 pub(crate) mod device_info;
-#[cfg(feature = "host")]
+#[cfg(rmk_host)]
 pub(crate) mod host;
 pub(crate) mod led;
 #[cfg(feature = "_nrf_ble")]
@@ -77,10 +77,10 @@ where
     profile_manager: ProfileManager<'b, 's, C, DefaultPacketPool>,
     product_name: &'static str,
     config: BleBatteryConfig<'b>,
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     host_service: Option<&'a crate::host::HostService<'a>>,
     // Keeps `'a` in the type's parameter list across all feature configurations.
-    #[cfg(not(feature = "host"))]
+    #[cfg(not(rmk_host))]
     _phantom: core::marker::PhantomData<&'a ()>,
 }
 
@@ -134,9 +134,9 @@ where
             profile_manager,
             product_name: rmk_config.device_config.product_name,
             config: rmk_config.ble_battery_config,
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             host_service: None,
-            #[cfg(not(feature = "host"))]
+            #[cfg(not(rmk_host))]
             _phantom: core::marker::PhantomData,
         }
     }
@@ -144,7 +144,7 @@ where
     /// Attach the host-protocol service (Vial or Rynk, picked at compile
     /// time by feature). See
     /// [`UsbTransport::with_host_service`](crate::usb::UsbTransport::with_host_service).
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     pub fn with_host_service(mut self, service: &'a crate::host::HostService<'a>) -> Self {
         self.host_service = Some(service);
         self
@@ -161,7 +161,7 @@ where
         let preferred = crate::state::load_preferred_connection().await;
         crate::state::set_preferred_connection(preferred);
         // Load the bonded devices from storage
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         self.profile_manager.load_bonded_devices().await;
         self.profile_manager.update_stack_bonds();
 
@@ -185,17 +185,17 @@ where
                     Either::First(Ok(conn)) => {
                         // Do NOT emit BleState::Connected here. gatt_events_task emits
                         // Connected when it sees GattConnectionEvent::Encrypted.
-                        #[cfg(feature = "storage")]
+                        #[cfg(rmk_storage)]
                         let active_bond_info = profile_manager.active_bond_info();
                         if let Either::Second(_) = select(
                             run_ble_keyboard(
                                 server,
                                 &conn,
                                 stack,
-                                #[cfg(feature = "storage")]
+                                #[cfg(rmk_storage)]
                                 active_bond_info,
                                 &self.config,
-                                #[cfg(feature = "host")]
+                                #[cfg(rmk_host)]
                                 self.host_service,
                             ),
                             profile_manager.update_profile(),
@@ -217,7 +217,7 @@ where
                         warn!("Advertising timeout, sleep and wait for any key");
                         set_ble_state(BleState::Inactive);
 
-                        #[cfg(feature = "split")]
+                        #[cfg(rmk_split)]
                         CENTRAL_SLEEP.signal(true);
 
                         // Wake on key or pointing activity after the advertising timeout.
@@ -225,7 +225,7 @@ where
                         let mut pointing_wake = crate::event::PointingEvent::subscriber();
                         let _ = select(key_wake.next_message_pure(), pointing_wake.next_message_pure()).await;
 
-                        #[cfg(feature = "split")]
+                        #[cfg(rmk_split)]
                         CENTRAL_SLEEP.signal(false);
                     }
                     Either::First(Err(e)) => {
@@ -254,13 +254,13 @@ pub(crate) async fn ble_task<C: Controller + ControllerCmdAsync<LeSetPhy>, P: Pa
     mut runner: Runner<'_, C, P>,
 ) {
     loop {
-        #[cfg(not(feature = "split"))]
+        #[cfg(not(rmk_split))]
         if let Err(_e) = runner.run().await {
             error!("[ble_task] runner.run() error");
             embassy_time::Timer::after_millis(100).await;
         }
 
-        #[cfg(feature = "split")]
+        #[cfg(rmk_split)]
         {
             // Signal to indicate the stack is started
             crate::split::ble::central::STACK_STARTED.signal(true);
@@ -289,29 +289,29 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
     let media_control_point = server.composite_service.hid_control_point;
     let system_control = server.composite_service.system_report;
 
-    #[cfg(feature = "passkey_entry")]
+    #[cfg(rmk_passkey_entry)]
     let mut passkey_state = PasskeyInputState::new();
 
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     let mut host_gatt_handler = HostGattHandler::new(server);
 
     loop {
-        #[cfg(feature = "passkey_entry")]
+        #[cfg(rmk_passkey_entry)]
         let Some(event) = next_gatt_event(conn, &mut passkey_state).await else {
             continue;
         };
-        #[cfg(not(feature = "passkey_entry"))]
+        #[cfg(not(rmk_passkey_entry))]
         let event = conn.next().await;
 
         match event {
             GattConnectionEvent::Disconnected { reason } => {
-                #[cfg(feature = "passkey_entry")]
+                #[cfg(rmk_passkey_entry)]
                 passkey_state.clear();
                 info!("[gatt] disconnected: {:?}", reason);
                 break;
             }
             GattConnectionEvent::PairingComplete { security_level, bond } => {
-                #[cfg(feature = "passkey_entry")]
+                #[cfg(rmk_passkey_entry)]
                 passkey_state.clear();
                 info!("[gatt] pairing complete: {:?}", security_level);
                 let profile = crate::state::current_profile();
@@ -330,7 +330,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                 }
             }
             GattConnectionEvent::PairingFailed(err) => {
-                #[cfg(feature = "passkey_entry")]
+                #[cfg(rmk_passkey_entry)]
                 passkey_state.clear();
                 error!("[gatt] pairing error: {:?}", err);
             }
@@ -361,9 +361,9 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                         // trouble-host 0.7 exposes written bytes via a closure; copy them out
                         // once so the dispatch below (which awaits) can use them freely.
                         // Sized for the active host protocol's largest BLE write.
-                        #[cfg(feature = "host")]
+                        #[cfg(rmk_host)]
                         let mut data_buf = [0u8; HOST_WRITE_BUFFER_SIZE];
-                        #[cfg(not(feature = "host"))]
+                        #[cfg(not(rmk_host))]
                         let mut data_buf = [0u8; 32];
                         let data_len = event.with_data(|_, data| {
                             let n = data.len().min(data_buf.len());
@@ -393,7 +393,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                         {
                             control_point_write = true;
                         } else {
-                            #[cfg(feature = "host")]
+                            #[cfg(rmk_host)]
                             match host_gatt_handler.handle_write(event.handle(), data, encrypted).await {
                                 HostWriteOutcome::Handled => {}
                                 HostWriteOutcome::CccdUpdated => cccd_updated = true,
@@ -402,13 +402,13 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                                     debug!("Write GATT Event to Unknown: {:?}", event.handle())
                                 }
                             }
-                            #[cfg(not(feature = "host"))]
+                            #[cfg(not(rmk_host))]
                             debug!("Write GATT Event to Unknown: {:?}", event.handle());
                         }
 
                         if control_point_write {
                             info!("Write GATT Event to Control Point: {:?}", event.handle());
-                            #[cfg(feature = "split")]
+                            #[cfg(rmk_split)]
                             {
                                 // Forward an HID Control Point write to the split central's sleep signal.
                                 // HID Class spec opcodes for the HID Control Point characteristic:
@@ -450,7 +450,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                 if cccd_updated {
                     // When macOS wakes up from sleep mode, it won't send EXIT SUSPEND command
                     // So we need to monitor the sleep state by using CCCD write event
-                    #[cfg(feature = "split")]
+                    #[cfg(rmk_split)]
                     CENTRAL_SLEEP.signal(false);
 
                     if let Some(table) = server.get_client_att_table(conn.raw())
@@ -523,7 +523,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
             GattConnectionEvent::PassKeyDisplay(pass_key) => info!("[gatt] PassKeyDisplay: {:?}", pass_key),
             GattConnectionEvent::PassKeyConfirm(pass_key) => info!("[gatt] PassKeyConfirm: {:?}", pass_key),
             GattConnectionEvent::PassKeyInput => {
-                #[cfg(feature = "passkey_entry")]
+                #[cfg(rmk_passkey_entry)]
                 if crate::PASSKEY_ENTRY_ENABLED {
                     info!("[gatt] PassKeyInput: entering passkey entry mode");
                     passkey_state.begin();
@@ -533,7 +533,7 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                         error!("[gatt] pass_key_cancel error: {:?}", e);
                     }
                 }
-                #[cfg(not(feature = "passkey_entry"))]
+                #[cfg(not(rmk_passkey_entry))]
                 warn!("[gatt] PassKeyInput event, should not happen")
             }
             GattConnectionEvent::BondLost => warn!("[gatt] BondLost"),
@@ -660,15 +660,15 @@ pub(crate) async fn set_conn_params<
 async fn run_ble_keyboard<
     'a,
     'b,
-    #[cfg(feature = "host")] 'r,
+    #[cfg(rmk_host)] 'r,
     C: Controller + ControllerCmdAsync<LeSetPhy> + ControllerCmdSync<LeReadLocalSupportedFeatures>,
 >(
     server: &'b Server<'_>,
     conn: &GattConnection<'a, 'b, DefaultPacketPool>,
     stack: &Stack<'_, C, DefaultPacketPool>,
-    #[cfg(feature = "storage")] active_bond_info: Option<crate::ble::profile::ProfileInfo>,
+    #[cfg(rmk_storage)] active_bond_info: Option<crate::ble::profile::ProfileInfo>,
     config: &BleBatteryConfig<'a>,
-    #[cfg(feature = "host")] host_service: Option<&'r crate::host::HostService<'r>>,
+    #[cfg(rmk_host)] host_service: Option<&'r crate::host::HostService<'r>>,
 ) {
     let mut ble_hid_server = BleHidServer::new(server, conn);
     let mut ble_led_reader = BleLedReader;
@@ -676,7 +676,7 @@ async fn run_ble_keyboard<
 
     // CCCD lookup uses cached bond info to avoid a cancellable flash read while
     // this future is racing other arms of an outer `select`.
-    #[cfg(feature = "storage")]
+    #[cfg(rmk_storage)]
     if let Some(bond_info) = active_bond_info
         && bond_info.info.identity.match_identity(&conn.raw().peer_identity())
     {
@@ -713,7 +713,7 @@ async fn run_ble_keyboard<
 
     let led_task = run_led_reader(&mut ble_led_reader, ConnectionType::Ble);
 
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     let host_task = async {
         if let Some(service) = host_service {
             HostGattHandler::run(server, conn, service).await;
@@ -721,7 +721,7 @@ async fn run_ble_keyboard<
             core::future::pending::<()>().await;
         }
     };
-    #[cfg(not(feature = "host"))]
+    #[cfg(not(rmk_host))]
     let host_task = core::future::pending::<()>();
 
     let inner = embassy_futures::join::join3(writer_task, led_task, host_task);

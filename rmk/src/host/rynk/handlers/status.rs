@@ -2,14 +2,14 @@
 //! plus the live getters for WPM / sleep / LED. Each value is read from its
 //! producer-owned current-value accessor, not a host-side cache.
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::battery::BatteryStatus;
 use rmk_types::led_indicator::LedIndicator;
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 use rmk_types::protocol::rynk::PeripheralStatus;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::protocol::rynk::command::GetBatteryStatus;
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 use rmk_types::protocol::rynk::command::GetPeripheralStatus;
 use rmk_types::protocol::rynk::command::{GetCurrentLayer, GetLedIndicator, GetMatrixState, GetSleepState, GetWpm};
 use rmk_types::protocol::rynk::{MATRIX_BITMAP_SIZE, MatrixState, RynkError};
@@ -37,7 +37,7 @@ impl Handle<GetMatrixState> for RynkService<'_> {
     }
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 impl Handle<GetBatteryStatus> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<BatteryStatus, RynkError> {
         Ok(self.ctx.battery_status())
@@ -48,7 +48,7 @@ impl Handle<GetBatteryStatus> for RynkService<'_> {
 /// snapshot is owned by the split driver layer
 /// ([`current_peripheral_status`](crate::split::driver::current_peripheral_status)),
 /// fed at the `PeripheralConnectedEvent` / `PeripheralBatteryEvent` publish sites.
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 impl Handle<GetPeripheralStatus> for RynkService<'_> {
     async fn handle(&self, id: u8) -> Result<PeripheralStatus, RynkError> {
         crate::split::driver::current_peripheral_status(id as usize).ok_or(RynkError::Invalid)

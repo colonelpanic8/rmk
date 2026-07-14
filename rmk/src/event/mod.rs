@@ -47,25 +47,25 @@ macro_rules! impl_payload_wrapper {
 mod action;
 mod battery;
 mod connection;
-#[cfg(feature = "dfu")]
+#[cfg(rmk_dfu)]
 mod dfu;
 mod input;
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 mod split;
 mod state;
 
 pub use action::ActionEvent;
 pub use battery::{BatteryAdcEvent, BatteryStatusEvent, ChargingStateEvent};
 pub use connection::{ConnectionStatus, ConnectionStatusChangeEvent, ConnectionType};
-#[cfg(feature = "dfu")]
+#[cfg(rmk_dfu)]
 pub use dfu::DfuStatusEvent;
 pub use input::{
     Axis, AxisEvent, AxisValType, KeyPos, KeyboardEvent, KeyboardEventPos, ModifierEvent, PointingEvent,
     PointingProcessorEvent, PointingSetCpiEvent, RotaryEncoderPos,
 };
-#[cfg(all(feature = "split", feature = "_ble"))]
+#[cfg(all(rmk_split, rmk_ble))]
 pub use split::ClearPeerEvent;
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 pub use split::{CentralConnectedEvent, PeripheralBatteryEvent, PeripheralConnectedEvent};
 pub use state::{LayerChangeEvent, LedIndicatorEvent, SleepStateEvent, WpmUpdateEvent};
 

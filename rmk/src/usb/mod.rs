@@ -13,7 +13,7 @@ use crate::RawMutex;
 use crate::channel::USB_REPORT_CHANNEL;
 use crate::config::DeviceConfig;
 use crate::core_traits::Runnable;
-#[cfg(feature = "steno")]
+#[cfg(rmk_steno)]
 use crate::hid::StenoReport;
 use crate::hid::{
     CompositeReport, CompositeReportType, HidError, HidWriterTrait, KeyboardReport, Report, run_led_reader,
@@ -21,16 +21,16 @@ use crate::hid::{
 use crate::light::UsbLedReader;
 use crate::state::{current_usb_state, set_usb_state};
 
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 pub(crate) mod rynk;
-#[cfg(feature = "vial")]
+#[cfg(rmk_vial)]
 pub(crate) mod vial;
 
 // Both submodules export the same host-transport names; `rynk` and `vial`
 // are mutually exclusive, so exactly one alias set is compiled.
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 use self::rynk::{HostUsbReader, HostUsbWriter, build_host_usb, run_host_usb};
-#[cfg(feature = "vial")]
+#[cfg(rmk_vial)]
 use self::vial::{HostUsbReader, HostUsbWriter, build_host_usb, run_host_usb};
 
 pub(crate) static USB_REMOTE_WAKEUP: Signal<RawMutex, ()> = Signal::new();
@@ -43,7 +43,7 @@ pub(crate) static USB_REMOTE_WAKEUP: Signal<RawMutex, ()> = Signal::new();
 pub(crate) struct UsbKeyboardWriter<'a, 'd, D: Driver<'d>> {
     pub(crate) keyboard_writer: &'a mut HidWriter<'d, D, 8>,
     pub(crate) other_writer: &'a mut HidWriter<'d, D, 9>,
-    #[cfg(feature = "steno")]
+    #[cfg(rmk_steno)]
     pub(crate) steno_writer: &'a mut HidWriter<'d, D, 9>,
 }
 
@@ -51,12 +51,12 @@ impl<'a, 'd, D: Driver<'d>> UsbKeyboardWriter<'a, 'd, D> {
     pub(crate) fn new(
         keyboard_writer: &'a mut HidWriter<'d, D, 8>,
         other_writer: &'a mut HidWriter<'d, D, 9>,
-        #[cfg(feature = "steno")] steno_writer: &'a mut HidWriter<'d, D, 9>,
+        #[cfg(rmk_steno)] steno_writer: &'a mut HidWriter<'d, D, 9>,
     ) -> Self {
         Self {
             keyboard_writer,
             other_writer,
-            #[cfg(feature = "steno")]
+            #[cfg(rmk_steno)]
             steno_writer,
         }
     }
@@ -126,7 +126,7 @@ impl<'d, D: Driver<'d>> HidWriterTrait for UsbKeyboardWriter<'_, 'd, D> {
             Report::MouseReport(r) => self.write_composite(CompositeReportType::Mouse, r).await,
             Report::MediaKeyboardReport(r) => self.write_composite(CompositeReportType::Media, r).await,
             Report::SystemControlReport(r) => self.write_composite(CompositeReportType::System, r).await,
-            #[cfg(feature = "steno")]
+            #[cfg(rmk_steno)]
             Report::StenoReport(steno_report) => {
                 let mut buf: [u8; 9] = [0; 9];
                 let n = steno_report
@@ -158,7 +158,7 @@ pub(crate) fn new_usb_builder<'d, D: Driver<'d>>(driver: D, keyboard_config: Dev
     usb_config.manufacturer = Some(keyboard_config.manufacturer);
     usb_config.product = Some(keyboard_config.product_name);
     // Prefix Rynk serials so hosts can identify RMK devices cheaply.
-    #[cfg(feature = "rynk")]
+    #[cfg(rmk_rynk)]
     let serial_number = {
         static SERIAL: StaticCell<heapless::String<64>> = StaticCell::new();
         let s = SERIAL.init(heapless::String::new());
@@ -166,7 +166,7 @@ pub(crate) fn new_usb_builder<'d, D: Driver<'d>>(driver: D, keyboard_config: Dev
         let _ = s.push_str(keyboard_config.serial_number);
         s.as_str()
     };
-    #[cfg(not(feature = "rynk"))]
+    #[cfg(not(rmk_rynk))]
     let serial_number = keyboard_config.serial_number;
     usb_config.serial_number = Some(serial_number);
     usb_config.max_power = 450;
@@ -180,15 +180,15 @@ pub(crate) fn new_usb_builder<'d, D: Driver<'d>>(driver: D, keyboard_config: Dev
     usb_config.composite_with_iads = true;
 
     // Extra interfaces (usb_log, steno, dfu, rynk) overflow the 128-byte config descriptor buffer.
-    #[cfg(any(feature = "usb_log", feature = "steno", feature = "dfu", feature = "rynk"))]
+    #[cfg(any(feature = "usb_log", rmk_steno, rmk_dfu, rmk_rynk))]
     const USB_BUF_SIZE: usize = 256;
-    #[cfg(not(any(feature = "usb_log", feature = "steno", feature = "dfu", feature = "rynk")))]
+    #[cfg(not(any(feature = "usb_log", rmk_steno, rmk_dfu, rmk_rynk)))]
     const USB_BUF_SIZE: usize = 128;
 
     // Control buffer must be large enough for the largest DFU transfer block.
-    #[cfg(feature = "dfu")]
+    #[cfg(rmk_dfu)]
     const CONTROL_BUF_SIZE: usize = ::rmk::dfu::BLOCK_SIZE_DFU;
-    #[cfg(not(feature = "dfu"))]
+    #[cfg(not(rmk_dfu))]
     const CONTROL_BUF_SIZE: usize = USB_BUF_SIZE;
 
     static CONFIG_DESC: StaticCell<[u8; USB_BUF_SIZE]> = StaticCell::new();
@@ -219,19 +219,19 @@ pub struct UsbTransport<'a, D: Driver<'static>> {
     keyboard_reader: HidReader<'static, D, 1>,
     keyboard_writer: HidWriter<'static, D, 8>,
     other_writer: HidWriter<'static, D, 9>,
-    #[cfg(feature = "steno")]
+    #[cfg(rmk_steno)]
     steno_writer: HidWriter<'static, D, 9>,
     #[cfg(feature = "usb_log")]
     logger: Option<embassy_usb::class::cdc_acm::CdcAcmClass<'static, D>>,
     /// Host-protocol transport halves: CDC-ACM under `rynk`, 32-byte HID
     /// reports under `vial`.
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     host_reader: HostUsbReader<D>,
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     host_writer: HostUsbWriter<D>,
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     host_service: Option<&'a crate::host::HostService<'a>>,
-    #[cfg(not(feature = "host"))]
+    #[cfg(not(rmk_host))]
     _phantom: core::marker::PhantomData<&'a ()>,
 }
 
@@ -259,21 +259,21 @@ impl<'a, D: Driver<'static>> UsbTransport<'a, D> {
             ::embassy_usb::class::hid::HidBootProtocol::Keyboard
         );
         let other_writer = add_usb_writer!(&mut builder, CompositeReport, 9, 16);
-        #[cfg(feature = "steno")]
+        #[cfg(rmk_steno)]
         let steno_writer = add_usb_writer!(&mut builder, StenoReport, 9, 16);
         #[cfg(feature = "usb_log")]
         let logger = Some(add_usb_logger!(&mut builder));
 
-        #[cfg(feature = "dfu")]
+        #[cfg(rmk_dfu)]
         {
             let product_name = device_config.product_name;
-            #[cfg(any(feature = "dfu_rp", feature = "dfu_nrf"))]
+            #[cfg(any(rmk_dfu_rp, rmk_dfu_nrf))]
             if let Some(mgr) = ::rmk::dfu::get_manager() {
                 ::rmk::dfu::register_dfu_interface(&mut builder, mgr, product_name);
             }
         }
 
-        #[cfg(any(feature = "rynk", feature = "vial"))]
+        #[cfg(any(rmk_rynk, rmk_vial))]
         let (host_reader, host_writer) = build_host_usb(&mut builder);
 
         let (keyboard_reader, keyboard_writer) = keyboard_rw.split();
@@ -284,23 +284,23 @@ impl<'a, D: Driver<'static>> UsbTransport<'a, D> {
             keyboard_reader,
             keyboard_writer,
             other_writer,
-            #[cfg(feature = "steno")]
+            #[cfg(rmk_steno)]
             steno_writer,
             #[cfg(feature = "usb_log")]
             logger,
-            #[cfg(any(feature = "rynk", feature = "vial"))]
+            #[cfg(any(rmk_rynk, rmk_vial))]
             host_reader,
-            #[cfg(any(feature = "rynk", feature = "vial"))]
+            #[cfg(any(rmk_rynk, rmk_vial))]
             host_writer,
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             host_service: None,
-            #[cfg(not(feature = "host"))]
+            #[cfg(not(rmk_host))]
             _phantom: core::marker::PhantomData,
         }
     }
 
     /// Attach the host-protocol service
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     pub fn with_host_service(mut self, service: &'a crate::host::HostService<'a>) -> Self {
         self.host_service = Some(service);
         self
@@ -314,17 +314,17 @@ impl<D: Driver<'static>> Runnable for UsbTransport<'_, D> {
             keyboard_reader,
             keyboard_writer,
             other_writer,
-            #[cfg(feature = "steno")]
+            #[cfg(rmk_steno)]
             steno_writer,
             #[cfg(feature = "usb_log")]
             logger,
-            #[cfg(any(feature = "rynk", feature = "vial"))]
+            #[cfg(any(rmk_rynk, rmk_vial))]
             host_reader,
-            #[cfg(any(feature = "rynk", feature = "vial"))]
+            #[cfg(any(rmk_rynk, rmk_vial))]
             host_writer,
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             host_service,
-            #[cfg(not(feature = "host"))]
+            #[cfg(not(rmk_host))]
                 _phantom: _,
         } = self;
 
@@ -347,7 +347,7 @@ impl<D: Driver<'static>> Runnable for UsbTransport<'_, D> {
         let mut writer = UsbKeyboardWriter::new(
             keyboard_writer,
             other_writer,
-            #[cfg(feature = "steno")]
+            #[cfg(rmk_steno)]
             steno_writer,
         );
         let writer_task = writer.run_writer();
@@ -356,7 +356,7 @@ impl<D: Driver<'static>> Runnable for UsbTransport<'_, D> {
         let led_task = run_led_reader(&mut led_reader, ConnectionType::Usb);
 
         let host_and_extras = async {
-            #[cfg(any(feature = "rynk", feature = "vial"))]
+            #[cfg(any(rmk_rynk, rmk_vial))]
             let host_task = async {
                 if let Some(service) = *host_service {
                     run_host_usb(host_reader, host_writer, service).await
@@ -364,7 +364,7 @@ impl<D: Driver<'static>> Runnable for UsbTransport<'_, D> {
                     core::future::pending::<()>().await
                 }
             };
-            #[cfg(not(feature = "host"))]
+            #[cfg(not(rmk_host))]
             let host_task = core::future::pending::<()>();
 
             #[cfg(feature = "usb_log")]

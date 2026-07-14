@@ -1,9 +1,9 @@
 use core::fmt::Debug;
 
-#[cfg(all(feature = "split", feature = "_ble"))]
+#[cfg(all(rmk_split, rmk_ble))]
 use embassy_futures::select::{Either, select};
 use embassy_futures::yield_now;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer, with_deadline};
 use heapless::Vec;
@@ -18,7 +18,7 @@ use usbd_hid::descriptor::{MediaKeyboardReport, SystemControlReport};
 
 use crate::channel::send_hid_report;
 use crate::core_traits::Runnable;
-#[cfg(all(feature = "split", feature = "_ble"))]
+#[cfg(all(rmk_split, rmk_ble))]
 use crate::event::ClearPeerEvent;
 use crate::event::{
     ActionEvent, KeyboardEvent, KeyboardEventPos, ModifierEvent, SubscribableEvent, publish_event, publish_event_async,
@@ -31,7 +31,7 @@ use crate::keyboard::mouse::{MouseAction, MouseState};
 use crate::keyboard::oneshot::OneShotState;
 use crate::keyboard_macros::MacroOperation;
 use crate::keymap::KeyMap;
-#[cfg(all(feature = "split", feature = "_ble"))]
+#[cfg(all(rmk_split, rmk_ble))]
 use crate::split::ble::central::update_activity_time;
 use crate::{COMBO_MAX_NUM, FORK_MAX_NUM, MACRO_SPACE_SIZE, boot};
 
@@ -42,13 +42,13 @@ pub(crate) mod held_buffer;
 pub(crate) mod morse;
 pub(crate) mod mouse;
 pub(crate) mod oneshot;
-#[cfg(feature = "steno")]
+#[cfg(rmk_steno)]
 pub(crate) mod steno;
 
 use crate::keymap::HOLD_BUFFER_SIZE;
 
 // Timestamp of the last key action, the value is the number of seconds since the boot
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) static LAST_KEY_TIMESTAMP: Signal<crate::RawMutex, u32> = Signal::new();
 
 /// Led states for the keyboard hid report (its value is received by by the light service in a hid report)
@@ -244,11 +244,11 @@ pub struct Keyboard<'a> {
     combo_on: bool,
 
     /// Plover HID stenography chord accumulator
-    #[cfg(feature = "steno")]
+    #[cfg(rmk_steno)]
     steno: crate::keyboard::steno::StenoChord,
 
     /// Passkey entry state for BLE pairing
-    #[cfg(feature = "passkey_entry")]
+    #[cfg(rmk_passkey_entry)]
     passkey_entry_state: crate::ble::passkey::PasskeyEntryState,
 }
 
@@ -276,9 +276,9 @@ impl<'a> Keyboard<'a> {
             system_control_report: SystemControlReport { usage_id: 0 },
             last_key_code: KeyCode::Hid(HidKeyCode::No),
             combo_on: true,
-            #[cfg(feature = "steno")]
+            #[cfg(rmk_steno)]
             steno: crate::keyboard::steno::StenoChord::new(),
-            #[cfg(feature = "passkey_entry")]
+            #[cfg(rmk_passkey_entry)]
             passkey_entry_state: crate::ble::passkey::PasskeyEntryState::new(),
         }
     }
@@ -286,7 +286,7 @@ impl<'a> Keyboard<'a> {
     /// Send a keyboard report to the host.
     async fn send_report(&self, report: Report) {
         // Do not report keypresses to Host in passkey mode
-        #[cfg(feature = "passkey_entry")]
+        #[cfg(rmk_passkey_entry)]
         if self.passkey_entry_state.is_active() {
             return;
         }
@@ -354,14 +354,14 @@ impl<'a> Keyboard<'a> {
     /// Process key changes at (row, col)
     pub async fn process_inner(&mut self, event: KeyboardEvent) {
         // Check for mode transitions (e.g., entering/exiting passkey entry)
-        #[cfg(feature = "passkey_entry")]
+        #[cfg(rmk_passkey_entry)]
         self.passkey_entry_state.check_mode_transition();
 
-        #[cfg(feature = "host_lock")]
+        #[cfg(rmk_host_lock)]
         self.keymap.update_matrix_state(&event);
 
         // Update activity time for BLE split central sleep management
-        #[cfg(all(feature = "split", feature = "_ble"))]
+        #[cfg(all(rmk_split, rmk_ble))]
         update_activity_time();
 
         // Capture the event time once per event and thread it through.
@@ -814,7 +814,7 @@ impl<'a> Keyboard<'a> {
             self.with_modifiers = ModifierCombination::new();
         }
 
-        #[cfg(feature = "_ble")]
+        #[cfg(rmk_ble)]
         LAST_KEY_TIMESTAMP.signal(Instant::now().as_secs() as u32);
 
         if !key_action.is_morse() {
@@ -1256,7 +1256,7 @@ impl<'a> Keyboard<'a> {
                 // Set the default layer and persist it so it survives a reboot
                 self.keymap.set_default_layer(layer_num);
                 // Persist only if the layer was valid (set_default_layer rejects out-of-range)
-                #[cfg(feature = "storage")]
+                #[cfg(rmk_storage)]
                 if event.pressed && self.keymap.get_default_layer() == layer_num {
                     crate::channel::FLASH_CHANNEL
                         .send(crate::storage::FlashOperationMessage::DefaultLayer(layer_num))
@@ -1324,7 +1324,7 @@ impl<'a> Keyboard<'a> {
                 self.process_action_layer_switch(2, event);
                 self.keymap.update_fn_layer_state();
             }
-            #[cfg(feature = "steno")]
+            #[cfg(rmk_steno)]
             Action::Steno(key) => {
                 if let Some(report) = self.steno.on_event(key, event.pressed) {
                     crate::channel::try_send_hid_report(report);
@@ -1428,7 +1428,7 @@ impl<'a> Keyboard<'a> {
 
     // Process a basic keypress/release and also take care of applying one shot modifiers
     async fn process_hid_keycode(&mut self, key: HidKeyCode, event: KeyboardEvent) {
-        #[cfg(feature = "passkey_entry")]
+        #[cfg(rmk_passkey_entry)]
         if self.passkey_entry_state.is_active() {
             use crate::ble::passkey::{PASSKEY_RESPONSE, PasskeyAction};
 
@@ -1504,7 +1504,7 @@ impl<'a> Keyboard<'a> {
                     boot::reboot_keyboard();
                 }
             }
-            #[cfg(feature = "storage")]
+            #[cfg(rmk_storage)]
             KeyboardAction::ClearEeprom => {
                 // When releasing the key, reset the storage — the same operation
                 // `ViaCommand::EepromReset` performs from the host side
@@ -1639,7 +1639,7 @@ impl<'a> Keyboard<'a> {
     async fn process_user(&mut self, id: u8, event: KeyboardEvent) {
         debug!("Processing user key id: {:?}, event: {:?}", id, event);
 
-        #[cfg(feature = "_ble")]
+        #[cfg(rmk_ble)]
         {
             use crate::NUM_BLE_PROFILE;
             use crate::ble::profile::BleProfileAction;
@@ -1647,7 +1647,7 @@ impl<'a> Keyboard<'a> {
             if event.pressed {
                 // Clear Peer is processed when pressed
                 if id == NUM_BLE_PROFILE as u8 + 4 {
-                    #[cfg(feature = "split")]
+                    #[cfg(rmk_split)]
                     if event.pressed {
                         // Wait for 5s, if the key is still pressed, clear split peer info
                         // If there's any other key event received during this period, skip
@@ -1659,7 +1659,7 @@ impl<'a> Keyboard<'a> {
                         {
                             Either::First(_) => {
                                 // Timeout reached, send clear peer message
-                                #[cfg(feature = "split")]
+                                #[cfg(rmk_split)]
                                 publish_event(ClearPeerEvent);
                                 info!("Clear peer");
                             }
@@ -1691,7 +1691,7 @@ impl<'a> Keyboard<'a> {
                 } else if id == NUM_BLE_PROFILE as u8 + 3 {
                     // Toggle preferred transport (USB <-> BLE);
                     // only meaningful when both transports exist in this build.
-                    #[cfg(not(feature = "_no_usb"))]
+                    #[cfg(rmk_usb)]
                     crate::state::toggle_preferred().await;
                 }
             }

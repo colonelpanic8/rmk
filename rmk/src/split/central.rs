@@ -1,9 +1,9 @@
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use core::cell::RefCell;
 
-#[cfg(not(feature = "_ble"))]
+#[cfg(not(rmk_ble))]
 use embedded_io_async::{Read, Write};
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use {
     bt_hci::cmd::le::{LeReadLocalSupportedFeatures, LeSetPhy, LeSetScanParams},
     bt_hci::controller::{ControllerCmdAsync, ControllerCmdSync},
@@ -25,26 +25,26 @@ pub async fn run_peripheral_manager<
     const COL: usize,
     const ROW_OFFSET: usize,
     const COL_OFFSET: usize,
-    #[cfg(feature = "_ble")] C: Controller
+    #[cfg(rmk_ble)] C: Controller
         + ControllerCmdSync<LeSetScanParams>
         + ControllerCmdAsync<LeSetPhy>
         + ControllerCmdSync<LeReadLocalSupportedFeatures>,
-    #[cfg(not(feature = "_ble"))] S: Read + Write,
+    #[cfg(not(rmk_ble))] S: Read + Write,
 >(
     id: usize,
-    #[cfg(feature = "_ble")] addr: &RefCell<VecView<Option<[u8; 6]>>>,
-    #[cfg(feature = "_ble")] stack: &'b Stack<'s, C, DefaultPacketPool>,
-    #[cfg(not(feature = "_ble"))] receiver: S,
+    #[cfg(rmk_ble)] addr: &RefCell<VecView<Option<[u8; 6]>>>,
+    #[cfg(rmk_ble)] stack: &'b Stack<'s, C, DefaultPacketPool>,
+    #[cfg(not(rmk_ble))] receiver: S,
 ) where
     's: 'b,
 {
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     {
         use crate::split::ble::central::run_ble_peripheral_manager;
         run_ble_peripheral_manager::<C, ROW, COL, ROW_OFFSET, COL_OFFSET>(id, addr, stack).await;
     };
 
-    #[cfg(not(feature = "_ble"))]
+    #[cfg(not(rmk_ble))]
     {
         use crate::split::serial::run_serial_peripheral_manager;
         run_serial_peripheral_manager::<ROW, COL, ROW_OFFSET, COL_OFFSET, S>(id, receiver).await;

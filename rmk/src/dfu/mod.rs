@@ -1,9 +1,9 @@
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 use core::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 use embassy_sync::signal::Signal;
 use embassy_usb::control::{InResponse, OutResponse, Request};
 use embassy_usb::driver::Driver;
@@ -11,21 +11,21 @@ use embassy_usb::types::StringIndex;
 use embassy_usb::{Builder, Handler};
 use static_cell::StaticCell;
 
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 use crate::core_traits::Runnable;
 
 // ---------------------------------------------------------------------------
 // Chip modules
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "dfu_nrf")]
+#[cfg(rmk_dfu_nrf)]
 mod nrf;
-#[cfg(feature = "dfu_rp")]
+#[cfg(rmk_dfu_rp)]
 mod rp;
 
-#[cfg(feature = "dfu_nrf")]
+#[cfg(rmk_dfu_nrf)]
 pub use self::nrf::{DFU_WRITE_SIZE, get_manager, init_flash, mark_booted};
-#[cfg(feature = "dfu_rp")]
+#[cfg(rmk_dfu_rp)]
 pub use self::rp::{DFU_WRITE_SIZE, get_manager, init_flash, mark_booted};
 
 // ---------------------------------------------------------------------------
@@ -36,19 +36,19 @@ pub use self::rp::{DFU_WRITE_SIZE, get_manager, init_flash, mark_booted};
 /// downloads. Must match the USB control buffer size used by the host.
 pub const BLOCK_SIZE_DFU: usize = 512;
 
-#[cfg(any(feature = "dfu_rp", feature = "dfu_nrf"))]
+#[cfg(any(rmk_dfu_rp, rmk_dfu_nrf))]
 use embassy_embedded_hal::flash::partition::BlockingPartition;
 
-#[cfg(feature = "dfu_nrf")]
+#[cfg(rmk_dfu_nrf)]
 use self::nrf::{MutexType, PartitionType};
-#[cfg(feature = "dfu_rp")]
+#[cfg(rmk_dfu_rp)]
 use self::rp::{MutexType, PartitionType};
 
 // ---------------------------------------------------------------------------
 // DfuFlashManager — shared by RP2040 and nRF
 // ---------------------------------------------------------------------------
 
-#[cfg(any(feature = "dfu_rp", feature = "dfu_nrf"))]
+#[cfg(any(rmk_dfu_rp, rmk_dfu_nrf))]
 pub struct DfuFlashManager {
     flash_mutex: &'static MutexType,
     state_offset: u32,
@@ -59,7 +59,7 @@ pub struct DfuFlashManager {
     storage_size: u32,
 }
 
-#[cfg(any(feature = "dfu_rp", feature = "dfu_nrf"))]
+#[cfg(any(rmk_dfu_rp, rmk_dfu_nrf))]
 impl DfuFlashManager {
     pub(super) fn new(
         flash_mutex: &'static MutexType,
@@ -119,14 +119,14 @@ impl Handler for DfuStringProvider {
 // DFU lock state
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 static DFU_LOCKED: AtomicBool = AtomicBool::new(true);
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 static DFU_STARTED: AtomicBool = AtomicBool::new(false);
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 static DFU_UNLOCK_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 pub fn is_dfu_unlocked() -> bool {
     !DFU_LOCKED.load(Ordering::Acquire)
 }
@@ -135,34 +135,34 @@ pub fn is_dfu_unlocked() -> bool {
 // RmkDfuHandler
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "dfu")]
+#[cfg(rmk_dfu)]
 use embassy_usb::class::dfu::{
     consts::Status,
     dfu_mode::{self, DfuState},
 };
-#[cfg(any(feature = "dfu", feature = "dfu_lock"))]
+#[cfg(any(rmk_dfu, rmk_dfu_lock))]
 use rmk_types::dfu::DfuStatus;
 
 /// DFU handler wrapper that blinks an LED during transfer and checks the
 /// DFU lock (if `dfu_lock` feature is enabled).
-#[cfg(any(feature = "dfu", feature = "dfu_lock"))]
+#[cfg(any(rmk_dfu, rmk_dfu_lock))]
 use crate::event::publish_event;
 
-#[cfg(feature = "dfu")]
+#[cfg(rmk_dfu)]
 struct RmkDfuHandler<H> {
     inner: H,
 }
 
-#[cfg(feature = "dfu")]
+#[cfg(rmk_dfu)]
 impl<H: dfu_mode::Handler> dfu_mode::Handler for RmkDfuHandler<H> {
     fn start(&mut self) -> Result<(), Status> {
-        #[cfg(feature = "dfu_lock")]
+        #[cfg(rmk_dfu_lock)]
         if !is_dfu_unlocked() {
             DFU_UNLOCK_SIGNAL.signal(());
             info!("dfu_lock: DFU download rejected — keys not unlocked");
             return Err(Status::ErrVendor);
         }
-        #[cfg(feature = "dfu_lock")]
+        #[cfg(rmk_dfu_lock)]
         DFU_STARTED.store(true, Ordering::Release);
         info!("dfu: DFU download started");
         publish_event(crate::event::DfuStatusEvent::new(DfuStatus::Started));
@@ -193,14 +193,14 @@ impl<H: dfu_mode::Handler> dfu_mode::Handler for RmkDfuHandler<H> {
 // register_dfu_interface
 // ---------------------------------------------------------------------------
 
-#[cfg(any(feature = "dfu_rp", feature = "dfu_nrf"))]
+#[cfg(any(rmk_dfu_rp, rmk_dfu_nrf))]
 use {
     embassy_boot::{BlockingFirmwareUpdater, FirmwareUpdaterConfig},
     embassy_usb_dfu::{ResetImmediate, dfu::FirmwareHandler},
 };
 
 /// Register a DFU interface on the USB builder.
-#[cfg(any(feature = "dfu_rp", feature = "dfu_nrf"))]
+#[cfg(any(rmk_dfu_rp, rmk_dfu_nrf))]
 pub fn register_dfu_interface<D: Driver<'static>>(
     builder: &mut Builder<'static, D>,
     mgr: &'static DfuFlashManager,
@@ -262,7 +262,7 @@ pub fn register_dfu_interface<D: Driver<'static>>(
 // ---------------------------------------------------------------------------
 
 /// Run a USB DFU-only device on the peripheral side of a split keyboard.
-#[cfg(any(feature = "dfu_rp", feature = "dfu_nrf"))]
+#[cfg(any(rmk_dfu_rp, rmk_dfu_nrf))]
 pub async fn run_peripheral_dfu<D: Driver<'static>>(
     driver: D,
     device_config: crate::config::DeviceConfig<'static>,
@@ -289,14 +289,14 @@ pub async fn run_peripheral_dfu<D: Driver<'static>>(
 // ---------------------------------------------------------------------------
 
 /// DfuLock state machine that checks a physical key combination to unlock DFU.
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 pub struct DfuLock<'a> {
     unlocked: AtomicBool,
     unlock_keys: &'a [(u8, u8)],
     keymap: &'a crate::keymap::KeyMap<'a>,
 }
 
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 impl<'a> DfuLock<'a> {
     pub fn new(unlock_keys: &'a [(u8, u8)], keymap: &'a crate::keymap::KeyMap<'a>) -> Self {
         Self {
@@ -353,7 +353,7 @@ impl<'a> DfuLock<'a> {
     }
 }
 
-#[cfg(feature = "dfu_lock")]
+#[cfg(rmk_dfu_lock)]
 impl<'a> Runnable for DfuLock<'a> {
     async fn run(&mut self) -> ! {
         loop {

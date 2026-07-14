@@ -2,7 +2,7 @@
 
 use embassy_time::Duration;
 use rmk_types::action::{EncoderAction, KeyAction};
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::battery::BatteryStatus;
 use rmk_types::combo::Combo as ComboConfig;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
@@ -13,7 +13,7 @@ use rmk_types::morse::{Morse, MorseProfile};
 use crate::event::KeyboardEventPos;
 use crate::keyboard::combo::Combo;
 use crate::keymap::KeyMap;
-#[cfg(feature = "storage")]
+#[cfg(rmk_storage)]
 use crate::{channel::FLASH_CHANNEL, storage::FlashOperationMessage};
 
 /// Context shared between Vial and Rynk host services.
@@ -52,7 +52,7 @@ impl<'a> KeyboardContext<'a> {
     pub async fn set_action(&self, layer: u8, row: u8, col: u8, action: KeyAction) {
         self.keymap
             .set_action_at(KeyboardEventPos::key_pos(col, row), layer as usize, action);
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL
             .send(FlashOperationMessage::KeymapKey {
                 layer,
@@ -72,7 +72,7 @@ impl<'a> KeyboardContext<'a> {
     /// out of their loop — see `keymap_dimensions()`.
     pub fn try_set_action_flat(&self, index: usize, action: KeyAction, rows: usize, cols: usize) {
         self.keymap.set_action_by_flat_index(index, action);
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         {
             let layer_size = rows * cols;
             let layer = index / layer_size;
@@ -94,7 +94,7 @@ impl<'a> KeyboardContext<'a> {
                 );
             }
         }
-        #[cfg(not(feature = "storage"))]
+        #[cfg(not(rmk_storage))]
         let _ = (rows, cols);
     }
 
@@ -115,7 +115,7 @@ impl<'a> KeyboardContext<'a> {
             self.keymap
                 .set_encoder_counter_clockwise(layer as usize, idx as usize, action)
         };
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         if let Some(encoder) = updated {
             FLASH_CHANNEL
                 .send(FlashOperationMessage::Encoder {
@@ -125,7 +125,7 @@ impl<'a> KeyboardContext<'a> {
                 })
                 .await;
         }
-        #[cfg(not(feature = "storage"))]
+        #[cfg(not(rmk_storage))]
         let _ = updated;
     }
 
@@ -133,13 +133,13 @@ impl<'a> KeyboardContext<'a> {
     /// once.
     pub async fn set_encoder(&self, layer: u8, idx: u8, action: EncoderAction) {
         let written = self.keymap.set_encoder(layer as usize, idx as usize, action);
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         if written {
             FLASH_CHANNEL
                 .send(FlashOperationMessage::Encoder { idx, layer, action })
                 .await;
         }
-        #[cfg(not(feature = "storage"))]
+        #[cfg(not(rmk_storage))]
         let _ = written;
     }
 
@@ -150,7 +150,7 @@ impl<'a> KeyboardContext<'a> {
     /// Vial's protocol expects every set to be followed by a full-buffer save.
     pub async fn write_macro_buffer(&self, offset: usize, data: &[u8]) {
         self.keymap.write_macro_buffer(offset, data);
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         {
             let buf = self.keymap.get_macro_sequences();
             FLASH_CHANNEL.send(FlashOperationMessage::MacroData(buf)).await;
@@ -184,9 +184,9 @@ impl<'a> KeyboardContext<'a> {
         if !valid {
             return false;
         }
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL.send(FlashOperationMessage::Combo { idx, config }).await;
-        #[cfg(not(feature = "storage"))]
+        #[cfg(not(rmk_storage))]
         let _ = config;
         true
     }
@@ -201,7 +201,7 @@ impl<'a> KeyboardContext<'a> {
 
     /// Mutate the morse at `idx` and persist. No-op if `idx` is out of range.
     pub async fn update_morse(&self, idx: u8, f: impl FnOnce(&mut Morse)) {
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         {
             let updated = self.keymap.with_morse_mut(idx as usize, |morse| {
                 f(morse);
@@ -211,7 +211,7 @@ impl<'a> KeyboardContext<'a> {
                 FLASH_CHANNEL.send(FlashOperationMessage::Morse { idx, morse }).await;
             }
         }
-        #[cfg(not(feature = "storage"))]
+        #[cfg(not(rmk_storage))]
         {
             self.keymap.with_morse_mut(idx as usize, f);
         }
@@ -243,31 +243,31 @@ impl<'a> KeyboardContext<'a> {
 
     pub async fn set_combo_timeout(&self, ms: u16) {
         self.keymap.set_combo_timeout(Duration::from_millis(ms as u64));
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL.send(FlashOperationMessage::ComboTimeout(ms)).await;
     }
 
     pub async fn set_one_shot_timeout(&self, ms: u16) {
         self.keymap.set_one_shot_timeout(Duration::from_millis(ms as u64));
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL.send(FlashOperationMessage::OneShotTimeout(ms)).await;
     }
 
     pub async fn set_tap_interval(&self, ms: u16) {
         self.keymap.set_tap_interval(ms);
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL.send(FlashOperationMessage::TapInterval(ms)).await;
     }
 
     pub async fn set_tap_capslock_interval(&self, ms: u16) {
         self.keymap.set_tap_capslock_interval(ms);
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL.send(FlashOperationMessage::TapCapslockInterval(ms)).await;
     }
 
     pub async fn set_morse_default_profile(&self, profile: MorseProfile) {
         self.keymap.set_morse_default_profile(profile);
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL
             .send(FlashOperationMessage::MorseDefaultProfile(profile))
             .await;
@@ -275,19 +275,19 @@ impl<'a> KeyboardContext<'a> {
 
     pub async fn set_morse_prior_idle_time(&self, ms: u16) {
         self.keymap.set_morse_prior_idle_time(Duration::from_millis(ms as u64));
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL.send(FlashOperationMessage::PriorIdleTime(ms)).await;
     }
 
     pub async fn set_layout_options(&self, opts: u32) {
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL.send(FlashOperationMessage::LayoutOptions(opts)).await;
-        #[cfg(not(feature = "storage"))]
+        #[cfg(not(rmk_storage))]
         let _ = opts;
     }
 
     pub async fn reset_storage(&self) {
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL.send(FlashOperationMessage::Reset).await;
     }
 
@@ -299,7 +299,7 @@ impl<'a> KeyboardContext<'a> {
         crate::state::current_connection_status()
     }
 
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     pub fn battery_status(&self) -> BatteryStatus {
         crate::input_device::battery::current_battery_status()
     }
@@ -314,7 +314,7 @@ impl<'a> KeyboardContext<'a> {
 
     pub async fn set_default_layer(&self, layer: u8) {
         self.keymap.set_default_layer(layer);
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         FLASH_CHANNEL.send(FlashOperationMessage::DefaultLayer(layer)).await;
     }
 
@@ -339,14 +339,14 @@ impl<'a> KeyboardContext<'a> {
                 false
             }
         });
-        #[cfg(feature = "storage")]
+        #[cfg(rmk_storage)]
         if valid {
             FLASH_CHANNEL.send(FlashOperationMessage::Fork { idx, fork }).await;
         }
         valid
     }
 
-    #[cfg(feature = "host_lock")]
+    #[cfg(rmk_host_lock)]
     pub fn read_matrix_state(&self, target: &mut [u8]) {
         self.keymap.read_matrix_state(target);
     }

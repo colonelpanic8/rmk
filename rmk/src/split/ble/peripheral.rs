@@ -5,7 +5,7 @@ use embassy_time::{Duration, Timer, with_timeout};
 use rmk_types::connection::ConnectionStatus;
 use trouble_host::prelude::*;
 
-#[cfg(feature = "storage")]
+#[cfg(rmk_storage)]
 use super::PeerAddress;
 use crate::event::{CentralConnectedEvent, KeyboardEvent, SubscribableEvent, publish_event};
 use crate::split::driver::{SplitDriverError, SplitReader, SplitWriter};

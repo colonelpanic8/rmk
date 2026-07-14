@@ -16,10 +16,10 @@ rmk-types = { version = "=0.2.2", path = "../rmk-types" }
 embedded-hal = { version = "1.0.0" }
 embedded-hal-async = { version = "1.0.0" }
 embedded-io-async = { version = "0.7" }
-embedded-storage = { version = "0.3", optional = true }
-embedded-storage-async = { version = "0.4", optional = true }
+embedded-storage = { version = "0.3" }
+embedded-storage-async = { version = "0.4" }
 
-embassy-embedded-hal = { version = "0.6", optional = true }
+embassy-embedded-hal = { version = "0.6" }
 embassy-time = { version = "0.5" }
 embassy-usb = { version = "0.6", features = [
     "max-interface-count-8",
@@ -40,7 +40,7 @@ sequential-storage = { version = "7.1.0", features = ["postcard"] }
 
 defmt = { version = "1", optional = true }
 log = { version = "0.4", optional = true }
-byteorder = { version = "1", default-features = false, optional = true }
+byteorder = { version = "1", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive"] }
 postcard = { version = "1", features = ["experimental-derive"] }
 
@@ -63,6 +63,9 @@ trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "71fb54c21
     "derive",
     "security",
     "serde",
+    # Sizes gatt-client structs, which only the split central instantiates;
+    # kept unconditional so [split] in keyboard.toml alone can enable split.
+    "gatt-client-notification-queue-size-4",
 ], optional = true }
 bt-hci = { version = "0.9", optional = true }
 
@@ -115,7 +118,7 @@ default = ["defmt", "storage", "vial", "host_lock", "watchdog"]
 watchdog = ["rmk-macro/watchdog"]
 
 ## Enable host configurator support
-host = ["dep:byteorder"]
+host = []
 
 ## Enable vial support
 vial = ["host"]
@@ -136,11 +139,7 @@ rynk = ["host", "host_lock", "rmk-types/rynk"]
 bulk = ["rynk", "rmk-types/bulk"]
 
 ## Enable the storage. The storage is optional to save memory
-storage = [
-    "dep:embedded-storage",
-    "dep:embedded-storage-async",
-    "dep:embassy-embedded-hal",
-]
+storage = []
 
 ## Enable defmt support
 defmt = [
@@ -187,6 +186,9 @@ sh1107 = ["oled_async"]
 sh1108 = ["oled_async"]
 ssd1309 = ["oled_async"]
 ## Enable TFT drivers via lcd-async (GC9107, GC9A01, ILI9225, ILI9341, ILI9342C, ILI9486, ILI9488, RM67162, ST7735, ST7789, ST7796).
+# TODO: TFT/SPI display toml-ization pending — the DisplayDriver enum in
+# keyboard.toml is OLED-only and the macro's SPI display codegen is
+# unimplemented, so TFT models below remain feature-only for the Rust API.
 lcd_async = ["display", "dep:lcd-async"]
 gc9107 = ["lcd_async"]
 gc9a01 = ["lcd_async"]
@@ -204,10 +206,7 @@ st7796 = ["lcd_async"]
 async_matrix = []
 
 ## Enable split keyboard support.
-split = [
-    "trouble-host?/gatt-client-notification-queue-size-4",
-    "rmk-types/split",
-]
+split = ["rmk-types/split"]
 
 ## Enable feature to use rp2040 specific features, like PIO and bootrom
 rp2040 = [
@@ -225,7 +224,7 @@ adafruit_bl = ["_nrf_ble"]
 zsa_voyager_bl = []
 
 ## Enable DFU firmware update support (USB DFU interface)
-dfu = ["dep:embassy-usb-dfu", "dep:embassy-embedded-hal", "rmk-types/dfu"]
+dfu = ["dep:embassy-usb-dfu", "rmk-types/dfu"]
 ## Enable RP2040-specific DFU with embassy-boot-rp (implies `dfu` and `rp2040`)
 dfu_rp = ["dfu", "dep:embassy-boot-rp", "dep:embassy-boot", "rp2040", "rmk-macro/dfu_rp"]
 ## Enable nRF DFU firmware update support (add a chip feature like `nrf52840` too)

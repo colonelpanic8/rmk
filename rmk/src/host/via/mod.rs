@@ -17,7 +17,7 @@ mod vial;
 pub struct VialService<'a> {
     ctx: KeyboardContext<'a>,
     vial_config: VialConfig<'static>,
-    #[cfg(feature = "host_lock")]
+    #[cfg(rmk_host_lock)]
     locker: crate::host::lock::HostLock<'a>,
 }
 
@@ -27,7 +27,7 @@ impl<'a> VialService<'a> {
             ctx: KeyboardContext::new(keymap),
             vial_config: config.vial_config,
             // Vial's poll cadence is ~100 ms (`VialCommand::UnlockPoll`).
-            #[cfg(feature = "host_lock")]
+            #[cfg(rmk_host_lock)]
             locker: crate::host::lock::HostLock::new(
                 config.vial_config.unlock_keys,
                 keymap,
@@ -59,11 +59,11 @@ impl<'a> VialService<'a> {
                             let layout_option: u32 = 0;
                             BigEndian::write_u32(&mut report.input_data[2..6], layout_option);
                         }
-                        #[cfg(not(feature = "host_lock"))]
+                        #[cfg(not(rmk_host_lock))]
                         ViaKeyboardInfo::SwitchMatrixState => {
                             error!("It is not secure to use matrix tester without vial lock");
                         }
-                        #[cfg(feature = "host_lock")]
+                        #[cfg(rmk_host_lock)]
                         ViaKeyboardInfo::SwitchMatrixState if self.locker.is_unlocked() => {
                             let bitmap = &mut report.input_data[2..];
                             self.ctx.read_matrix_state(bitmap);
@@ -228,7 +228,7 @@ impl<'a> VialService<'a> {
                 process_vial(
                     report,
                     &self.vial_config,
-                    #[cfg(feature = "host_lock")]
+                    #[cfg(rmk_host_lock)]
                     &self.locker,
                     &self.ctx,
                 )

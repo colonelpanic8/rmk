@@ -1,12 +1,12 @@
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use bt_hci::{cmd::le::LeSetPhy, controller::ControllerCmdAsync};
 use embassy_futures::select::{Either, select};
-#[cfg(not(feature = "_ble"))]
+#[cfg(not(rmk_ble))]
 use embedded_io_async::{Read, Write};
 use futures::FutureExt;
-#[cfg(all(feature = "_ble", feature = "storage"))]
+#[cfg(all(rmk_ble, rmk_storage))]
 use {super::ble::PeerAddress, crate::channel::FLASH_CHANNEL};
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use {
     crate::event::{BatteryStatusEvent, ChargingStateEvent, EventSubscriber},
     rmk_types::battery::BatteryStatus,
@@ -18,9 +18,9 @@ use super::driver::{SplitReader, SplitWriter};
 use crate::event::{
     KeyboardEvent, LayerChangeEvent, LedIndicatorEvent, PointingEvent, SubscribableEvent, publish_event,
 };
-#[cfg(feature = "display")]
+#[cfg(rmk_display)]
 use crate::event::{ModifierEvent, SleepStateEvent, WpmUpdateEvent};
-#[cfg(not(feature = "_ble"))]
+#[cfg(not(rmk_ble))]
 use crate::split::serial::SerialSplitDriver;
 use crate::state::update_status;
 
@@ -36,16 +36,16 @@ use crate::state::update_status;
 pub async fn run_rmk_split_peripheral<
     'b,
     's,
-    #[cfg(feature = "_ble")] C: Controller + ControllerCmdAsync<LeSetPhy>,
-    #[cfg(not(feature = "_ble"))] S: Write + Read,
+    #[cfg(rmk_ble)] C: Controller + ControllerCmdAsync<LeSetPhy>,
+    #[cfg(not(rmk_ble))] S: Write + Read,
 >(
-    #[cfg(feature = "_ble")] id: usize,
-    #[cfg(feature = "_ble")] stack: &'b Stack<'s, C, DefaultPacketPool>,
-    #[cfg(not(feature = "_ble"))] serial: S,
+    #[cfg(rmk_ble)] id: usize,
+    #[cfg(rmk_ble)] stack: &'b Stack<'s, C, DefaultPacketPool>,
+    #[cfg(not(rmk_ble))] serial: S,
 ) where
     's: 'b,
 {
-    #[cfg(not(feature = "_ble"))]
+    #[cfg(not(rmk_ble))]
     {
         let mut peripheral = SplitPeripheral::new(SerialSplitDriver::new(serial));
         loop {
@@ -53,7 +53,7 @@ pub async fn run_rmk_split_peripheral<
         }
     }
 
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     crate::split::ble::peripheral::initialize_nrf_ble_split_peripheral_and_run(id, stack).await;
 }
 
@@ -73,24 +73,24 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
     /// If also receives split messages from the central through `SplitReader`.
     pub(crate) async fn run(&mut self) {
         let mut key_sub = KeyboardEvent::subscriber();
-        #[cfg(feature = "_ble")]
+        #[cfg(rmk_ble)]
         let mut charging_state_sub = ChargingStateEvent::subscriber();
         let mut pointing_sub = PointingEvent::subscriber();
-        #[cfg(feature = "_ble")]
+        #[cfg(rmk_ble)]
         let mut battery_sub = BatteryStatusEvent::subscriber();
 
         loop {
             let read_message_to_send = async {
-                crate::select_biased_with_feature! {
+                crate::select_biased_with_cfg! {
                     e = key_sub.next_message_pure().fuse() => SplitMessage::Key(e),
-                    with_feature("_ble"): e = charging_state_sub.next_message_pure().fuse() => {
+                    with_cfg(rmk_ble): e = charging_state_sub.next_message_pure().fuse() => {
                         SplitMessage::BatteryStatus(BatteryStatus::Available {
                             charge_state: e.charging.into(),
                             level: None,
                         }.into())
                     },
                     e = pointing_sub.next_message_pure().fuse() => SplitMessage::Pointing(e),
-                    with_feature("_ble"): e = battery_sub.next_event().fuse() => SplitMessage::BatteryStatus(e),
+                    with_cfg(rmk_ble): e = battery_sub.next_event().fuse() => SplitMessage::BatteryStatus(e),
                 }
             };
 
@@ -102,7 +102,7 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                             trace!("Received central connection status: {:?}", status);
                             update_status(|c| *c = status);
                         }
-                        #[cfg(all(feature = "_ble", feature = "storage"))]
+                        #[cfg(all(rmk_ble, rmk_storage))]
                         SplitMessage::ClearPeer => {
                             // Clear the peer address
                             FLASH_CHANNEL
@@ -121,17 +121,17 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                             // Publish Layer event
                             publish_event(LayerChangeEvent::new(layer));
                         }
-                        #[cfg(feature = "display")]
+                        #[cfg(rmk_display)]
                         SplitMessage::Wpm(wpm) => {
                             publish_event(WpmUpdateEvent::new(wpm));
                         }
-                        #[cfg(feature = "display")]
+                        #[cfg(rmk_display)]
                         SplitMessage::Modifier(bits) => {
                             publish_event(ModifierEvent {
                                 modifier: rmk_types::modifier::ModifierCombination::from_bits(bits),
                             });
                         }
-                        #[cfg(feature = "display")]
+                        #[cfg(rmk_display)]
                         SplitMessage::SleepState(sleeping) => {
                             publish_event(SleepStateEvent::new(sleeping));
                         }

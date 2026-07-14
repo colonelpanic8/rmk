@@ -5,13 +5,13 @@
 //!
 //! Coverage includes each dispatch arm and topic push.
 
-#![cfg(feature = "rynk")]
+#![cfg(rmk_rynk)]
 
 pub mod common;
 
 use heapless::Vec as HVec;
 use rmk::config::{BehaviorConfig, PositionalConfig, RmkConfig};
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk::event::BatteryStatusEvent;
 use rmk::event::{
     ConnectionStatusChangeEvent, LayerChangeEvent, LedIndicatorEvent, SleepStateEvent, WpmUpdateEvent, publish_event,
@@ -19,9 +19,9 @@ use rmk::event::{
 use rmk::host::HostService as RynkService;
 use rmk::types::action::{Action, EncoderAction, KeyAction};
 use rmk::types::keycode::{HidKeyCode, KeyCode};
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::battery::{BatteryStatus, ChargeState};
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::ble::BleStatus;
 use rmk_types::combo::Combo as ComboConfig;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
@@ -74,7 +74,7 @@ fn service_with_encoders() -> RynkService<'static> {
 }
 
 /// 3x4 service for bulk edge and row-wrap cases.
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 fn service_3x4() -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
     let per_key: &'static PositionalConfig<3, 4> = Box::leak(Box::new(PositionalConfig::default()));
@@ -85,7 +85,7 @@ fn service_3x4() -> RynkService<'static> {
 }
 
 /// 48-key service for full and over-budget bulk runs.
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 fn service_3x4x4() -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
     let per_key: &'static PositionalConfig<3, 4> = Box::leak(Box::new(PositionalConfig::default()));
@@ -96,7 +96,7 @@ fn service_3x4x4() -> RynkService<'static> {
 }
 
 /// Distinct action per bulk slot catches wrong-position writes.
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 fn bulk_action(i: usize) -> KeyAction {
     KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::from(4 + i as u8))))
 }
@@ -130,17 +130,17 @@ fn get_capabilities() {
         assert_eq!(caps.macro_space_size, 256);
         assert_eq!(caps.macro_chunk_size, 64);
         // This suite runs with all-on and rynk-only feature sets.
-        assert_eq!(caps.storage_enabled, cfg!(feature = "storage"));
-        assert_eq!(caps.ble_enabled, cfg!(feature = "_ble"));
-        assert_eq!(caps.is_split, cfg!(feature = "split"));
+        assert_eq!(caps.storage_enabled, cfg!(rmk_storage));
+        assert_eq!(caps.ble_enabled, cfg!(rmk_ble));
+        assert_eq!(caps.is_split, cfg!(rmk_split));
         // Bulk flag and budgets must move together.
-        assert_eq!(caps.bulk_transfer_supported, cfg!(feature = "bulk"));
-        #[cfg(feature = "bulk")]
+        assert_eq!(caps.bulk_transfer_supported, cfg!(rmk_bulk));
+        #[cfg(rmk_bulk)]
         {
             assert_eq!(caps.max_bulk_keys as usize, rmk_types::constants::BULK_KEYMAP_SIZE);
             assert_eq!(caps.max_bulk_configs as usize, rmk_types::constants::BULK_SIZE);
         }
-        #[cfg(not(feature = "bulk"))]
+        #[cfg(not(rmk_bulk))]
         {
             assert_eq!(caps.max_bulk_keys, 0);
             assert_eq!(caps.max_bulk_configs, 0);
@@ -427,7 +427,7 @@ fn get_set_encoder_round_trip() {
     });
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 #[test]
 fn keymap_bulk_round_trip_wraps_row_boundary() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -478,7 +478,7 @@ fn keymap_bulk_round_trip_wraps_row_boundary() {
     });
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 #[test]
 fn keymap_bulk_round_trip_wraps_layer_boundary() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -542,7 +542,7 @@ fn keymap_bulk_round_trip_wraps_layer_boundary() {
     });
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 #[test]
 fn keymap_bulk_max_capacity_round_trip() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -579,7 +579,7 @@ fn keymap_bulk_max_capacity_round_trip() {
     });
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 #[test]
 fn keymap_bulk_clamps_and_rejects() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -652,7 +652,7 @@ fn keymap_bulk_clamps_and_rejects() {
     });
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 #[test]
 fn keymap_bulk_get_caps_page_at_budget() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -752,7 +752,7 @@ fn combo_rejects_out_of_range() {
     });
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 #[test]
 fn combo_bulk_round_trip_with_empty_slots() {
     use rmk_types::constants::BULK_SIZE;
@@ -792,7 +792,7 @@ fn combo_bulk_round_trip_with_empty_slots() {
     });
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 #[test]
 fn combo_bulk_clamps_and_rejects() {
     use rmk_types::constants::BULK_SIZE;
@@ -891,7 +891,7 @@ fn morse_rejects_out_of_range() {
     });
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 #[test]
 fn morse_bulk_round_trip() {
     use rmk_types::constants::BULK_SIZE;
@@ -932,7 +932,7 @@ fn morse_bulk_round_trip() {
     });
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 #[test]
 fn morse_bulk_clamps_and_rejects() {
     use rmk_types::constants::BULK_SIZE;
@@ -1073,7 +1073,7 @@ fn get_connection_status_matches_connection_type() {
     });
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 #[test]
 fn get_ble_status() {
     let service = service();
@@ -1083,7 +1083,7 @@ fn get_ble_status() {
     });
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 #[test]
 fn switch_ble_profile() {
     let service = service();
@@ -1094,7 +1094,7 @@ fn switch_ble_profile() {
     });
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 #[test]
 fn switch_ble_profile_rejects_out_of_range() {
     let service = service();
@@ -1104,7 +1104,7 @@ fn switch_ble_profile_rejects_out_of_range() {
     });
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 #[test]
 fn clear_ble_profile() {
     let service = service();
@@ -1136,7 +1136,7 @@ fn get_matrix_state() {
     });
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 #[test]
 fn get_battery_status() {
     let service = service();
@@ -1148,7 +1148,7 @@ fn get_battery_status() {
     });
 }
 
-#[cfg(all(feature = "_ble", feature = "split"))]
+#[cfg(all(rmk_ble, rmk_split))]
 #[test]
 fn get_peripheral_status() {
     let service = service();
@@ -1209,7 +1209,7 @@ fn drops_topic_cmd_from_host() {
     });
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 #[test]
 fn drops_battery_topic_cmd_from_host() {
     // Cover the one `_ble`-gated topic explicitly.
@@ -1393,7 +1393,7 @@ fn topic_connection_change() {
     assert_eq!(v.preferred, ConnectionType::Ble);
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 #[test]
 fn topic_battery_status() {
     let service = service();

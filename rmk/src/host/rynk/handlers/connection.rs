@@ -1,10 +1,10 @@
 //! Connection handlers — USB/BLE preferred-transport read, BLE profile management.
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::ble::BleStatus;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::protocol::rynk::RynkError;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::protocol::rynk::command::{ClearBleProfile, GetBleStatus, SwitchBleProfile};
 use rmk_types::protocol::rynk::command::{GetConnectionStatus, GetConnectionType};
 
@@ -25,7 +25,7 @@ impl Handle<GetConnectionStatus> for RynkService<'_> {
     }
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 impl Handle<GetBleStatus> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<BleStatus, RynkError> {
         Ok(self.ctx.connection_status().ble)
@@ -36,7 +36,7 @@ impl Handle<GetBleStatus> for RynkService<'_> {
 /// used so a host hammering this Cmd while the previous switch is still
 /// running observes the queue-full error rather than blocking the
 /// dispatch loop.
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 impl Handle<SwitchBleProfile> for RynkService<'_> {
     async fn handle(&self, slot: u8) -> Result<(), RynkError> {
         Self::check_ble_profile_slot(slot)?;
@@ -48,7 +48,7 @@ impl Handle<SwitchBleProfile> for RynkService<'_> {
 
 /// `Cmd::ClearBleProfile` — wipes the bond at the given slot without
 /// requiring a prior switch (uses [`BleProfileAction::ClearSlot`]).
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 impl Handle<ClearBleProfile> for RynkService<'_> {
     async fn handle(&self, slot: u8) -> Result<(), RynkError> {
         Self::check_ble_profile_slot(slot)?;
@@ -58,7 +58,7 @@ impl Handle<ClearBleProfile> for RynkService<'_> {
     }
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 impl RynkService<'_> {
     /// `Invalid` for a BLE profile slot past the configured profile count.
     fn check_ble_profile_slot(slot: u8) -> Result<(), RynkError> {

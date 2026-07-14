@@ -56,62 +56,62 @@ macro_rules! __join_all_chunked {
 }
 
 #[macro_export]
-macro_rules! with_feature {
-    ($feature:literal, $future:expr, $t:ty$(,)?) => {{
-        #[cfg(feature = $feature)]
+macro_rules! with_cfg {
+    ($cfg:ident, $future:expr, $t:ty$(,)?) => {{
+        #[cfg($cfg)]
         {
             core::pin::pin!($future.fuse())
         }
-        #[cfg(not(feature = $feature))]
+        #[cfg(not($cfg))]
         {
             core::future::pending::<$t>().fuse()
         }
     }};
-    ($feature:literal, $future:expr$(,)?) => {{
-        #[cfg(feature = $feature)]
+    ($cfg:ident, $future:expr$(,)?) => {{
+        #[cfg($cfg)]
         {
             core::pin::pin!($future.fuse())
         }
-        #[cfg(not(feature = $feature))]
+        #[cfg(not($cfg))]
         {
             core::future::pending::<()>().fuse()
         }
     }};
 }
 
-/// Wrapper for select_biased! with feature-gated arms
+/// Wrapper for select_biased! with cfg-gated arms (`rmk_*` capability cfgs)
 ///
 /// Usage:
 /// ```ignore
-/// select_biased_with_feature! {
+/// select_biased_with_cfg! {
 ///     pattern = future => handler,
-///     with_feature("feature"): pattern = future => handler,
+///     with_cfg(rmk_ble): pattern = future => handler,
 /// }
 /// ```
 #[macro_export]
-macro_rules! select_biased_with_feature {
+macro_rules! select_biased_with_cfg {
     ($($input:tt)*) => {
-        $crate::__select_biased_with_feature_impl!([] [] $($input)*)
+        $crate::__select_biased_with_cfg_impl!([] [] $($input)*)
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __select_biased_with_feature_impl {
+macro_rules! __select_biased_with_cfg_impl {
     // Collect conditional arm
-    ([$($n:tt)*] [$($c:tt)*] with_feature($f:literal): $p:pat = $fut:expr => $h:expr, $($rest:tt)*) => {
-        $crate::__select_biased_with_feature_impl!([$($n)*] [$($c)* {$f: $p = $fut => $h,}] $($rest)*)
+    ([$($n:tt)*] [$($c:tt)*] with_cfg($f:ident): $p:pat = $fut:expr => $h:expr, $($rest:tt)*) => {
+        $crate::__select_biased_with_cfg_impl!([$($n)*] [$($c)* {$f: $p = $fut => $h,}] $($rest)*)
     };
-    ([$($n:tt)*] [$($c:tt)*] with_feature($f:literal): $p:pat = $fut:expr => $h:expr $(,)?) => {
-        $crate::__select_biased_with_feature_impl!([$($n)*] [$($c)* {$f: $p = $fut => $h,}])
+    ([$($n:tt)*] [$($c:tt)*] with_cfg($f:ident): $p:pat = $fut:expr => $h:expr $(,)?) => {
+        $crate::__select_biased_with_cfg_impl!([$($n)*] [$($c)* {$f: $p = $fut => $h,}])
     };
 
     // Collect normal arm
     ([$($n:tt)*] [$($c:tt)*] $p:pat = $fut:expr => $h:expr, $($rest:tt)*) => {
-        $crate::__select_biased_with_feature_impl!([$($n)* $p = $fut => $h,] [$($c)*] $($rest)*)
+        $crate::__select_biased_with_cfg_impl!([$($n)* $p = $fut => $h,] [$($c)*] $($rest)*)
     };
     ([$($n:tt)*] [$($c:tt)*] $p:pat = $fut:expr => $h:expr $(,)?) => {
-        $crate::__select_biased_with_feature_impl!([$($n)* $p = $fut => $h,] [$($c)*])
+        $crate::__select_biased_with_cfg_impl!([$($n)* $p = $fut => $h,] [$($c)*])
     };
 
     // Done: no conditional arms
@@ -120,34 +120,34 @@ macro_rules! __select_biased_with_feature_impl {
     };
 
     // Done: has conditional arms - generate nested cfg
-    ([$($n:tt)*] [{$f:literal: $($arm:tt)*} $($rest:tt)*]) => {{
-        #[cfg(feature = $f)]
-        { $crate::__select_biased_with_feature_gen!([$($n)* $($arm)*] [$($rest)*]) }
-        #[cfg(not(feature = $f))]
-        { $crate::__select_biased_with_feature_impl!([$($n)*] [$($rest)*]) }
+    ([$($n:tt)*] [{$f:ident: $($arm:tt)*} $($rest:tt)*]) => {{
+        #[cfg($f)]
+        { $crate::__select_biased_with_cfg_gen!([$($n)* $($arm)*] [$($rest)*]) }
+        #[cfg(not($f))]
+        { $crate::__select_biased_with_cfg_impl!([$($n)*] [$($rest)*]) }
     }};
 }
 
 // Generate final select_biased with collected arms
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __select_biased_with_feature_gen {
+macro_rules! __select_biased_with_cfg_gen {
     ([$($n:tt)*] [$($c:tt)*]) => {
-        $crate::__select_biased_with_feature_expand!([$($n)*] [$($c)*])
+        $crate::__select_biased_with_cfg_expand!([$($n)*] [$($c)*])
     };
 }
 
 // Expand to select_biased with cfg checks for remaining conditional arms
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __select_biased_with_feature_expand {
+macro_rules! __select_biased_with_cfg_expand {
     ([$($all:tt)*] []) => {
         $crate::futures::select_biased! { $($all)* }
     };
-    ([$($collected:tt)*] [{$f:literal: $($arm:tt)*} $($rest:tt)*]) => {{
-        #[cfg(feature = $f)]
-        { $crate::__select_biased_with_feature_expand!([$($collected)* $($arm)*] [$($rest)*]) }
-        #[cfg(not(feature = $f))]
-        { $crate::__select_biased_with_feature_expand!([$($collected)*] [$($rest)*]) }
+    ([$($collected:tt)*] [{$f:ident: $($arm:tt)*} $($rest:tt)*]) => {{
+        #[cfg($f)]
+        { $crate::__select_biased_with_cfg_expand!([$($collected)* $($arm)*] [$($rest)*]) }
+        #[cfg(not($f))]
+        { $crate::__select_biased_with_cfg_expand!([$($collected)*] [$($rest)*]) }
     }};
 }

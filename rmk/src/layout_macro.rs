@@ -687,7 +687,7 @@ macro_rules! special {
     };
 }
 
-#[cfg(feature = "steno")]
+#[cfg(rmk_steno)]
 #[macro_export]
 macro_rules! steno {
     ($key: ident) => {

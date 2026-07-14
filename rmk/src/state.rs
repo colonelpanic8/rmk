@@ -2,7 +2,7 @@ use core::cell::Cell;
 
 use embassy_sync::blocking_mutex::Mutex;
 use rmk_types::ble::BleState;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::ble::BleStatus;
 use rmk_types::connection::{ConnectionStatus, ConnectionType, UsbState};
 
@@ -30,17 +30,17 @@ pub(crate) fn current_usb_state() -> UsbState {
 /// Current central sleep state for host polling. Sourced from the BLE sleep
 /// manager's `SLEEPING_STATE`; always `false` in builds without BLE.
 pub(crate) fn current_sleep_state() -> bool {
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     {
         crate::ble::SLEEPING_STATE.load(core::sync::atomic::Ordering::Acquire)
     }
-    #[cfg(not(feature = "_ble"))]
+    #[cfg(not(rmk_ble))]
     {
         false
     }
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) fn current_ble_status() -> BleStatus {
     CONNECTION_STATUS.lock(|c| c.get().ble)
 }
@@ -102,22 +102,22 @@ pub(crate) fn set_preferred_connection(t: ConnectionType) {
 ///
 /// With the `storage` feature, reads the persisted `ConnectionType` from flash;
 /// otherwise falls back to a build-time default — `Ble` when USB is disabled, `Usb` otherwise.
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) async fn load_preferred_connection() -> ConnectionType {
-    #[cfg(feature = "storage")]
+    #[cfg(rmk_storage)]
     let stored = crate::storage::read_connection_type().await;
-    #[cfg(not(feature = "storage"))]
+    #[cfg(not(rmk_storage))]
     let stored: Option<ConnectionType> = None;
     match stored {
         Some(c) => c,
-        #[cfg(feature = "_no_usb")]
+        #[cfg(not(rmk_usb))]
         None => ConnectionType::Ble,
-        #[cfg(not(feature = "_no_usb"))]
+        #[cfg(rmk_usb)]
         None => ConnectionType::Usb,
     }
 }
 
-#[cfg(all(feature = "_ble", not(feature = "_no_usb")))]
+#[cfg(all(rmk_ble, rmk_usb))]
 pub(crate) async fn toggle_preferred() {
     let mut new = ConnectionType::Usb;
     update_status(|c| {
@@ -128,13 +128,13 @@ pub(crate) async fn toggle_preferred() {
         new = c.preferred;
     });
     info!("Switching preferred transport to: {:?}", new);
-    #[cfg(feature = "storage")]
+    #[cfg(rmk_storage)]
     crate::channel::FLASH_CHANNEL
         .send(crate::storage::FlashOperationMessage::ConnectionType(new))
         .await;
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) fn current_profile() -> u8 {
     CONNECTION_STATUS.lock(|c| c.get().ble.profile)
 }
@@ -160,9 +160,9 @@ mod tests {
 
     fn reset_state() {
         CONNECTION_STATUS.lock(|c| c.set(ConnectionStatus::default()));
-        #[cfg(not(feature = "_no_usb"))]
+        #[cfg(rmk_usb)]
         crate::channel::USB_REPORT_CHANNEL.clear();
-        #[cfg(feature = "_ble")]
+        #[cfg(rmk_ble)]
         crate::channel::BLE_REPORT_CHANNEL.clear();
     }
 
@@ -228,7 +228,7 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "_no_usb"))]
+    #[cfg(rmk_usb)]
     #[test]
     fn flipping_away_from_active_clears_stale_reports_and_queues_all_up() {
         use crate::channel::USB_REPORT_CHANNEL;
@@ -262,7 +262,7 @@ mod tests {
         );
     }
 
-    #[cfg(not(feature = "_no_usb"))]
+    #[cfg(rmk_usb)]
     #[test]
     fn blocked_send_drops_report_after_transport_change() {
         use embassy_futures::join::join;
@@ -298,7 +298,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(not(feature = "_no_usb"), feature = "_ble"))]
+    #[cfg(all(rmk_usb, rmk_ble))]
     #[test]
     fn usb_preference_flip_releases_previous_ble_transport() {
         use crate::channel::BLE_REPORT_CHANNEL;
@@ -327,7 +327,7 @@ mod tests {
         );
     }
 
-    #[cfg(not(feature = "_no_usb"))]
+    #[cfg(rmk_usb)]
     #[test]
     fn blocked_send_enqueues_when_transport_stays_active() {
         use embassy_futures::join::join;

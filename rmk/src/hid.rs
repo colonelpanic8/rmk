@@ -6,7 +6,7 @@ use embassy_usb::class::hid::ReadError;
 use embassy_usb::driver::EndpointError;
 use rmk_types::connection::ConnectionType;
 use rmk_types::led_indicator::LedIndicator;
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 use rmk_types::protocol::rynk::RYNK_HID_REPORT_SIZE;
 use serde::Serialize;
 use usbd_hid::descriptor::generator_prelude::*;
@@ -61,7 +61,7 @@ pub struct ViaReport {
 }
 
 /// Vendor HID report carrying the Rynk config protocol over HID.
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 #[gen_hid_descriptor(
     (collection = APPLICATION, usage_page = 0xFF60, usage = 0x61) = {
         (usage = 0x62, logical_min = 0x0) = {
@@ -81,7 +81,7 @@ pub struct RynkHidReport {
 }
 
 // `core::assert!`: a `defmt` build's crate-level `assert!` isn't const-callable.
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 const _: () = core::assert!(
     RYNK_HID_REPORT_SIZE == 32,
     "RynkHidReport literal length must equal RYNK_HID_REPORT_SIZE"
@@ -117,7 +117,7 @@ pub enum CompositeReportType {
 /// Logical collection containing 64 single-bit Ordinal usages.
 ///
 /// Reference: <https://github.com/dnaq/plover-machine-hid>
-#[cfg(feature = "steno")]
+#[cfg(rmk_steno)]
 #[gen_hid_descriptor(
     (collection = LOGICAL, usage_page = 0xFF50, usage = 0x4C56) = {
         (report_id = 0x50, usage_page = 0x0A, usage_min = 0x0, usage_max = 0x3F, logical_min = 0x0) = {
@@ -134,7 +134,7 @@ pub struct StenoReport {
 // `gen_hid_descriptor` skips the `AsInputReport` impl when a `report_id`
 // is present, so the wire format must be assembled by hand: byte 0 is the
 // Plover HID report ID followed by the eight chord-bitmap bytes.
-#[cfg(feature = "steno")]
+#[cfg(rmk_steno)]
 impl usbd_hid::descriptor::AsInputReport for StenoReport {
     fn serialize(&self, buffer: &mut [u8]) -> Result<usize, usbd_hid::descriptor::BufferOverflow> {
         if buffer.len() < 9 {
@@ -146,7 +146,7 @@ impl usbd_hid::descriptor::AsInputReport for StenoReport {
     }
 }
 
-#[cfg(all(test, feature = "steno"))]
+#[cfg(all(test, rmk_steno))]
 mod steno_tests {
     use usbd_hid::descriptor::SerializedDescriptor;
 
@@ -235,7 +235,7 @@ pub enum Report {
     /// System control report
     SystemControlReport(SystemControlReport),
     /// Plover HID stenography chord report
-    #[cfg(feature = "steno")]
+    #[cfg(rmk_steno)]
     StenoReport(StenoReport),
 }
 
@@ -246,7 +246,7 @@ impl AsInputReport for Report {
             Report::MouseReport(r) => r.serialize(buffer),
             Report::MediaKeyboardReport(r) => r.serialize(buffer),
             Report::SystemControlReport(r) => r.serialize(buffer),
-            #[cfg(feature = "steno")]
+            #[cfg(rmk_steno)]
             Report::StenoReport(r) => r.serialize(buffer),
         }
     }

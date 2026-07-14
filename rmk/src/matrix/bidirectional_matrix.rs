@@ -102,6 +102,6 @@ impl<Pin: FlexPin, D: DebouncerTrait<ROW, COL>, const PIN_NUM: usize, const ROW:
 impl<Pin: FlexPin, D: DebouncerTrait<ROW, COL>, const PIN_NUM: usize, const ROW: usize, const COL: usize>
     MatrixTrait<ROW, COL> for BidirectionalMatrix<Pin, D, PIN_NUM, ROW, COL>
 {
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     async fn wait_for_key(&mut self) {}
 }

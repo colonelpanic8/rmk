@@ -8,7 +8,7 @@
 use futures::FutureExt;
 use rmk_types::protocol::rynk::TopicEvent;
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use crate::event::BatteryStatusEvent;
 use crate::event::{
     ConnectionStatusChangeEvent, EventSubscriber, LayerChangeEvent, LedIndicatorEvent, SleepStateEvent,
@@ -21,7 +21,7 @@ pub(crate) struct TopicSubscribers {
     conn: <ConnectionStatusChangeEvent as SubscribableEvent>::Subscriber,
     sleep: <SleepStateEvent as SubscribableEvent>::Subscriber,
     led: <LedIndicatorEvent as SubscribableEvent>::Subscriber,
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     battery: <BatteryStatusEvent as SubscribableEvent>::Subscriber,
 }
 
@@ -33,7 +33,7 @@ impl TopicSubscribers {
             conn: ConnectionStatusChangeEvent::subscriber(),
             sleep: SleepStateEvent::subscriber(),
             led: LedIndicatorEvent::subscriber(),
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             battery: BatteryStatusEvent::subscriber(),
         }
     }
@@ -42,13 +42,13 @@ impl TopicSubscribers {
     /// Each value's current snapshot is owned by its producer,
     /// this only forwards change notifications onto the wire.
     pub(crate) async fn next_event(&mut self) -> TopicEvent {
-        crate::select_biased_with_feature! {
+        crate::select_biased_with_cfg! {
             e = self.layer.next_event().fuse() => TopicEvent::LayerChange(*e),
             e = self.wpm.next_event().fuse() => TopicEvent::WpmUpdate(*e),
             e = self.conn.next_event().fuse() => TopicEvent::ConnectionChange(*e),
             e = self.sleep.next_event().fuse() => TopicEvent::SleepState(*e),
             e = self.led.next_event().fuse() => TopicEvent::LedIndicatorChange(*e),
-            with_feature("_ble"): e = self.battery.next_event().fuse() => TopicEvent::BatteryStatusChange(*e),
+            with_cfg(rmk_ble): e = self.battery.next_event().fuse() => TopicEvent::BatteryStatusChange(*e),
         }
     }
 }

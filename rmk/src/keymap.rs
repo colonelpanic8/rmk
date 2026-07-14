@@ -4,7 +4,7 @@ use embassy_time::Duration;
 use rmk_types::action::{EncoderAction, KeyAction};
 use rmk_types::fork::Fork;
 use rmk_types::morse::{Morse, MorseProfile};
-#[cfg(all(feature = "storage", feature = "host"))]
+#[cfg(all(rmk_storage, rmk_host))]
 use {
     crate::{boot::reboot_keyboard, storage::Storage},
     embedded_storage_async::nor_flash::NorFlash,
@@ -16,7 +16,7 @@ use crate::event::{KeyboardEvent, KeyboardEventPos, LayerChangeEvent, publish_ev
 use crate::input_device::rotary_encoder::Direction;
 use crate::keyboard::combo::Combo;
 use crate::keyboard_macros::MacroOperation;
-#[cfg(feature = "host_lock")]
+#[cfg(rmk_host_lock)]
 use crate::matrix::MatrixState;
 
 pub(crate) const HOLD_BUFFER_SIZE: usize = 16;
@@ -103,7 +103,7 @@ struct KeyMapInner<'a> {
     /// Mouse button state
     mouse_buttons: u8,
     /// Matrix state for vial lock
-    #[cfg(feature = "host_lock")]
+    #[cfg(rmk_host_lock)]
     matrix_state: MatrixState,
 }
 
@@ -363,7 +363,7 @@ impl<'a> KeyMap<'a> {
                 behavior,
                 hand,
                 mouse_buttons: 0,
-                #[cfg(feature = "host_lock")]
+                #[cfg(rmk_host_lock)]
                 matrix_state: MatrixState::new(ROW, COL),
             }),
         }
@@ -380,7 +380,7 @@ impl<'a> KeyMap<'a> {
         Self::build(data, behavior, positional_config)
     }
 
-    #[cfg(all(feature = "storage", feature = "host"))]
+    #[cfg(all(rmk_storage, rmk_host))]
     pub async fn new_from_storage<
         F: NorFlash,
         const ROW: usize,
@@ -760,17 +760,17 @@ impl<'a> KeyMap<'a> {
         self.inner.borrow().behavior.keyboard_macros.macro_sequences
     }
 
-    #[cfg(feature = "host_lock")]
+    #[cfg(rmk_host_lock)]
     pub(crate) fn update_matrix_state(&self, event: &KeyboardEvent) {
         self.inner.borrow_mut().matrix_state.update(event);
     }
 
-    #[cfg(feature = "host_lock")]
+    #[cfg(rmk_host_lock)]
     pub(crate) fn read_matrix_state(&self, target: &mut [u8]) {
         self.inner.borrow().matrix_state.read_all(target);
     }
 
-    #[cfg(feature = "host_lock")]
+    #[cfg(rmk_host_lock)]
     pub(crate) fn read_matrix_key(&self, row: u8, col: u8) -> bool {
         self.inner.borrow().matrix_state.read(row, col)
     }

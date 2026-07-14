@@ -1,7 +1,7 @@
 use embassy_time::Timer;
 use embedded_hal::digital::{InputPin, OutputPin};
 use rmk_macro::input_device;
-#[cfg(feature = "async_matrix")]
+#[cfg(rmk_async_matrix)]
 use {embassy_futures::select::select_array, embedded_hal_async::digital::Wait};
 
 use crate::core_traits::Runnable;
@@ -13,7 +13,7 @@ pub mod direct_pin;
 pub mod hc595_matrix;
 
 /// Recording the matrix pressed state
-#[cfg(feature = "host_lock")]
+#[cfg(rmk_host_lock)]
 pub struct MatrixState {
     // 30 bytes is the limit by Vial and 240 keys is enough for most keyboards
     state: [u8; 30],
@@ -22,7 +22,7 @@ pub struct MatrixState {
     row_len: usize,
 }
 
-#[cfg(feature = "host_lock")]
+#[cfg(rmk_host_lock)]
 impl MatrixState {
     pub fn new(row: usize, col: usize) -> Self {
         let row_len = col.div_ceil(8);
@@ -70,7 +70,7 @@ impl MatrixState {
 ///
 /// The keyboard matrix is a 2D matrix of keys, the matrix does the scanning and saves the result to each key's `KeyState`.
 pub trait MatrixTrait<const ROW: usize, const COL: usize>: InputDevice {
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     async fn wait_for_key(&mut self);
 }
 
@@ -123,14 +123,14 @@ pub trait MatrixOutputPins<Out: OutputPin> {
 pub trait MatrixInputPins<In: InputPin> {
     fn get_input_pins(&self) -> &[In];
     fn get_input_pins_mut(&mut self) -> &mut [In];
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     async fn wait_input_pins(&mut self);
 }
 
 /// Matrix is the physical pcb layout of the keyboard matrix.
 pub struct Matrix<
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -153,13 +153,13 @@ pub struct Matrix<
     /// Current scan pos: (out_idx, in_idx)
     scan_pos: (usize, usize),
     /// Re-scan needed flag
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     rescan_needed: bool,
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -172,8 +172,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -186,8 +186,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -200,8 +200,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -214,8 +214,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -234,8 +234,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -254,8 +254,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -272,7 +272,7 @@ impl<
         &mut self.row_pins
     }
 
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     async fn wait_input_pins(&mut self) {
         let futs = self.row_pins.each_mut().map(|input_pin| input_pin.wait_for_high());
         let _ = select_array(futs).await;
@@ -280,8 +280,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -298,7 +298,7 @@ impl<
         &mut self.col_pins
     }
 
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     async fn wait_input_pins(&mut self) {
         let futs = self.col_pins.each_mut().map(|input_pin| input_pin.wait_for_high());
         let _ = select_array(futs).await;
@@ -306,8 +306,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -335,15 +335,15 @@ where
             debouncer,
             key_states: [[KeyState::new(); ROW]; COL],
             scan_pos: (0, 0),
-            #[cfg(feature = "async_matrix")]
+            #[cfg(rmk_async_matrix)]
             rescan_needed: false,
         }
     }
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -394,7 +394,7 @@ where
                     if let DebounceState::Debounced = debounce_state {
                         self.key_states[col_idx][row_idx].toggle_pressed();
                         self.scan_pos = (out_idx, in_idx);
-                        #[cfg(feature = "async_matrix")]
+                        #[cfg(rmk_async_matrix)]
                         {
                             self.rescan_needed = true;
                         }
@@ -410,7 +410,7 @@ where
                     }
 
                     // If there's key still pressed, always refresh the self.scan_start
-                    #[cfg(feature = "async_matrix")]
+                    #[cfg(rmk_async_matrix)]
                     if self.key_states[col_idx][row_idx].pressed {
                         self.rescan_needed = true;
                     }
@@ -422,7 +422,7 @@ where
                 }
             }
 
-            #[cfg(feature = "async_matrix")]
+            #[cfg(rmk_async_matrix)]
             {
                 if !self.rescan_needed {
                     self.wait_for_key().await;
@@ -435,8 +435,8 @@ where
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -460,8 +460,8 @@ where
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     Out: OutputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
@@ -476,7 +476,7 @@ where
     Self: MatrixOutputPins<Out>,
     Self: MatrixInputPins<In>,
 {
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     async fn wait_for_key(&mut self) {
         // First, set all output pins to high
         for out in self.get_output_pins_mut().iter_mut() {
@@ -520,6 +520,6 @@ impl<const ROW: usize, const COL: usize> TestMatrix<ROW, COL> {
 }
 
 impl<const ROW: usize, const COL: usize> MatrixTrait<ROW, COL> for TestMatrix<ROW, COL> {
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     async fn wait_for_key(&mut self) {}
 }

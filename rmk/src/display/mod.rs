@@ -67,22 +67,22 @@ pub use lcd_async;
 pub use oled_async;
 pub use renderers::{LogoRenderer, OledRenderer};
 use rmk_macro::processor;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::ble::BleStatus;
 use rmk_types::modifier::ModifierCombination;
 #[cfg(feature = "ssd1306")]
 pub use ssd1306;
 
 use crate::core_traits::Runnable;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use crate::event::ConnectionStatusChangeEvent;
-#[cfg(all(feature = "split", feature = "_ble"))]
+#[cfg(all(rmk_split, rmk_ble))]
 use crate::event::PeripheralBatteryEvent;
 use crate::event::{
     BatteryStatusEvent, KeyboardEvent, LayerChangeEvent, LedIndicatorEvent, ModifierEvent, SleepStateEvent,
     WpmUpdateEvent,
 };
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 use crate::event::{CentralConnectedEvent, PeripheralConnectedEvent};
 use crate::processor::Processor;
 
@@ -113,16 +113,16 @@ pub struct RenderContext {
     /// Whether the keyboard is sleeping.
     pub sleeping: bool,
     /// Current BLE connection status (profile + state).
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     pub ble_status: BleStatus,
     /// Whether the central is connected (only meaningful on peripherals).
-    #[cfg(feature = "split")]
+    #[cfg(rmk_split)]
     pub central_connected: bool,
     /// Per-peripheral connection state, indexed by peripheral id.
-    #[cfg(feature = "split")]
+    #[cfg(rmk_split)]
     pub peripherals_connected: [bool; crate::SPLIT_PERIPHERALS_NUM],
     /// Per-peripheral battery status, indexed by peripheral id.
-    #[cfg(all(feature = "split", feature = "_ble"))]
+    #[cfg(all(rmk_split, rmk_ble))]
     pub peripheral_batteries: [BatteryStatusEvent; crate::SPLIT_PERIPHERALS_NUM],
     /// Currently active modifier keys (Shift, Ctrl, Alt, GUI).
     pub modifiers: ModifierCombination,
@@ -144,13 +144,13 @@ impl Default for RenderContext {
             num_lock: false,
             battery: BatteryStatusEvent(rmk_types::battery::BatteryStatus::Unavailable),
             sleeping: false,
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             ble_status: BleStatus::default(),
-            #[cfg(feature = "split")]
+            #[cfg(rmk_split)]
             central_connected: false,
-            #[cfg(feature = "split")]
+            #[cfg(rmk_split)]
             peripherals_connected: [false; crate::SPLIT_PERIPHERALS_NUM],
-            #[cfg(all(feature = "split", feature = "_ble"))]
+            #[cfg(all(rmk_split, rmk_ble))]
             peripheral_batteries: [BatteryStatusEvent(rmk_types::battery::BatteryStatus::Unavailable);
                 crate::SPLIT_PERIPHERALS_NUM],
             modifiers: ModifierCombination::new(),
@@ -224,9 +224,9 @@ pub trait DisplayRenderer<C: PixelColor> {
 /// - `D` — display driver, must implement [`DisplayDriver`].
 /// - `R` — the renderer, defaults to [`LogoRenderer`].
 #[processor(subscribe = [KeyboardEvent, LayerChangeEvent, WpmUpdateEvent, LedIndicatorEvent, ModifierEvent, BatteryStatusEvent, SleepStateEvent])]
-#[cfg_attr(feature = "_ble", processor(subscribe = [ConnectionStatusChangeEvent]))]
-#[cfg_attr(feature = "split", processor(subscribe = [PeripheralConnectedEvent, CentralConnectedEvent]))]
-#[cfg_attr(all(feature = "split", feature = "_ble"), processor(subscribe = [PeripheralBatteryEvent]))]
+#[cfg_attr(rmk_ble, processor(subscribe = [ConnectionStatusChangeEvent]))]
+#[cfg_attr(rmk_split, processor(subscribe = [PeripheralConnectedEvent, CentralConnectedEvent]))]
+#[cfg_attr(all(rmk_split, rmk_ble), processor(subscribe = [PeripheralBatteryEvent]))]
 #[::rmk::macros::runnable_generated]
 pub struct DisplayProcessor<D, R = LogoRenderer>
 where
@@ -380,13 +380,13 @@ where
         self.render().await;
     }
 
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     async fn on_connection_status_change_event(&mut self, event: ConnectionStatusChangeEvent) {
         self.ctx.ble_status = event.0.ble;
         self.render().await;
     }
 
-    #[cfg(feature = "split")]
+    #[cfg(rmk_split)]
     async fn on_peripheral_connected_event(&mut self, event: PeripheralConnectedEvent) {
         if let Some(slot) = self.ctx.peripherals_connected.get_mut(event.id) {
             *slot = event.connected;
@@ -394,13 +394,13 @@ where
         self.render().await;
     }
 
-    #[cfg(feature = "split")]
+    #[cfg(rmk_split)]
     async fn on_central_connected_event(&mut self, event: CentralConnectedEvent) {
         self.ctx.central_connected = event.connected;
         self.render().await;
     }
 
-    #[cfg(all(feature = "split", feature = "_ble"))]
+    #[cfg(all(rmk_split, rmk_ble))]
     async fn on_peripheral_battery_event(&mut self, event: PeripheralBatteryEvent) {
         if let Some(slot) = self.ctx.peripheral_batteries.get_mut(event.id) {
             *slot = event.state;
@@ -420,7 +420,7 @@ where
 
         // Prime from current state after subscribing, so the first render
         // reflects state that was set before the processor started.
-        #[cfg(feature = "_ble")]
+        #[cfg(rmk_ble)]
         {
             self.ctx.ble_status = crate::state::current_ble_status();
         }

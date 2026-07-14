@@ -6,11 +6,11 @@ use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
 use futures::FutureExt;
 use rmk_types::battery::BatteryStatus;
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 use rmk_types::protocol::rynk::PeripheralStatus;
 
 use super::SplitMessage;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use crate::event::{BatteryStatusEvent, PeripheralBatteryEvent};
 use crate::event::{
     KeyboardEvent, KeyboardEventPos, PeripheralConnectedEvent, SubscribableEvent, publish_event, publish_event_async,
@@ -81,7 +81,7 @@ pub(crate) fn set_peripheral_connected(id: usize, connected: bool) {
 }
 
 /// Latch peripheral `id`'s battery status and broadcast the change.
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) fn set_peripheral_battery(id: usize, battery: BatteryStatus) {
     if update_slot(id, |s| s.battery = battery) {
         publish_event(PeripheralBatteryEvent {
@@ -92,7 +92,7 @@ pub(crate) fn set_peripheral_battery(id: usize, battery: BatteryStatus) {
 }
 
 /// Latest snapshot for peripheral `id`, or `None` when `id` is out of range.
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 pub(crate) fn current_peripheral_status(id: usize) -> Option<PeripheralStatus> {
     PERIPHERAL_SLOTS.lock(|slots| {
         slots.get().get(id).map(|s| PeripheralStatus {
@@ -155,14 +155,14 @@ impl<const ROW: usize, const COL: usize, const ROW_OFFSET: usize, const COL_OFFS
         // Subscribe before the initial send so any change racing past the
         // snapshot is still delivered to us.
         let mut connection_sub = crate::event::ConnectionStatusChangeEvent::subscriber();
-        #[cfg(feature = "_ble")]
+        #[cfg(rmk_ble)]
         let mut clear_peer_sub = crate::event::ClearPeerEvent::subscriber();
 
-        #[cfg(feature = "display")]
+        #[cfg(rmk_display)]
         let mut wpm_sub = crate::event::WpmUpdateEvent::subscriber();
-        #[cfg(feature = "display")]
+        #[cfg(rmk_display)]
         let mut modifier_sub = crate::event::ModifierEvent::subscriber();
-        #[cfg(feature = "display")]
+        #[cfg(rmk_display)]
         let mut sleep_sub = crate::event::SleepStateEvent::subscriber();
 
         // Send the current state once on startup so the peripheral matches us
@@ -180,12 +180,12 @@ impl<const ROW: usize, const COL: usize, const ROW_OFFSET: usize, const COL_OFFS
         loop {
             // Use select_biased_with_feature to handle feature-gated subscriber arms
             let next_event_to_peri = async {
-                crate::select_biased_with_feature! {
+                crate::select_biased_with_cfg! {
                     e = indicator_sub.next_event().fuse() => SplitMessage::KeyboardIndicator(e.0.into_bits()),
                     e = layer_sub.next_event().fuse() => SplitMessage::Layer(e.0),
                     e = connection_sub.next_event().fuse() => SplitMessage::ConnectionStatus(e.0),
-                    with_feature("_ble"): _ = clear_peer_sub.next_event().fuse() => {
-                        #[cfg(feature = "storage")]
+                    with_cfg(rmk_ble): _ = clear_peer_sub.next_event().fuse() => {
+                        #[cfg(rmk_storage)]
                         {
                             use {crate::channel::FLASH_CHANNEL, crate::split::ble::PeerAddress, crate::storage::FlashOperationMessage};
                             FLASH_CHANNEL
@@ -198,9 +198,9 @@ impl<const ROW: usize, const COL: usize, const ROW_OFFSET: usize, const COL_OFFS
                         }
                         SplitMessage::ClearPeer
                     },
-                    with_feature("display"): e = wpm_sub.next_event().fuse() => SplitMessage::Wpm(e.0),
-                    with_feature("display"): e = modifier_sub.next_event().fuse() => SplitMessage::Modifier(e.modifier.into_bits()),
-                    with_feature("display"): e = sleep_sub.next_event().fuse() => SplitMessage::SleepState(e.0),
+                    with_cfg(rmk_display): e = wpm_sub.next_event().fuse() => SplitMessage::Wpm(e.0),
+                    with_cfg(rmk_display): e = modifier_sub.next_event().fuse() => SplitMessage::Modifier(e.modifier.into_bits()),
+                    with_cfg(rmk_display): e = sleep_sub.next_event().fuse() => SplitMessage::SleepState(e.0),
                 }
             };
 
@@ -248,7 +248,7 @@ impl<const ROW: usize, const COL: usize, const ROW_OFFSET: usize, const COL_OFFS
             },
             // Non-key events are drop-on-full to keep the split read loop responsive.
             SplitMessage::Pointing(e) => publish_event(e),
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             SplitMessage::BatteryStatus(state) => set_peripheral_battery(self.id, state.0),
             _ => warn!("{:?} should not come from peripheral", split_message),
         }

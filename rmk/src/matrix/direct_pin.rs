@@ -2,7 +2,7 @@ use embassy_time::Timer;
 use embedded_hal;
 use embedded_hal::digital::InputPin;
 use rmk_macro::input_device;
-#[cfg(feature = "async_matrix")]
+#[cfg(rmk_async_matrix)]
 use {
     core::future::pending, embassy_futures::select::select_array, embassy_time::Instant,
     embedded_hal_async::digital::Wait,
@@ -15,8 +15,8 @@ use crate::event::KeyboardEvent;
 /// DirectPinMartex only has input pins.
 #[input_device(publish = KeyboardEvent)]
 pub struct DirectPinMatrix<
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
     const COL: usize,
@@ -31,7 +31,7 @@ pub struct DirectPinMatrix<
     /// Key state matrix
     key_states: [[KeyState; COL]; ROW],
     /// Start scanning — used by async-matrix wait gating only.
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     scan_start: Option<Instant>,
     /// Pin active level
     low_active: bool,
@@ -40,8 +40,8 @@ pub struct DirectPinMatrix<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
     const COL: usize,
@@ -56,7 +56,7 @@ impl<
             direct_pins,
             debouncer,
             key_states: [[KeyState::new(); COL]; ROW],
-            #[cfg(feature = "async_matrix")]
+            #[cfg(rmk_async_matrix)]
             scan_start: None,
             low_active,
             scan_pos: (0, 0),
@@ -65,8 +65,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
     const COL: usize,
@@ -81,7 +81,7 @@ impl<
         loop {
             let (row_idx_start, col_idx_start) = self.scan_pos;
 
-            #[cfg(feature = "async_matrix")]
+            #[cfg(rmk_async_matrix)]
             self.wait_for_key().await;
 
             // Scan matrix and send report
@@ -117,7 +117,7 @@ impl<
                         }
 
                         // If there's key still pressed, always refresh the self.scan_start
-                        #[cfg(feature = "async_matrix")]
+                        #[cfg(rmk_async_matrix)]
                         if self.key_states[row_idx][col_idx].pressed {
                             self.scan_start = Some(Instant::now());
                         }
@@ -133,8 +133,8 @@ impl<
 }
 
 impl<
-    #[cfg(not(feature = "async_matrix"))] In: InputPin,
-    #[cfg(feature = "async_matrix")] In: Wait + InputPin,
+    #[cfg(not(rmk_async_matrix))] In: InputPin,
+    #[cfg(rmk_async_matrix)] In: Wait + InputPin,
     D: DebouncerTrait<ROW, COL>,
     const ROW: usize,
     const COL: usize,
@@ -143,7 +143,7 @@ impl<
     const COL_OFFSET: usize,
 > MatrixTrait<ROW, COL> for DirectPinMatrix<In, D, ROW, COL, SIZE, ROW_OFFSET, COL_OFFSET>
 {
-    #[cfg(feature = "async_matrix")]
+    #[cfg(rmk_async_matrix)]
     async fn wait_for_key(&mut self) {
         if let Some(start_time) = self.scan_start {
             // If no key press over 1ms, stop scanning and wait for interupt

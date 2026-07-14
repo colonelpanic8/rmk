@@ -3,9 +3,9 @@ use usbd_hid::descriptor::{AsInputReport, SerializedDescriptor};
 
 use super::battery_service::BatteryService;
 use super::device_info::DeviceConfigurationService;
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 use crate::hid::RynkHidReport;
-#[cfg(feature = "vial")]
+#[cfg(rmk_vial)]
 use crate::hid::ViaReport;
 use crate::hid::{CompositeReport, CompositeReportType, HidError, HidWriterTrait, KeyboardReport, Report};
 
@@ -13,12 +13,12 @@ use crate::hid::{CompositeReport, CompositeReportType, HidError, HidWriterTrait,
 // per-connection client-specific attribute buffer size.
 pub(crate) const CCCD_TABLE_SIZE: usize = trouble_host::config::CLIENT_ATT_TABLE_SIZE;
 
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 use rmk_types::protocol::rynk::{
     RYNK_BLE_CHUNK_SIZE, RYNK_HID_REPORT_SIZE, RYNK_INPUT_CHAR_UUID, RYNK_OUTPUT_CHAR_UUID, RYNK_SERVICE_UUID,
 };
 
-#[cfg(feature = "vial")]
+#[cfg(rmk_vial)]
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
@@ -28,7 +28,7 @@ pub(crate) struct Server {
     pub(crate) device_config_service: DeviceConfigurationService,
 }
 
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
@@ -39,7 +39,7 @@ pub(crate) struct Server {
     pub(crate) device_config_service: DeviceConfigurationService,
 }
 
-#[cfg(not(feature = "host"))]
+#[cfg(not(rmk_host))]
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
@@ -55,7 +55,7 @@ pub(crate) struct Server {
 ///
 /// `gatt_events_task` forwards `output_data` writes into
 /// [`crate::channel::RYNK_BLE_RX_PIPE`] for [`crate::ble::host::HostGattHandler::run`] to drain.
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 #[gatt_service(uuid = RYNK_SERVICE_UUID)]
 pub(crate) struct RynkGattService {
     // ATT enforces encryption; the event loop still filters the data path.
@@ -69,7 +69,7 @@ pub(crate) struct RynkGattService {
 /// Rynk HID-over-GATT service.
 /// `gatt_events_task` feeds the payload into [`crate::channel::RYNK_BLE_RX_PIPE`],
 /// [`crate::ble::host::HostGattHandler::run`] drains the pipe to get data.
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub(crate) struct RynkHidService {
     #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
@@ -94,7 +94,7 @@ pub(crate) struct RynkHidService {
 /// `input_data` notify; hosts push requests through `output_data`. `gatt_events_task`
 /// forwards `output_data` writes into [`crate::channel::VIAL_BLE_RX_CHANNEL`] for
 /// [`crate::ble::host::HostGattHandler::run`] to drain.
-#[cfg(feature = "vial")]
+#[cfg(rmk_vial)]
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub(crate) struct VialGattService {
     #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
@@ -197,7 +197,7 @@ impl<P: PacketPool> HidWriterTrait for BleHidServer<'_, '_, '_, P> {
             Report::SystemControlReport(r) => self.notify_report(self.system_report, r).await,
             // Plover HID over BLE is not supported: the stock HID-over-GATT service
             // has no stenography characteristic. Drop silently at the writer.
-            #[cfg(feature = "steno")]
+            #[cfg(rmk_steno)]
             Report::StenoReport(_) => {
                 debug!("Steno chord dropped: Plover HID over BLE is not supported");
                 Ok(0)

@@ -6,7 +6,7 @@
 //! multi-report reassembly (`GetCapabilities` > 32 B), a pipelined two-request
 //! session, and a server→host topic push.
 
-#![cfg(feature = "rynk")]
+#![cfg(rmk_rynk)]
 
 pub mod common;
 
@@ -55,8 +55,8 @@ fn get_capabilities_spans_multiple_reports() {
         assert_eq!(caps.num_layers, 1);
         assert_eq!(caps.num_rows, 2);
         assert_eq!(caps.num_cols, 2);
-        assert_eq!(caps.storage_enabled, cfg!(feature = "storage"));
-        assert_eq!(caps.ble_enabled, cfg!(feature = "_ble"));
+        assert_eq!(caps.storage_enabled, cfg!(rmk_storage));
+        assert_eq!(caps.ble_enabled, cfg!(rmk_ble));
     });
 }
 

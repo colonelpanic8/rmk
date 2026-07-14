@@ -17,20 +17,8 @@
 // Enable std for espidf and test
 #![cfg_attr(not(test), no_std)]
 
-// Mutual exclusivity guard
-#[cfg(all(feature = "rynk", feature = "vial"))]
-compile_error!("features `rynk` and `vial` are mutually exclusive");
-
-// `host` needs a concrete configurator protocol to expose `HostService`.
-#[cfg(all(feature = "host", not(any(feature = "rynk", feature = "vial"))))]
-compile_error!("feature `host` requires enabling either `rynk` or `vial`");
-
-#[cfg(all(feature = "usb_log", feature = "_usb_high_speed"))]
-compile_error!(
-    "`usb_log` is not supported on high-speed USB chips yet: embassy-usb-logger \
-     only handles 64-byte packets, which high-speed bulk endpoints can't use. \
-     Use `defmt` logging on these chips."
-);
+// Capability invariants (vial⊕rynk, host⇒vial∨rynk, usb_log conflicts, …)
+// are checked by build.rs via rmk_config::resolved::Capabilities.
 
 // Re-export self as ::rmk for macro-generated code to work both inside and outside the crate
 extern crate self as rmk;
@@ -59,31 +47,31 @@ use keymap::KeyMap;
 pub use keymap::KeymapData;
 pub use rmk_macro as macros;
 pub use rmk_types as types;
-#[cfg(all(feature = "storage", feature = "host"))]
+#[cfg(all(rmk_storage, rmk_host))]
 use rmk_types::action::EncoderAction;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub use trouble_host::prelude::*;
-#[cfg(feature = "storage")]
+#[cfg(rmk_storage)]
 use {embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash, storage::Storage};
 
 use crate::config::PositionalConfig;
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub mod ble;
 pub mod boot;
 pub mod channel;
 pub mod config;
 pub mod core_traits;
 pub mod debounce;
-#[cfg(feature = "dfu")]
+#[cfg(rmk_dfu)]
 pub mod dfu;
-#[cfg(feature = "display")]
+#[cfg(rmk_display)]
 pub mod display;
 pub mod driver;
 pub mod event;
 pub mod helper_macro;
 pub mod hid;
-#[cfg(feature = "host")]
+#[cfg(rmk_host)]
 pub mod host;
 pub mod input_device;
 pub mod keyboard;
@@ -93,14 +81,14 @@ pub mod layout_macro;
 pub mod light;
 pub mod matrix;
 pub mod processor;
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 pub mod split;
 pub mod state;
-#[cfg(feature = "storage")]
+#[cfg(rmk_storage)]
 pub mod storage;
-#[cfg(not(feature = "_no_usb"))]
+#[cfg(rmk_usb)]
 pub mod usb;
-#[cfg(feature = "watchdog")]
+#[cfg(rmk_watchdog)]
 pub mod watchdog;
 
 // Test-only helper that drives `embassy-time/mock-driver` from the
@@ -124,7 +112,7 @@ pub async fn initialize_keymap<
     KeyMap::new(data, behavior_config, positional_config).await
 }
 
-#[cfg(feature = "storage")]
+#[cfg(rmk_storage)]
 pub async fn initialize_keymap_and_storage<
     'a,
     F: AsyncNorFlash,
@@ -139,7 +127,7 @@ pub async fn initialize_keymap_and_storage<
     behavior_config: &'a mut config::BehaviorConfig,
     positional_config: &'a PositionalConfig<ROW, COL>,
 ) -> (KeyMap<'a>, Storage<F, ROW, COL, NUM_LAYER, NUM_ENCODER>) {
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     {
         let mut storage = {
             let encoder_opt: Option<&mut [[EncoderAction; NUM_ENCODER]; NUM_LAYER]> = if NUM_ENCODER > 0 {
@@ -154,7 +142,7 @@ pub async fn initialize_keymap_and_storage<
         (keymap, storage)
     }
 
-    #[cfg(not(feature = "host"))]
+    #[cfg(not(rmk_host))]
     {
         let storage = Storage::new(flash, storage_config, behavior_config).await;
         let keymap = KeyMap::new(data, behavior_config, positional_config).await;

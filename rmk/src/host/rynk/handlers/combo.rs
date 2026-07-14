@@ -1,18 +1,18 @@
 //! Combo handlers.
 
 use rmk_types::combo::Combo as ComboConfig;
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use rmk_types::constants::BULK_SIZE;
 use rmk_types::protocol::rynk::command::{GetCombo, SetCombo};
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use rmk_types::protocol::rynk::command::{GetComboBulk, SetComboBulk};
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use rmk_types::protocol::rynk::{GetComboBulkRequest, GetComboBulkResponse, SetComboBulkRequest};
 use rmk_types::protocol::rynk::{RynkError, SetComboRequest};
 
 use super::super::RynkService;
 use super::Handle;
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use super::bulk::{bulk_page, bulk_write_start};
 
 impl Handle<GetCombo> for RynkService<'_> {
@@ -40,7 +40,7 @@ impl Handle<SetCombo> for RynkService<'_> {
     }
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 impl Handle<GetComboBulk> for RynkService<'_> {
     async fn handle(&self, req: GetComboBulkRequest) -> Result<GetComboBulkResponse, RynkError> {
         // Empty slots read back as the empty config, same as the single Get; an
@@ -57,7 +57,7 @@ impl Handle<GetComboBulk> for RynkService<'_> {
     }
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 impl Handle<SetComboBulk> for RynkService<'_> {
     async fn handle(&self, req: SetComboBulkRequest) -> Result<(), RynkError> {
         // Validate the whole run first, so it applies whole or not at all. The

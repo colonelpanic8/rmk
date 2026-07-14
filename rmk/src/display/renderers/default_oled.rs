@@ -3,20 +3,20 @@ use core::fmt::Write as _;
 use embedded_graphics::image::{Image, ImageRaw};
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_5X8;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use embedded_graphics::mono_font::iso_8859_1::FONT_6X9;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::primitives::{Circle, Line, PrimitiveStyle};
 use embedded_graphics::text::Text;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use rmk_types::battery::{BatteryStatus, ChargeState};
 
 use super::icons;
 use crate::display::{DisplayRenderer, RenderContext};
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use crate::event::BatteryStatusEvent;
 
 const FONT_STYLE: MonoTextStyle<'_, BinaryColor> = MonoTextStyle::new(&FONT_5X8, BinaryColor::On);
@@ -204,7 +204,7 @@ fn draw_status_zone<D: DrawTarget<Color = BinaryColor>>(ctx: &RenderContext, dis
     draw_lock_dots(ctx, display, 2, lock_y);
 
     // Battery (right side, only for BLE)
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     draw_battery_icon(ctx.battery, display, layout);
 }
 
@@ -223,7 +223,7 @@ fn draw_lock_dots<D: DrawTarget<Color = BinaryColor>>(ctx: &RenderContext, displ
     }
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 fn draw_battery_icon<D: DrawTarget<Color = BinaryColor>>(
     battery: BatteryStatusEvent,
     display: &mut D,
@@ -316,18 +316,18 @@ fn draw_connection_indicator<D: DrawTarget<Color = BinaryColor>>(
 ) {
     let _connected = is_connected(ctx);
 
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     {
         draw_ble_indicator(_connected, _display, _layout);
     }
 
-    #[cfg(all(not(feature = "_ble"), feature = "split"))]
+    #[cfg(all(not(rmk_ble), rmk_split))]
     {
         draw_status_mark(_connected, _display, _layout.w - 7, 4);
     }
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 fn draw_ble_indicator<D: DrawTarget<Color = BinaryColor>>(connected: bool, display: &mut D, layout: &Layout) {
     const BT_W: i32 = icons::BT_ICON_W as i32;
     const BT_H: i32 = icons::BT_ICON_H as i32;
@@ -378,20 +378,20 @@ fn is_connected(_ctx: &RenderContext) -> bool {
     // Split + BLE:
     // - peripheral: connected when paired to the central
     // - central: connected when host BLE is connected
-    #[cfg(all(feature = "split", feature = "_ble"))]
+    #[cfg(all(rmk_split, rmk_ble))]
     return _ctx.central_connected || _ctx.ble_status.state == crate::types::ble::BleState::Connected;
 
     // Split without BLE:
     // - peripheral: connected when paired to the central
     // - central: connected when at least one peripheral is paired
-    #[cfg(all(feature = "split", not(feature = "_ble")))]
+    #[cfg(all(rmk_split, not(rmk_ble)))]
     return _ctx.central_connected || _ctx.peripherals_connected.iter().any(|&connected| connected);
 
     // BLE: connected when BLE state reports connected
-    #[cfg(all(not(feature = "split"), feature = "_ble"))]
+    #[cfg(all(not(rmk_split), rmk_ble))]
     return _ctx.ble_status.state == crate::types::ble::BleState::Connected;
 
     // Wired: always connected
-    #[cfg(not(any(feature = "split", feature = "_ble")))]
+    #[cfg(not(any(rmk_split, rmk_ble)))]
     true
 }

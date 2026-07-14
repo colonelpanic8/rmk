@@ -1,5 +1,5 @@
 pub fn jump_to_bootloader() {
-    #[cfg(feature = "adafruit_bl")]
+    #[cfg(rmk_adafruit_bl)]
     // Reference: https://github.com/adafruit/Adafruit_nRF52_Bootloader/blob/d6b28e66053eea467166f44875e3c7ec741cb471/src/main.c#L107
     embassy_nrf::pac::POWER
         .gpregret()
@@ -10,7 +10,7 @@ pub fn jump_to_bootloader() {
     embassy_rp::rom_data::reset_to_usb_boot(0, 0);
 
     #[cfg(all(
-        feature = "zsa_voyager_bl",
+        rmk_zsa_voyager_bl,
         target_arch = "arm",
         target_os = "none",
         any(target_abi = "eabi", target_abi = "eabihf")
@@ -30,7 +30,7 @@ pub fn jump_to_bootloader() {
         core::ptr::write_volatile(GPIOA_ODR, d & !(1 << 9));
     }
 
-    #[cfg(not(any(feature = "adafruit_bl", feature = "rp2040", feature = "zsa_voyager_bl")))]
+    #[cfg(not(any(rmk_adafruit_bl, feature = "rp2040", rmk_zsa_voyager_bl)))]
     warn!("Please specify a bootloader to jump to!");
 
     reboot_keyboard();

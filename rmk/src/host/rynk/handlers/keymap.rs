@@ -1,20 +1,20 @@
 //! Keymap and encoder handlers (encoder is part of keymap's `0x01xx` Cmd group).
 
 use rmk_types::action::{EncoderAction, KeyAction};
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use rmk_types::constants::BULK_KEYMAP_SIZE;
 use rmk_types::protocol::rynk::command::{
     GetDefaultLayer, GetEncoderAction, GetKeyAction, SetDefaultLayer, SetEncoderAction, SetKeyAction,
 };
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use rmk_types::protocol::rynk::command::{GetKeymapBulk, SetKeymapBulk};
 use rmk_types::protocol::rynk::{GetEncoderRequest, KeyPosition, RynkError, SetEncoderRequest, SetKeyRequest};
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use rmk_types::protocol::rynk::{GetKeymapBulkRequest, GetKeymapBulkResponse, SetKeymapBulkRequest};
 
 use super::super::RynkService;
 use super::Handle;
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use super::bulk::{bulk_page, bulk_write_start};
 
 impl Handle<GetKeyAction> for RynkService<'_> {
@@ -90,7 +90,7 @@ impl RynkService<'_> {
     }
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 impl RynkService<'_> {
     /// Validate a bulk keymap start position against the live geometry and
     /// return its flat, row-major, layer-major key index.
@@ -105,7 +105,7 @@ impl RynkService<'_> {
     }
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 impl Handle<GetKeymapBulk> for RynkService<'_> {
     async fn handle(&self, req: GetKeymapBulkRequest) -> Result<GetKeymapBulkResponse, RynkError> {
         // From the start key the page reads forward through the flat keymap,
@@ -119,7 +119,7 @@ impl Handle<GetKeymapBulk> for RynkService<'_> {
     }
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 impl Handle<SetKeymapBulk> for RynkService<'_> {
     async fn handle(&self, req: SetKeymapBulkRequest) -> Result<(), RynkError> {
         // Validate the whole run first, so it applies whole or not at all.

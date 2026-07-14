@@ -2,9 +2,9 @@
 //!
 //! This module contains built-in processor implementations for output devices.
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub mod battery_led;
-#[cfg(feature = "dfu")]
+#[cfg(rmk_dfu)]
 pub mod dfu_led;
 pub mod led_indicator;
 pub mod wpm;

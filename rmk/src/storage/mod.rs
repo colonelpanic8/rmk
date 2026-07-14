@@ -11,7 +11,7 @@ use rmk_types::morse::MorseProfile;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::NoCache;
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
-#[cfg(feature = "host")]
+#[cfg(rmk_host)]
 use {
     crate::{MACRO_SPACE_SIZE, keyboard::combo::ComboConfig},
     rmk_types::action::{EncoderAction, KeyAction},
@@ -19,11 +19,11 @@ use {
     rmk_types::morse::Morse,
 };
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use crate::ble::profile::ProfileInfo;
 use crate::channel::FLASH_CHANNEL;
 use crate::config::StorageConfig;
-#[cfg(all(feature = "_ble", feature = "split"))]
+#[cfg(all(rmk_ble, rmk_split))]
 use crate::split::ble::PeerAddress;
 use crate::{BUILD_HASH, config};
 
@@ -33,38 +33,38 @@ pub(crate) static FLASH_OPERATION_FINISHED: Signal<crate::RawMutex, bool> = Sign
 
 // Request/response over `FLASH_CHANNEL`. One `Signal` per read variant; the
 // storage task fires the matching one once it has the result.
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 static BOND_INFO_RESPONSE: Signal<crate::RawMutex, Option<ProfileInfo>> = Signal::new();
-#[cfg(all(feature = "_ble", feature = "split"))]
+#[cfg(all(rmk_ble, rmk_split))]
 static PEER_ADDRESS_RESPONSE: Signal<crate::RawMutex, Option<PeerAddress>> = Signal::new();
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 static CONNECTION_TYPE_RESPONSE: Signal<crate::RawMutex, Option<ConnectionType>> = Signal::new();
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 async fn request_read<T: Send>(msg: FlashOperationMessage, response: &Signal<crate::RawMutex, T>) -> T {
     response.reset();
     FLASH_CHANNEL.send(msg).await;
     response.wait().await
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) async fn read_bond_info(slot_num: u8) -> Option<ProfileInfo> {
     request_read(FlashOperationMessage::ReadBleBondInfo(slot_num), &BOND_INFO_RESPONSE).await
 }
 
-#[cfg(all(feature = "_ble", feature = "split"))]
+#[cfg(all(rmk_ble, rmk_split))]
 pub(crate) async fn read_peer_address(peer_id: u8) -> Option<PeerAddress> {
     request_read(FlashOperationMessage::ReadPeerAddress(peer_id), &PEER_ADDRESS_RESPONSE).await
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) async fn read_connection_type() -> Option<ConnectionType> {
     request_read(FlashOperationMessage::ReadConnectionType, &CONNECTION_TYPE_RESPONSE).await
 }
 
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub(crate) async fn read_active_ble_profile() -> Option<u8> {
     request_read(
         FlashOperationMessage::ReadActiveBleProfile,
@@ -75,7 +75,7 @@ pub(crate) async fn read_active_ble_profile() -> Option<u8> {
 
 /// Send a peer address to be persisted; wait for the storage task to finish.
 /// Returns `true` if the write completed successfully.
-#[cfg(all(feature = "_ble", feature = "split"))]
+#[cfg(all(rmk_ble, rmk_split))]
 pub(crate) async fn write_peer_address(addr: PeerAddress) -> bool {
     FLASH_OPERATION_FINISHED.reset();
     FLASH_CHANNEL.send(FlashOperationMessage::PeerAddress(addr)).await;
@@ -87,52 +87,52 @@ pub(crate) async fn write_peer_address(addr: PeerAddress) -> bool {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub(crate) enum FlashOperationMessage {
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     // BLE profile info to be saved
     ProfileInfo(ProfileInfo),
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     // Current active BLE profile number
     ActiveBleProfile(u8),
-    #[cfg(all(feature = "_ble", feature = "split"))]
+    #[cfg(all(rmk_ble, rmk_split))]
     // Peer address
     PeerAddress(PeerAddress),
     // Clear the storage
     Reset,
     // Clear the layout info
     ResetLayout,
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     // Clear info of given slot number
     ClearSlot(u8),
     // Layout option
     LayoutOptions(u32),
     // Default layer number
     DefaultLayer(u8),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     MacroData([u8; MACRO_SPACE_SIZE]),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     KeymapKey {
         layer: u8,
         row: u8,
         col: u8,
         action: KeyAction,
     },
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Encoder {
         layer: u8,
         idx: u8,
         action: EncoderAction,
     },
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Combo {
         idx: u8,
         config: ComboConfig,
     },
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Fork {
         idx: u8,
         fork: Fork,
     },
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Morse {
         idx: u8,
         morse: Morse,
@@ -151,16 +151,16 @@ pub(crate) enum FlashOperationMessage {
     PriorIdleTime(u16),
     // Default morse profile containing all morse/tap-hold settings (mode, timeouts, unilateral_tap)
     MorseDefaultProfile(MorseProfile),
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     // Read bond info for the given slot; storage task replies via `BOND_INFO_RESPONSE`.
     ReadBleBondInfo(u8),
-    #[cfg(all(feature = "_ble", feature = "split"))]
+    #[cfg(all(rmk_ble, rmk_split))]
     // Read peer address for the given peer id; storage task replies via `PEER_ADDRESS_RESPONSE`.
     ReadPeerAddress(u8),
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     // Read the persisted `ConnectionType`; storage task replies via `CONNECTION_TYPE_RESPONSE`.
     ReadConnectionType,
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     // Read the persisted active BLE profile number; storage task replies via `ACTIVE_BLE_PROFILE_RESPONSE`.
     ReadActiveBleProfile,
 }
@@ -172,65 +172,65 @@ pub(crate) enum StorageKey {
     LayoutConfig,
     BehaviorConfig,
     ConnectionType,
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     MacroData,
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Keymap {
         layer: u8,
         row: u8,
         col: u8,
     },
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Encoder {
         layer: u8,
         idx: u8,
     },
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Combo(u8),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Fork(u8),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Morse(u8),
-    #[cfg(all(feature = "_ble", feature = "split"))]
+    #[cfg(all(rmk_ble, rmk_split))]
     PeerAddress(u8),
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     ActiveBleProfile,
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     BondInfo(u8),
 }
 
 impl StorageKey {
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     pub(crate) const fn keymap(layer: u8, row: u8, col: u8) -> Self {
         Self::Keymap { layer, row, col }
     }
 
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     pub(crate) const fn bond_info(slot_num: u8) -> Self {
         Self::BondInfo(slot_num)
     }
 
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     pub(crate) const fn combo(idx: u8) -> Self {
         Self::Combo(idx)
     }
 
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     pub(crate) const fn encoder(idx: u8, layer: u8) -> Self {
         Self::Encoder { layer, idx }
     }
 
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     pub(crate) const fn fork(idx: u8) -> Self {
         Self::Fork(idx)
     }
 
-    #[cfg(all(feature = "_ble", feature = "split"))]
+    #[cfg(all(rmk_ble, rmk_split))]
     pub(crate) const fn peer_address(peer_id: u8) -> Self {
         Self::PeerAddress(peer_id)
     }
 
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     pub(crate) const fn morse(idx: u8) -> Self {
         Self::Morse(idx)
     }
@@ -260,23 +260,23 @@ pub(crate) enum StorageData {
     LayoutConfig(LayoutConfig),
     BehaviorConfig(BehaviorConfig),
     ConnectionType(ConnectionType),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     MacroData(#[serde(with = "crate::host::storage::macro_bytes_serde")] [u8; MACRO_SPACE_SIZE]),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     KeyAction(KeyAction),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     EncoderAction(EncoderAction),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Combo(ComboConfig),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Fork(Fork),
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     Morse(Morse),
-    #[cfg(all(feature = "_ble", feature = "split"))]
+    #[cfg(all(rmk_ble, rmk_split))]
     PeerAddress(PeerAddress),
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     BondInfo(ProfileInfo),
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     ActiveBleProfile(u8),
 }
 
@@ -345,16 +345,16 @@ pub fn async_flash_wrapper<F: NorFlash>(flash: F) -> BlockingAsync<F> {
     embassy_embedded_hal::adapter::BlockingAsync::new(flash)
 }
 
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 pub async fn new_storage_for_split_peripheral<F: AsyncNorFlash>(
     flash: F,
     storage_config: StorageConfig,
 ) -> Storage<F, 0, 0, 0, 0> {
     Storage::<F, 0, 0, 0, 0>::new(
         flash,
-        #[cfg(feature = "host")]
+        #[cfg(rmk_host)]
         &[],
-        #[cfg(feature = "host")]
+        #[cfg(rmk_host)]
         &None,
         &storage_config,
         &config::BehaviorConfig::default(),
@@ -406,8 +406,8 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
 
     pub async fn new(
         flash: F,
-        #[cfg(feature = "host")] keymap: &[[[KeyAction; COL]; ROW]; NUM_LAYER],
-        #[cfg(feature = "host")] encoder_map: &Option<&mut [[EncoderAction; NUM_ENCODER]; NUM_LAYER]>,
+        #[cfg(rmk_host)] keymap: &[[[KeyAction; COL]; ROW]; NUM_LAYER],
+        #[cfg(rmk_host)] encoder_map: &Option<&mut [[EncoderAction; NUM_ENCODER]; NUM_LAYER]>,
         storage_config: &StorageConfig,
         behavior_config: &config::BehaviorConfig,
     ) -> Self {
@@ -423,14 +423,14 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         // Otherwise, use storage config setting
         // When DFU is active the storage partition already sits at the correct
         // offset — the _nrf_ble special case (0x60000) only applies without DFU.
-        #[cfg(all(feature = "_nrf_ble", not(any(feature = "dfu_rp", feature = "dfu_nrf"))))]
+        #[cfg(all(feature = "_nrf_ble", not(any(rmk_dfu_rp, rmk_dfu_nrf))))]
         let start_addr = if storage_config.start_addr == 0 {
             0x0006_0000
         } else {
             storage_config.start_addr
         };
 
-        #[cfg(not(all(feature = "_nrf_ble", not(any(feature = "dfu_rp", feature = "dfu_nrf")))))]
+        #[cfg(not(all(feature = "_nrf_ble", not(any(rmk_dfu_rp, rmk_dfu_nrf)))))]
         let start_addr = storage_config.start_addr;
         // Check storage setting
         info!(
@@ -465,9 +465,9 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             // Initialize storage from keymap and config
             if storage
                 .initialize_storage_with_config(
-                    #[cfg(feature = "host")]
+                    #[cfg(rmk_host)]
                     keymap,
-                    #[cfg(feature = "host")]
+                    #[cfg(rmk_host)]
                     encoder_map,
                     behavior_config,
                 )
@@ -487,7 +487,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     .ok();
             }
         } else if storage_config.clear_layout {
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             {
                 debug!("clear_layout=true; overwriting layout items without erase.");
                 let encoder_map = encoder_map.as_ref().map(|m| &**m);
@@ -523,8 +523,8 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
 
     async fn initialize_storage_with_config(
         &mut self,
-        #[cfg(feature = "host")] keymap: &[[[KeyAction; COL]; ROW]; NUM_LAYER],
-        #[cfg(feature = "host")] encoder_map: &Option<&mut [[EncoderAction; NUM_ENCODER]; NUM_LAYER]>,
+        #[cfg(rmk_host)] keymap: &[[[KeyAction; COL]; ROW]; NUM_LAYER],
+        #[cfg(rmk_host)] encoder_map: &Option<&mut [[EncoderAction; NUM_ENCODER]; NUM_LAYER]>,
         behavior: &config::BehaviorConfig,
     ) -> Result<(), ()> {
         // Save storage config
@@ -554,7 +554,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             .await
             .map_err(|e| print_storage_error::<F>(e))?;
 
-        #[cfg(feature = "host")]
+        #[cfg(rmk_host)]
         for (layer, layer_data) in keymap.iter().enumerate() {
             for (row, row_data) in layer_data.iter().enumerate() {
                 for (col, action) in row_data.iter().enumerate() {
@@ -569,7 +569,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         }
 
         // Save encoder configurations
-        #[cfg(feature = "host")]
+        #[cfg(rmk_host)]
         if let Some(encoder_map) = encoder_map {
             for (layer, layer_data) in encoder_map.iter().enumerate() {
                 for (idx, action) in layer_data.iter().enumerate() {
@@ -586,7 +586,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         Ok(())
     }
 
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     async fn reset_layout_only(
         &mut self,
         keymap: &[[[KeyAction; COL]; ROW]; NUM_LAYER],
@@ -648,7 +648,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
     ///
     /// Must be called before the storage task starts; once it is running it owns
     /// `&mut Storage` and no other reader can hold it.
-    #[cfg(all(feature = "_ble", feature = "split"))]
+    #[cfg(all(rmk_ble, rmk_split))]
     pub async fn read_peripheral_addresses<const PERI_NUM: usize>(
         &mut self,
     ) -> core::cell::RefCell<heapless::Vec<Option<[u8; 6]>, PERI_NUM>> {
@@ -673,7 +673,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             debug!("Flash operation: {:?}", info);
 
             let write_result: Result<(), SSError<F::Error>> = match info {
-                #[cfg(feature = "_ble")]
+                #[cfg(rmk_ble)]
                 FlashOperationMessage::ReadBleBondInfo(slot_num) => {
                     let resp = match self.fetch_data(StorageKey::bond_info(slot_num)).await {
                         Some(StorageData::BondInfo(info)) => Some(info),
@@ -682,7 +682,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     BOND_INFO_RESPONSE.signal(resp);
                     continue;
                 }
-                #[cfg(all(feature = "_ble", feature = "split"))]
+                #[cfg(all(rmk_ble, rmk_split))]
                 FlashOperationMessage::ReadPeerAddress(peer_id) => {
                     let resp = match self.fetch_data(StorageKey::peer_address(peer_id)).await {
                         Some(StorageData::PeerAddress(addr)) => Some(addr),
@@ -691,7 +691,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     PEER_ADDRESS_RESPONSE.signal(resp);
                     continue;
                 }
-                #[cfg(feature = "_ble")]
+                #[cfg(rmk_ble)]
                 FlashOperationMessage::ReadConnectionType => {
                     let resp = match self.fetch_data(StorageKey::ConnectionType).await {
                         Some(StorageData::ConnectionType(v)) => Some(v),
@@ -700,7 +700,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     CONNECTION_TYPE_RESPONSE.signal(resp);
                     continue;
                 }
-                #[cfg(feature = "_ble")]
+                #[cfg(rmk_ble)]
                 FlashOperationMessage::ReadActiveBleProfile => {
                     let resp = match self.fetch_data(StorageKey::ActiveBleProfile).await {
                         Some(StorageData::ActiveBleProfile(v)) => Some(v),
@@ -721,12 +721,12 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 FlashOperationMessage::DefaultLayer(default_layer) => {
                     update_storage_field!(&mut self.flash, &mut self.buffer, LayoutConfig, default_layer)
                 }
-                #[cfg(feature = "host")]
+                #[cfg(rmk_host)]
                 FlashOperationMessage::MacroData(data) => {
                     self.store_data(StorageKey::MacroData, &StorageData::MacroData(data))
                         .await
                 }
-                #[cfg(feature = "host")]
+                #[cfg(rmk_host)]
                 FlashOperationMessage::KeymapKey {
                     layer,
                     row,
@@ -736,21 +736,21 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     self.store_data(StorageKey::keymap(layer, row, col), &StorageData::KeyAction(action))
                         .await
                 }
-                #[cfg(feature = "host")]
+                #[cfg(rmk_host)]
                 FlashOperationMessage::Encoder { layer, idx, action } => {
                     self.store_data(StorageKey::encoder(idx, layer), &StorageData::EncoderAction(action))
                         .await
                 }
-                #[cfg(feature = "host")]
+                #[cfg(rmk_host)]
                 FlashOperationMessage::Combo { idx, config } => {
                     self.store_data(StorageKey::combo(idx), &StorageData::Combo(config))
                         .await
                 }
-                #[cfg(feature = "host")]
+                #[cfg(rmk_host)]
                 FlashOperationMessage::Fork { idx, fork } => {
                     self.store_data(StorageKey::fork(idx), &StorageData::Fork(fork)).await
                 }
-                #[cfg(feature = "host")]
+                #[cfg(rmk_host)]
                 FlashOperationMessage::Morse { idx, morse } => {
                     self.store_data(StorageKey::morse(idx), &StorageData::Morse(morse))
                         .await
@@ -759,17 +759,17 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     self.store_data(StorageKey::ConnectionType, &StorageData::ConnectionType(ty))
                         .await
                 }
-                #[cfg(all(feature = "_ble", feature = "split"))]
+                #[cfg(all(rmk_ble, rmk_split))]
                 FlashOperationMessage::PeerAddress(peer) => {
                     self.store_data(StorageKey::peer_address(peer.peer_id), &StorageData::PeerAddress(peer))
                         .await
                 }
-                #[cfg(feature = "_ble")]
+                #[cfg(rmk_ble)]
                 FlashOperationMessage::ActiveBleProfile(profile) => {
                     self.store_data(StorageKey::ActiveBleProfile, &StorageData::ActiveBleProfile(profile))
                         .await
                 }
-                #[cfg(feature = "_ble")]
+                #[cfg(rmk_ble)]
                 FlashOperationMessage::ClearSlot(slot_num) => {
                     use trouble_host::prelude::SecurityLevel;
                     use trouble_host::{Address, BondInformation, Identity, LongTermKey};
@@ -793,7 +793,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     self.store_data(StorageKey::bond_info(slot_num), &StorageData::BondInfo(empty))
                         .await
                 }
-                #[cfg(feature = "_ble")]
+                #[cfg(rmk_ble)]
                 FlashOperationMessage::ProfileInfo(b) => {
                     debug!("Saving profile info: {:?}", b);
                     self.store_data(StorageKey::bond_info(b.slot_num), &StorageData::BondInfo(b))
@@ -847,7 +847,7 @@ pub(crate) fn print_storage_error<F: AsyncNorFlash>(e: SSError<F::Error>) {
 }
 
 const fn get_buffer_size() -> usize {
-    #[cfg(feature = "host")]
+    #[cfg(rmk_host)]
     {
         // The buffer size needed = size_of(StorageData) = MACRO_SPACE_SIZE + 8(generally)
         // According to doc of `sequential-storage`, for some flashes it should be aligned in 32 bytes
@@ -862,7 +862,7 @@ const fn get_buffer_size() -> usize {
         (buffer_size + 31) & !31
     }
 
-    #[cfg(not(feature = "host"))]
+    #[cfg(not(rmk_host))]
     256
 }
 
@@ -974,27 +974,27 @@ mod tests {
             StorageKey::LayoutConfig,
             StorageKey::BehaviorConfig,
             StorageKey::ConnectionType,
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             StorageKey::MacroData,
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             StorageKey::Keymap {
                 layer: 2,
                 row: 3,
                 col: 4,
             },
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             StorageKey::Encoder { layer: 1, idx: 5 },
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             StorageKey::Combo(6),
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             StorageKey::Fork(7),
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             StorageKey::Morse(8),
-            #[cfg(all(feature = "_ble", feature = "split"))]
+            #[cfg(all(rmk_ble, rmk_split))]
             StorageKey::PeerAddress(0),
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             StorageKey::ActiveBleProfile,
-            #[cfg(feature = "_ble")]
+            #[cfg(rmk_ble)]
             StorageKey::BondInfo(0),
         ];
 
@@ -1039,16 +1039,16 @@ mod tests {
             .unwrap();
 
             let (flash, _) = map.destroy();
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             let keymap = [[[KeyAction::No; 1]; 1]; 1];
-            #[cfg(feature = "host")]
+            #[cfg(rmk_host)]
             let encoder_map: Option<&mut [[EncoderAction; 0]; 1]> = None;
 
             let mut storage = Storage::<Flash, 1, 1, 1, 0>::new(
                 flash,
-                #[cfg(feature = "host")]
+                #[cfg(rmk_host)]
                 &keymap,
-                #[cfg(feature = "host")]
+                #[cfg(rmk_host)]
                 &encoder_map,
                 &RuntimeStorageConfig::default(),
                 &RuntimeBehaviorConfig::default(),

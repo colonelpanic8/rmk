@@ -2,7 +2,7 @@
 //!
 //! The rotary encoder implementation is adapted from: <https://github.com/leshow/rotary-encoder-hal/blob/master/src/lib.rs>
 use embedded_hal::digital::InputPin;
-#[cfg(feature = "async_matrix")]
+#[cfg(rmk_async_matrix)]
 use embedded_hal_async::digital::Wait;
 use postcard::experimental::max_size::MaxSize;
 use rmk_macro::input_device;
@@ -15,10 +15,10 @@ use crate::event::KeyboardEvent;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[input_device(publish = KeyboardEvent)]
 pub struct RotaryEncoder<
-    #[cfg(feature = "async_matrix")] A: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] A: InputPin,
-    #[cfg(feature = "async_matrix")] B: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] B: InputPin,
+    #[cfg(rmk_async_matrix)] A: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] A: InputPin,
+    #[cfg(rmk_async_matrix)] B: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] B: InputPin,
     P: Phase,
 > {
     pin_a: A,
@@ -141,10 +141,10 @@ impl Phase for ResolutionPhase {
 }
 
 impl<
-    #[cfg(feature = "async_matrix")] A: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] A: InputPin,
-    #[cfg(feature = "async_matrix")] B: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] B: InputPin,
+    #[cfg(rmk_async_matrix)] A: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] A: InputPin,
+    #[cfg(rmk_async_matrix)] B: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] B: InputPin,
 > RotaryEncoder<A, B, DefaultPhase>
 {
     /// Accepts two [`InputPin`](https://docs.rs/embedded-hal/latest/embedded_hal/digital/trait.InputPin.html)s, these will be read on every `update()`.
@@ -164,10 +164,10 @@ impl<
 
 /// Create a resolution-based rotary encoder
 impl<
-    #[cfg(feature = "async_matrix")] A: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] A: InputPin,
-    #[cfg(feature = "async_matrix")] B: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] B: InputPin,
+    #[cfg(rmk_async_matrix)] A: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] A: InputPin,
+    #[cfg(rmk_async_matrix)] B: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] B: InputPin,
 > RotaryEncoder<A, B, ResolutionPhase>
 {
     /// Creates a new encoder with the specified resolution
@@ -186,10 +186,10 @@ impl<
 }
 
 impl<
-    #[cfg(feature = "async_matrix")] A: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] A: InputPin,
-    #[cfg(feature = "async_matrix")] B: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] B: InputPin,
+    #[cfg(rmk_async_matrix)] A: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] A: InputPin,
+    #[cfg(rmk_async_matrix)] B: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] B: InputPin,
     P: Phase,
 > RotaryEncoder<A, B, P>
 {
@@ -278,10 +278,10 @@ impl<
 }
 
 impl<
-    #[cfg(feature = "async_matrix")] A: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] A: InputPin,
-    #[cfg(feature = "async_matrix")] B: InputPin + Wait,
-    #[cfg(not(feature = "async_matrix"))] B: InputPin,
+    #[cfg(rmk_async_matrix)] A: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] A: InputPin,
+    #[cfg(rmk_async_matrix)] B: InputPin + Wait,
+    #[cfg(not(rmk_async_matrix))] B: InputPin,
     P: Phase,
 > RotaryEncoder<A, B, P>
 {
@@ -296,7 +296,7 @@ impl<
         }
 
         loop {
-            #[cfg(feature = "async_matrix")]
+            #[cfg(rmk_async_matrix)]
             {
                 let (pin_a, pin_b) = self.pins();
                 embassy_futures::select::select(pin_a.wait_for_any_edge(), pin_b.wait_for_any_edge()).await;
@@ -309,7 +309,7 @@ impl<
                 return KeyboardEvent::rotary_encoder(self.id, direction, true);
             }
 
-            #[cfg(not(feature = "async_matrix"))]
+            #[cfg(not(rmk_async_matrix))]
             {
                 // Wait for 20ms to avoid busy loop
                 embassy_time::Timer::after_millis(20).await;

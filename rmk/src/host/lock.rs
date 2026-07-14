@@ -3,7 +3,7 @@
 use core::cell::Cell;
 
 use embassy_time::{Duration, Instant};
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 use rmk_types::protocol::rynk::LockStatus;
 
 use crate::keymap::KeyMap;
@@ -99,7 +99,7 @@ impl<'a> HostLock<'a> {
     }
 }
 
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 impl HostLock<'_> {
     /// Side-effect-free snapshot for `GetLockStatus`: reports the current lock
     /// state and challenge without arming an attempt (lazy window-expiry aside).
@@ -227,7 +227,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "rynk")]
+    #[cfg(rmk_rynk)]
     #[test]
     fn poll_reports_progress_then_unlocks() {
         keymap!(keymap);
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(s.remaining_keys, 0);
     }
 
-    #[cfg(feature = "rynk")]
+    #[cfg(rmk_rynk)]
     #[test]
     fn status_is_side_effect_free() {
         keymap!(keymap);

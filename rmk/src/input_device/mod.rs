@@ -6,7 +6,7 @@
 use crate::core_traits::Runnable;
 
 pub mod adc;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 pub mod battery;
 pub mod iqs5xx;
 pub mod joystick;
