@@ -68,11 +68,6 @@ impl RynkClient {
         }
     }
 
-    /// Drop a stalled partial frame so the next request starts clean.
-    pub fn resync(&mut self) {
-        self.0.resync();
-    }
-
     /// Topic pushes the driver dropped (queue full). `f64` so JS gets a `number`.
     pub fn events_dropped(&self) -> f64 {
         self.0.events_dropped() as f64
