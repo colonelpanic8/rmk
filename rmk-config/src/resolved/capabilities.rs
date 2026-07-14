@@ -50,7 +50,8 @@ pub struct Capabilities {
     /// Derived: `vial || rynk`.
     pub host: bool,
     pub bulk: bool,
-    /// Derived: `host || dfu_lock`.
+    /// Derived: `rynk || dfu_lock || (vial && [host].unlock_keys set)`.
+    /// Vial alone doesn't imply the lock — lock-free Vial builds save flash.
     pub host_lock: bool,
     pub dfu_lock: bool,
     pub split: bool,
@@ -223,6 +224,7 @@ impl Capabilities {
 
         let host = toml.get_host_config();
         let (vial, rynk) = (host.vial_enabled, host.rynk_enabled);
+        let host_unlock_keys = host.unlock_keys.as_ref().is_some_and(|keys| !keys.is_empty());
 
         let dfu_cfg = toml.get_dfu_config();
         let dfu = dfu_cfg.as_ref().is_some_and(|d| d.enabled);
@@ -273,7 +275,7 @@ impl Capabilities {
             rynk,
             host: vial || rynk,
             bulk: false,
-            host_lock: vial || rynk || dfu_lock,
+            host_lock: rynk || dfu_lock || (vial && host_unlock_keys),
             dfu_lock,
             split: toml.split.is_some(),
             display: !display_drivers.is_empty(),
@@ -318,7 +320,7 @@ impl Capabilities {
             caps.adafruit_bl = features.contains("adafruit_bl");
             caps.zsa_voyager_bl = features.contains("zsa_voyager_bl");
         }
-        caps.host_lock = caps.host || caps.dfu_lock || features.contains("host_lock");
+        caps.host_lock = caps.host_lock || caps.dfu_lock || features.contains("host_lock");
 
         if !validate_features {
             caps.check_invariants(&mut errs);
@@ -565,8 +567,23 @@ enabled = true
     #[test]
     fn toml_defaults_activate_core_capabilities() {
         let caps = Capabilities::resolve(Some(&cfg(RP2040_USB)), &feats(&["defmt"])).unwrap();
-        assert!(caps.usb && caps.storage && caps.vial && caps.host && caps.host_lock && caps.watchdog);
+        assert!(caps.usb && caps.storage && caps.vial && caps.host && caps.watchdog);
+        // Vial without [host].unlock_keys stays lock-free (saves flash).
+        assert!(!caps.host_lock);
         assert!(!caps.ble && !caps.split && !caps.rynk && !caps.async_matrix && !caps.steno);
+    }
+
+    #[test]
+    fn host_unlock_keys_enable_the_lock() {
+        let toml = cfg(&format!("{RP2040_USB}\n[host]\nunlock_keys = [[0, 0]]"));
+        let caps = Capabilities::resolve(Some(&toml), &feats(&[])).unwrap();
+        assert!(caps.vial && caps.host_lock);
+
+        let toml = cfg(&format!(
+            "{RP2040_USB}\n[host]\nvial_enabled = false\nrynk_enabled = true"
+        ));
+        let caps = Capabilities::resolve(Some(&toml), &feats(&[])).unwrap();
+        assert!(caps.rynk && caps.host_lock);
     }
 
     #[test]
