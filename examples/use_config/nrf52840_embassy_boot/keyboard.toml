@@ -57,7 +57,8 @@ enabled = true
 # dfu_size = 528384
 
 [dfu]
+enabled = true
 led = "P0_15" # default P0_15, to not use set to "none"
-# Optional DFU lock — physical keys to press simultaneously to unlock DFU firmware download.
-# Requires the `dfu_lock` Cargo feature (not enabled by default).
+# Optional DFU lock — physical keys to press simultaneously to unlock DFU
+# firmware download. Enabled automatically when unlock_keys is set.
 # unlock_keys = [[0, 0], [1, 1]]

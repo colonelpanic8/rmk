@@ -206,17 +206,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
-name = "cargo_toml"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa61aec073ec94791433ddf3df2323ff9d1711557c2a0eefb0f99cb4f8dca520"
-dependencies = [
- "semver 1.0.28",
- "serde",
- "toml",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1901,6 +1890,7 @@ dependencies = [
  "heapless 0.9.3",
  "paste",
  "postcard",
+ "rmk-config",
  "rmk-macro",
  "rmk-types",
  "sequential-storage",
@@ -1930,7 +1920,6 @@ dependencies = [
 name = "rmk-macro"
 version = "0.7.1"
 dependencies = [
- "cargo_toml",
  "darling 0.23.0",
  "proc-macro2",
  "quote",
@@ -2070,10 +2059,6 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
-dependencies = [
- "serde",
- "serde_core",
-]
 
 [[package]]
 name = "semver-parser"

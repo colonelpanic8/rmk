@@ -33,12 +33,7 @@ peripheral = [
 ]
 
 [dependencies]
-rmk = { path = "../../../rmk", default-features = false, features = [
-    "log",
-    "split",
-    "storage",
-    "vial",
-] }
+rmk = { path = "../../../rmk", default-features = false, features = ["esp32c3_ble", "log"] }
 embassy-executor = { version = "0.10" }
 esp-backtrace = { version = "0.19", features = [
     "panic-handler",

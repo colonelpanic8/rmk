@@ -92,6 +92,83 @@ fn all_use_config_examples_resolve() {
     );
 }
 
+/// Every use_config example's rmk feature list must agree with its
+/// keyboard.toml under the same resolution rmk/build.rs enforces — the drift
+/// regression test for the capability gate.
+#[test]
+fn use_config_example_features_are_consistent() {
+    use rmk_config::resolved::{ActiveFeatures, Capabilities};
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/use_config");
+    let rmk_manifest: toml::Value = toml::from_str(
+        &std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../rmk/Cargo.toml")).unwrap(),
+    )
+    .unwrap();
+    let feature_table = rmk_manifest["features"].as_table().unwrap();
+
+    // Close a feature set over rmk's [features] graph, like cargo does.
+    let close = |names: Vec<String>| -> Vec<String> {
+        let mut stack = names;
+        let mut closed = std::collections::HashSet::new();
+        while let Some(name) = stack.pop() {
+            if !closed.insert(name.clone()) {
+                continue;
+            }
+            if let Some(deps) = feature_table.get(&name).and_then(|v| v.as_array()) {
+                for dep in deps {
+                    let dep = dep.as_str().unwrap();
+                    // Same-crate feature names only; skip dep:/crate-forward edges.
+                    if !dep.contains(':') && !dep.contains('/') {
+                        stack.push(dep.to_string());
+                    }
+                }
+            }
+        }
+        closed.into_iter().collect()
+    };
+
+    let mut dirs: Vec<_> = std::fs::read_dir(&root)
+        .expect("read examples/use_config")
+        .map(|e| e.expect("dir entry").path())
+        .filter(|p| p.join("keyboard.toml").exists() && p.join("Cargo.toml").exists())
+        .collect();
+    dirs.sort();
+
+    let mut failures = Vec::new();
+    for dir in dirs {
+        let name = dir.file_name().unwrap().to_string_lossy().to_string();
+        let manifest: toml::Value =
+            toml::from_str(&std::fs::read_to_string(dir.join("Cargo.toml")).unwrap()).unwrap();
+        let rmk_dep = &manifest["dependencies"]["rmk"];
+        let mut features: Vec<String> = rmk_dep
+            .get("features")
+            .and_then(|f| f.as_array())
+            .map(|a| a.iter().map(|v| v.as_str().unwrap().to_string()).collect())
+            .unwrap_or_default();
+        if rmk_dep.get("default-features").and_then(|v| v.as_bool()) != Some(false) {
+            features.push("default".to_string());
+        }
+        let features = ActiveFeatures::from_names(&close(features));
+
+        let config = match KeyboardTomlConfig::load_for_build(dir.join("keyboard.toml")) {
+            Ok(config) => config,
+            Err(e) => {
+                failures.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        if let Err(errs) = Capabilities::resolve(Some(&config), &features) {
+            failures.push(format!("{name}:\n  - {}", errs.join("\n  - ")));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "example Cargo.toml features disagree with keyboard.toml:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[test]
 fn host_unlock_keys_reject_too_many_entries() {
     let path = write_temp_keyboard_toml(

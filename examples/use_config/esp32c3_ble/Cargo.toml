@@ -10,12 +10,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-rmk = { path = "../../../rmk", default-features = false, features = [
-    "esp32c3_ble",
-    "log",
-    "storage",
-    "vial",
-] }
+rmk = { path = "../../../rmk", default-features = false, features = ["esp32c3_ble", "log"] }
 embassy-executor = { version = "0.10" }
 esp-backtrace = { version = "0.19", features = [
     "esp32c3",

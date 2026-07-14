@@ -60,7 +60,8 @@ _  _      _
 # dfu_size = 528384
 
 [dfu]
+enabled = true
 led = "PIN_25"
-# Optional DFU lock — physical keys to press simultaneously to unlock DFU firmware download.
-# Requires the `dfu_lock` Cargo feature (not enabled by default).
+# Optional DFU lock — physical keys to press simultaneously to unlock DFU
+# firmware download. Enabled automatically when unlock_keys is set.
 unlock_keys = [[0, 0], [1, 1]]

@@ -6,6 +6,7 @@ vendor_id = 0x4c4b
 product_id = 0x4643
 manufacturer = "haobo"
 chip = "nrf52832"
+async_matrix = true
 usb_enable = false
 
 [matrix]
