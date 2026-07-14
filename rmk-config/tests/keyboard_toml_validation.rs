@@ -137,8 +137,7 @@ fn use_config_example_features_are_consistent() {
     let mut failures = Vec::new();
     for dir in dirs {
         let name = dir.file_name().unwrap().to_string_lossy().to_string();
-        let manifest: toml::Value =
-            toml::from_str(&std::fs::read_to_string(dir.join("Cargo.toml")).unwrap()).unwrap();
+        let manifest: toml::Value = toml::from_str(&std::fs::read_to_string(dir.join("Cargo.toml")).unwrap()).unwrap();
         let rmk_dep = &manifest["dependencies"]["rmk"];
         let mut features: Vec<String> = rmk_dep
             .get("features")

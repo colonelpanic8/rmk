@@ -89,7 +89,10 @@ impl Capabilities {
     /// like `rmk-types` that only receive the subset of features `rmk`
     /// forwards, where "missing feature" checks would misfire. `rmk/build.rs`
     /// validates the full set against the same toml.
-    pub fn resolve_forwarded(toml: Option<&KeyboardTomlConfig>, features: &ActiveFeatures) -> Result<Self, Vec<String>> {
+    pub fn resolve_forwarded(
+        toml: Option<&KeyboardTomlConfig>,
+        features: &ActiveFeatures,
+    ) -> Result<Self, Vec<String>> {
         Self::resolve_inner(toml, features, false)
     }
 
@@ -120,18 +123,29 @@ impl Capabilities {
     pub fn from_toml(toml: &KeyboardTomlConfig) -> Result<Self, String> {
         let (caps, _, mut errs) = Self::toml_caps(toml).map_err(|e| e.join("\n"))?;
         caps.check_invariants(&mut errs);
-        if errs.is_empty() { Ok(caps) } else { Err(errs.join("\n")) }
+        if errs.is_empty() {
+            Ok(caps)
+        } else {
+            Err(errs.join("\n"))
+        }
     }
 
     /// `(cfg name, enabled)` for every capability. Build scripts declare all
     /// names (so `check-cfg` never warns) and enable the active ones.
     pub fn cfgs(&self) -> Vec<(String, bool)> {
-        self.flags().iter().map(|(name, on)| (format!("rmk_{name}"), *on)).collect()
+        self.flags()
+            .iter()
+            .map(|(name, on)| (format!("rmk_{name}"), *on))
+            .collect()
     }
 
     /// Names of active capabilities, matched against `subscriber_default.toml`.
     pub fn active_names(&self) -> Vec<&'static str> {
-        self.flags().iter().filter(|(_, on)| *on).map(|(name, _)| *name).collect()
+        self.flags()
+            .iter()
+            .filter(|(_, on)| *on)
+            .map(|(name, _)| *name)
+            .collect()
     }
 
     fn flags(&self) -> [(&'static str, bool); 21] {
@@ -230,8 +244,7 @@ impl Capabilities {
                 .as_ref()
                 .is_some_and(|d| d.unlock_keys.as_ref().is_some_and(|keys| !keys.is_empty()));
 
-        let mut display_drivers: Vec<DisplayDriver> =
-            toml.get_display_config().map(|d| d.driver).into_iter().collect();
+        let mut display_drivers: Vec<DisplayDriver> = toml.get_display_config().map(|d| d.driver).into_iter().collect();
         if let Some(split) = &toml.split {
             display_drivers.extend(split.central.display.as_ref().map(|d| d.driver.clone()));
             display_drivers.extend(
@@ -320,14 +333,26 @@ impl Capabilities {
             ("vial", caps.vial, "set `vial_enabled = true` in [host]"),
             ("rynk", caps.rynk, "set `rynk_enabled = true` in [host]"),
             ("split", caps.split, "add a [split] section"),
-            ("async_matrix", caps.async_matrix, "set `async_matrix = true` in [keyboard]"),
+            (
+                "async_matrix",
+                caps.async_matrix,
+                "set `async_matrix = true` in [keyboard]",
+            ),
             ("_ble", caps.ble, "set `enabled = true` in [ble]"),
             ("dfu", caps.dfu, "set `enabled = true` in [dfu]"),
             ("dfu_rp", caps.dfu_rp, "enable [dfu] on an rp2040 chip"),
             ("dfu_nrf", caps.dfu_nrf, "enable [dfu] on an nRF chip"),
             ("steno", caps.steno, "set `steno = true` in [keyboard]"),
-            ("passkey_entry", caps.passkey_entry, "set `passkey_entry = true` in [ble]"),
-            ("adafruit_bl", caps.adafruit_bl, "set `bootloader = \"adafruit\"` in [keyboard]"),
+            (
+                "passkey_entry",
+                caps.passkey_entry,
+                "set `passkey_entry = true` in [ble]",
+            ),
+            (
+                "adafruit_bl",
+                caps.adafruit_bl,
+                "set `bootloader = \"adafruit\"` in [keyboard]",
+            ),
             (
                 "zsa_voyager_bl",
                 caps.zsa_voyager_bl,
@@ -480,9 +505,7 @@ fn ble_feature_hint(chip: &ChipModel) -> String {
 fn display_family_feature(driver: &DisplayDriver) -> &'static str {
     match driver {
         DisplayDriver::Ssd1306 => "ssd1306",
-        DisplayDriver::Sh1106 | DisplayDriver::Sh1107 | DisplayDriver::Sh1108 | DisplayDriver::Ssd1309 => {
-            "oled_async"
-        }
+        DisplayDriver::Sh1106 | DisplayDriver::Sh1107 | DisplayDriver::Sh1108 | DisplayDriver::Ssd1309 => "oled_async",
     }
 }
 
@@ -561,13 +584,17 @@ enabled = true
 
     #[test]
     fn vial_rynk_exclusive_in_toml() {
-        let toml = cfg(&format!("{RP2040_USB}\n[host]\nvial_enabled = true\nrynk_enabled = true"));
+        let toml = cfg(&format!(
+            "{RP2040_USB}\n[host]\nvial_enabled = true\nrynk_enabled = true"
+        ));
         assert!(err_text(Capabilities::resolve(Some(&toml), &feats(&[]))).contains("mutually exclusive"));
     }
 
     #[test]
     fn vial_rynk_exclusive_across_sources() {
-        let toml = cfg(&format!("{RP2040_USB}\n[host]\nvial_enabled = false\nrynk_enabled = true"));
+        let toml = cfg(&format!(
+            "{RP2040_USB}\n[host]\nvial_enabled = false\nrynk_enabled = true"
+        ));
         let err = err_text(Capabilities::resolve(Some(&toml), &feats(&["vial"])));
         assert!(err.contains("feature `vial`"), "{err}");
     }
@@ -619,7 +646,10 @@ enabled = true
             "{}",
             NRF52840_BLE.replace("usb_enable = true", "usb_enable = false")
         ));
-        let err = err_text(Capabilities::resolve(Some(&toml), &feats(&["_ble", "storage", "usb_log"])));
+        let err = err_text(Capabilities::resolve(
+            Some(&toml),
+            &feats(&["_ble", "storage", "usb_log"]),
+        ));
         assert!(err.contains("`usb_log` requires USB"), "{err}");
     }
 
@@ -707,10 +737,7 @@ enabled = true
 
     #[test]
     fn adafruit_bootloader_requires_feature() {
-        let toml = cfg(&NRF52840_BLE.replace(
-            "usb_enable = true",
-            "usb_enable = true\nbootloader = \"adafruit\"",
-        ));
+        let toml = cfg(&NRF52840_BLE.replace("usb_enable = true", "usb_enable = true\nbootloader = \"adafruit\""));
         let err = err_text(Capabilities::resolve(Some(&toml), &feats(NRF_BLE_CLOSURE)));
         assert!(err.contains("`adafruit_bl`"), "{err}");
     }

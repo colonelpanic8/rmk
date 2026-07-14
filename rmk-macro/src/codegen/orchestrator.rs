@@ -1,10 +1,10 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use rmk_config::DebouncerType;
 use rmk_config::resolved::hardware::{
     BoardConfig, ChipSeries, KeyInfo, MatrixConfig, MatrixType, UniBodyConfig,
 };
 use rmk_config::resolved::{Behavior, Capabilities, Hardware, Host, Identity, Keymap, Layout};
+use rmk_config::DebouncerType;
 
 use super::behavior::expand_behavior_config;
 use super::chip::bind_interrupt::expand_bind_interrupt;
@@ -59,7 +59,9 @@ pub(crate) fn parse_keyboard_mod(item_mod: syn::ItemMod) -> TokenStream2 {
         expand_imports_and_constants(&identity, &host, &hardware, &behavior, &keymap);
 
     // Generate main function body
-    let main_function = expand_main(&host, &hardware, &behavior, &keymap, &layout, item_mod, &caps);
+    let main_function = expand_main(
+        &host, &hardware, &behavior, &keymap, &layout, item_mod, &caps,
+    );
 
     quote! {
         #imports_and_statics
@@ -332,7 +334,11 @@ fn expand_main(
 }
 
 // TODO: move this function to a separate folder
-pub(crate) fn expand_keymap_and_storage(hardware: &Hardware, keymap: &Keymap, caps: &Capabilities) -> TokenStream2 {
+pub(crate) fn expand_keymap_and_storage(
+    hardware: &Hardware,
+    keymap: &Keymap,
+    caps: &Capabilities,
+) -> TokenStream2 {
     let row = keymap.rows as usize;
     let col = keymap.cols as usize;
 

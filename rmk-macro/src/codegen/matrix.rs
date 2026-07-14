@@ -1,10 +1,10 @@
 //! Initialize matrix initialization boilerplate of RMK
 //!
 use quote::quote;
-use rmk_config::resolved::{Capabilities, Hardware};
 use rmk_config::resolved::hardware::{
     BoardConfig, ChipModel, ChipSeries, MatrixConfig, MatrixType, UniBodyConfig,
 };
+use rmk_config::resolved::{Capabilities, Hardware};
 
 use super::chip::gpio::{
     convert_direct_pins_to_initializers, convert_input_pins_to_initializers,

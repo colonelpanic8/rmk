@@ -1,11 +1,11 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use rmk_config::SplitConnection;
-use rmk_config::resolved::{Capabilities, Hardware};
 use rmk_config::resolved::hardware::{
     BleConfig, BoardConfig, ChipModel, ChipSeries, CommunicationConfig, InputDeviceConfig,
     MatrixType, SplitBoardConfig, SplitConfig,
 };
+use rmk_config::resolved::{Capabilities, Hardware};
+use rmk_config::SplitConnection;
 use syn::ItemMod;
 
 use super::central::expand_serial_init;

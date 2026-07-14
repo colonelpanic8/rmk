@@ -10,7 +10,10 @@ use rmk_config::resolved::{Capabilities, Hardware};
 /// must be joined with the other tasks.
 ///
 /// Chips without codegen return empty tokens and `None`.
-pub(crate) fn expand_watchdog_init(hardware: &Hardware, caps: &Capabilities) -> (TokenStream2, Option<TokenStream2>) {
+pub(crate) fn expand_watchdog_init(
+    hardware: &Hardware,
+    caps: &Capabilities,
+) -> (TokenStream2, Option<TokenStream2>) {
     if !caps.watchdog {
         return (quote! {}, None);
     }
