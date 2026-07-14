@@ -1223,11 +1223,13 @@ impl<'a> Keyboard<'a> {
                 // Consumer/system keys with no HID alias are dispatched directly here.
                 KeyCode::Consumer(consumer) => {
                     self.process_action_consumer_control(consumer, event).await;
-                    self.apply_one_shot_after_key(false, event).await;
+                    self.update_osm(event);
+                    self.update_osl(event);
                 }
                 KeyCode::SystemControl(system_control) => {
                     self.process_action_system_control(system_control, event).await;
-                    self.apply_one_shot_after_key(false, event).await;
+                    self.update_osm(event);
+                    self.update_osl(event);
                 }
                 _ => warn!("KeyCode variant not supported: {:?}", key),
             },
@@ -1577,11 +1579,7 @@ impl<'a> Keyboard<'a> {
             true
         };
 
-        self.apply_one_shot_after_key(is_basic_keyboard_key, event).await;
-    }
-
-    /// One-shot post-processing shared by every `Action::Key` dispatch path.
-    async fn apply_one_shot_after_key(&mut self, is_basic_keyboard_key: bool, event: KeyboardEvent) {
+        // Consume any pending one-shot; on quick-release of a basic key, re-send the report.
         let quick_release = self.keymap.one_shot_modifiers_config().quick_release;
         let osm_consumed = self.update_osm(event);
         if quick_release && osm_consumed && is_basic_keyboard_key && event.pressed {
