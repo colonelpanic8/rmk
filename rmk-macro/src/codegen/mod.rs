@@ -3,7 +3,6 @@ pub(crate) mod behavior;
 pub(crate) mod chip;
 pub(crate) mod display;
 pub(crate) mod entry;
-pub(crate) mod feature;
 pub(crate) mod import;
 pub(crate) mod input_device;
 pub(crate) mod keyboard_config;

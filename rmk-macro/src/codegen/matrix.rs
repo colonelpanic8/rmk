@@ -1,7 +1,7 @@
 //! Initialize matrix initialization boilerplate of RMK
 //!
 use quote::quote;
-use rmk_config::resolved::Hardware;
+use rmk_config::resolved::{Capabilities, Hardware};
 use rmk_config::resolved::hardware::{
     BoardConfig, ChipModel, ChipSeries, MatrixConfig, MatrixType, UniBodyConfig,
 };
@@ -10,13 +10,12 @@ use super::chip::gpio::{
     convert_direct_pins_to_initializers, convert_input_pins_to_initializers,
     convert_output_pins_to_initializers, get_input_pin_type, get_output_pin_type,
 };
-use super::feature::is_feature_enabled;
 
 pub(crate) fn expand_matrix_config(
     hardware: &Hardware,
-    rmk_features: &Option<Vec<String>>,
+    caps: &Capabilities,
 ) -> proc_macro2::TokenStream {
-    let async_matrix = is_feature_enabled(rmk_features, "async_matrix");
+    let async_matrix = caps.async_matrix;
     let mut matrix_config = proc_macro2::TokenStream::new();
     match &hardware.board {
         BoardConfig::UniBody(UniBodyConfig { matrix, .. }) => match matrix.matrix_type {

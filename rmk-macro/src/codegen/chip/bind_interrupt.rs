@@ -5,16 +5,15 @@ use std::collections::HashSet;
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use rmk_config::resolved::Hardware;
+use rmk_config::resolved::{Capabilities, Hardware};
 use rmk_config::resolved::hardware::{BoardConfig, InputDeviceConfig, UniBodyConfig};
 use syn::ItemMod;
 
 use crate::codegen::display::expand_display_interrupt;
-use crate::codegen::feature::{get_rmk_features, is_feature_enabled};
 use crate::codegen::input_device::iqs5xx::expand_iqs5xx_interrupts;
 
 /// Expand `bind_interrupt!` stuffs, and other code before `main` function
-pub(crate) fn expand_bind_interrupt(hardware: &Hardware, item_mod: &ItemMod) -> TokenStream2 {
+pub(crate) fn expand_bind_interrupt(hardware: &Hardware, caps: &Capabilities, item_mod: &ItemMod) -> TokenStream2 {
     // If there is a function with `#[Overwritten(bind_interrupt)]`, override it
     if let Some((_, items)) = &item_mod.content {
         items
@@ -32,9 +31,9 @@ pub(crate) fn expand_bind_interrupt(hardware: &Hardware, item_mod: &ItemMod) -> 
                 }
                 None
             })
-            .unwrap_or(bind_interrupt_default(hardware, item_mod))
+            .unwrap_or(bind_interrupt_default(hardware, caps, item_mod))
     } else {
-        bind_interrupt_default(hardware, item_mod)
+        bind_interrupt_default(hardware, caps, item_mod)
     }
 }
 
@@ -53,7 +52,7 @@ pub(crate) fn find_extern_irqs(item_mod: &ItemMod) -> Vec<TokenStream2> {
 }
 
 /// Expand default `bind_interrupt!` for different chips and nrf-sdc config for nRF52
-pub(crate) fn bind_interrupt_default(hardware: &Hardware, item_mod: &ItemMod) -> TokenStream2 {
+pub(crate) fn bind_interrupt_default(hardware: &Hardware, caps: &Capabilities, item_mod: &ItemMod) -> TokenStream2 {
     let extern_irqs_vec = find_extern_irqs(item_mod);
     let extern_irqs = if extern_irqs_vec.is_empty() {
         quote! {}
@@ -96,8 +95,7 @@ pub(crate) fn bind_interrupt_default(hardware: &Hardware, item_mod: &ItemMod) ->
     match chip.series {
         rmk_config::resolved::hardware::ChipSeries::Stm32 => {
             // For stm32, bind USB interrupt and EXTI interrupts (if async_matrix is enabled)
-            let rmk_features = get_rmk_features();
-            let async_matrix = is_feature_enabled(&rmk_features, "async_matrix");
+            let async_matrix = caps.async_matrix;
 
             // Generate EXTI interrupt bindings for async_matrix
             let exti_interrupts = if async_matrix {

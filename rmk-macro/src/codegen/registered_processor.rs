@@ -1,18 +1,17 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use rmk_config::resolved::Hardware;
+use rmk_config::resolved::{Capabilities, Hardware};
 use rmk_config::resolved::hardware::{ChipModel, PinConfig};
 use syn::ItemMod;
 
 use super::chip::gpio::convert_gpio_str_to_output_pin;
-use crate::codegen::feature::is_feature_enabled;
 
 /// Expand processor init/exec blocks from keyboard config.
 /// Returns (initializers, executors).
 pub(crate) fn expand_registered_processor_init(
     hardware: &Hardware,
     item_mod: &ItemMod,
-    rmk_features: &Option<Vec<String>>,
+    caps: &Capabilities,
 ) -> (TokenStream, Vec<TokenStream>) {
     let mut initializers = TokenStream::new();
     let mut executors = vec![];
@@ -21,7 +20,7 @@ pub(crate) fn expand_registered_processor_init(
     initializers.extend(i);
     executors.extend(e);
 
-    if is_feature_enabled(rmk_features, "dfu_rp") || is_feature_enabled(rmk_features, "dfu_nrf") {
+    if caps.dfu_rp || caps.dfu_nrf {
         create_dfu_led_processor(hardware, &mut initializers, &mut executors);
     }
 

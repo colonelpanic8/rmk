@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use rmk_config::SplitConnection;
-use rmk_config::resolved::Hardware;
+use rmk_config::resolved::{Capabilities, Hardware};
 use rmk_config::resolved::hardware::{
     BleConfig, BoardConfig, ChipModel, ChipSeries, CommunicationConfig, InputDeviceConfig,
     MatrixType, SplitBoardConfig, SplitConfig,
@@ -14,7 +14,6 @@ use crate::codegen::chip::flash::expand_flash_init;
 use crate::codegen::chip::gpio::expand_output_initialization;
 use crate::codegen::display::{expand_display_config, expand_display_interrupt};
 use crate::codegen::entry::join_all_tasks;
-use crate::codegen::feature::{get_rmk_features, is_feature_enabled};
 use crate::codegen::import::expand_custom_imports;
 use crate::codegen::input_device::adc::expand_adc_device;
 use crate::codegen::input_device::encoder::expand_encoder_device;
@@ -36,12 +35,12 @@ pub(crate) fn parse_split_peripheral_mod(
     _attr: proc_macro::TokenStream,
     item_mod: ItemMod,
 ) -> TokenStream2 {
-    let rmk_features = get_rmk_features();
-    if !is_feature_enabled(&rmk_features, "split") {
-        panic!("\"split\" feature of RMK should be enabled");
-    }
-
     let toml_config = read_keyboard_toml_config();
+    let caps = Capabilities::from_toml(&toml_config)
+        .unwrap_or_else(|e| panic!("❌ keyboard.toml error:\n{e}"));
+    if !caps.split {
+        panic!("add a [split] section to keyboard.toml to build a split peripheral");
+    }
     let hardware = toml_config
         .hardware()
         .expect("failed to resolve hardware config");
@@ -49,8 +48,7 @@ pub(crate) fn parse_split_peripheral_mod(
         .identity()
         .expect("failed to resolve identity config");
 
-    let dfu_enabled =
-        is_feature_enabled(&rmk_features, "dfu_rp") || is_feature_enabled(&rmk_features, "dfu_nrf");
+    let dfu_enabled = caps.dfu_rp || caps.dfu_nrf;
     let device_config = if dfu_enabled {
         let vid = identity.vendor_id;
         let pid = identity.product_id;
@@ -70,10 +68,10 @@ pub(crate) fn parse_split_peripheral_mod(
         quote! {}
     };
 
-    let main_function = expand_split_peripheral(id, &identity, &hardware, item_mod, &rmk_features);
+    let main_function = expand_split_peripheral(id, &identity, &hardware, item_mod, &caps);
 
     let bind_interrupts =
-        expand_bind_interrupt_for_split_peripheral(&hardware.chip, &hardware, id, &rmk_features);
+        expand_bind_interrupt_for_split_peripheral(&hardware.chip, &hardware, id, &caps);
 
     let chip = &hardware.chip;
     let main_function_sig = if chip.series == ChipSeries::Esp32 {
@@ -108,7 +106,7 @@ fn expand_bind_interrupt_for_split_peripheral(
     chip: &ChipModel,
     hardware: &Hardware,
     peripheral_id: usize,
-    rmk_features: &Option<Vec<String>>,
+    caps: &Capabilities,
 ) -> TokenStream2 {
     let communication = &hardware.communication;
 
@@ -136,8 +134,7 @@ fn expand_bind_interrupt_for_split_peripheral(
 
     match chip.series {
         ChipSeries::Nrf52 => {
-            let dfu_enabled = is_feature_enabled(rmk_features, "dfu_rp")
-                || is_feature_enabled(rmk_features, "dfu_nrf");
+            let dfu_enabled = caps.dfu_rp || caps.dfu_nrf;
             let usb_interrupt = if dfu_enabled {
                 quote! {
                     USBD => ::embassy_nrf::usb::InterruptHandler<::embassy_nrf::peripherals::USBD>;
@@ -258,8 +255,7 @@ fn expand_bind_interrupt_for_split_peripheral(
             }
         }
         ChipSeries::Rp2040 => {
-            let dfu_enabled = is_feature_enabled(rmk_features, "dfu_rp")
-                || is_feature_enabled(rmk_features, "dfu_nrf");
+            let dfu_enabled = caps.dfu_rp || caps.dfu_nrf;
             if communication.ble_enabled() {
                 let usb_int = if dfu_enabled {
                     quote! { USBCTRL_IRQ => ::embassy_rp::usb::InterruptHandler<::embassy_rp::peripherals::USB>; }
@@ -307,7 +303,7 @@ fn expand_split_peripheral(
     _identity: &Identity,
     hardware: &Hardware,
     item_mod: ItemMod,
-    rmk_features: &Option<Vec<String>>,
+    caps: &Capabilities,
 ) -> TokenStream2 {
     // Check whether keyboard.toml contains split section
     let split_config = match &hardware.board {
@@ -326,20 +322,17 @@ fn expand_split_peripheral(
     let mut chip_init = expand_chip_init(hardware, Some(id), &item_mod);
     if split_config.connection == SplitConnection::Ble {
         // Add storage when using BLE split
-        let flash_init = expand_flash_init(hardware);
+        let flash_init = expand_flash_init(hardware, caps);
         chip_init.extend(quote! {
             #flash_init
             let mut storage = ::rmk::storage::new_storage_for_split_peripheral(flash, storage_config).await;
         });
-    } else if is_feature_enabled(rmk_features, "dfu_rp")
-        || is_feature_enabled(rmk_features, "dfu_nrf")
-    {
-        let flash_init = expand_flash_init(hardware);
+    } else if caps.dfu_rp || caps.dfu_nrf {
+        let flash_init = expand_flash_init(hardware, caps);
         chip_init.extend(quote! { #flash_init });
     }
 
-    let dfu_enabled =
-        is_feature_enabled(rmk_features, "dfu_rp") || is_feature_enabled(rmk_features, "dfu_nrf");
+    let dfu_enabled = caps.dfu_rp || caps.dfu_nrf;
 
     // Mark booted when DFU is enabled so the bootloader doesn't
     // revert the previous update.
@@ -372,7 +365,7 @@ fn expand_split_peripheral(
     let row = peripheral_config.rows;
 
     // Matrix config
-    let async_matrix = is_feature_enabled(rmk_features, "async_matrix");
+    let async_matrix = caps.async_matrix;
     let chip = &hardware.chip;
     let mut matrix_config = proc_macro2::TokenStream::new();
     let bootmagic = expand_bootmagic_check(&peripheral_config.matrix);
@@ -461,7 +454,7 @@ fn expand_split_peripheral(
 
     // Add processor support for peripherals
     let (registered_processor_initializers, mut registered_processors) =
-        expand_registered_processor_init(hardware, &item_mod, rmk_features);
+        expand_registered_processor_init(hardware, &item_mod, caps);
 
     // Display configuration for this peripheral
     let display_init = if let Some(display_config) = &peripheral_config.display {
@@ -477,7 +470,7 @@ fn expand_split_peripheral(
         quote! {}
     };
 
-    let (watchdog_init, watchdog_task) = expand_watchdog_init(hardware);
+    let (watchdog_init, watchdog_task) = expand_watchdog_init(hardware, caps);
 
     let runnable_import = if !registered_processors.is_empty() || watchdog_task.is_some() {
         quote! { use ::rmk::core_traits::Runnable; }
