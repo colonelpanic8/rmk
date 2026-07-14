@@ -8,7 +8,7 @@
 
 Action::DefaultLayer(5)                   08 05
 Action::Key(Hid(A))                       01 00 04
-Action::KeyWithModifier(A,LShift)         03 00 04 02
+Action::KeyWithModifier(A,LShift)         03 04 02
 Action::KeyboardControl(Bootloader)       11 00
 Action::LayerOff(3)                       06 03
 Action::LayerOn(1)                        04 01
@@ -18,7 +18,7 @@ Action::LayerToggleOnly(6)                09 06
 Action::Light(RgbTog)                     10 07
 Action::Modifier(LCtrl)                   02 01
 Action::No                                00
-Action::OneShotKey(Hid(B))                0f 00 05
+Action::OneShotKey(Hid(B))                0f 05
 Action::OneShotLayer(8)                   0d 08
 Action::OneShotModifier(LAlt)             0e 04
 Action::Special(GraveEscape)              12 00

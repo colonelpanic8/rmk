@@ -89,7 +89,7 @@ mod tests {
     use super::*;
     use crate::action::Action;
     use crate::constants::MORSE_SIZE;
-    use crate::keycode::{HidKeyCode, KeyCode};
+    use crate::keycode::HidKeyCode;
     use crate::modifier::ModifierCombination;
     use crate::morse::{MorsePattern, MorseProfile};
     use crate::protocol::rynk::tests::{assert_max_size_bound, round_trip};
@@ -101,7 +101,7 @@ mod tests {
     /// pattern is `0b1`), so patterns start at 1.
     fn full_morse() -> Morse {
         // Use a multi-byte action so MaxSize catches per-entry under-counts.
-        let action = Action::KeyWithModifier(KeyCode::Hid(HidKeyCode::A), ModifierCombination::new());
+        let action = Action::KeyWithModifier(HidKeyCode::A, ModifierCombination::new());
         let mut m = Morse {
             profile: MorseProfile::const_default(),
             actions: heapless::LinearMap::new(),

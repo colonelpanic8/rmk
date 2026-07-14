@@ -24,7 +24,7 @@ pub use light::LightAction;
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
 
-use crate::keycode::{KeyCode, SpecialKey};
+use crate::keycode::{HidKeyCode, KeyCode, SpecialKey};
 use crate::modifier::ModifierCombination;
 #[cfg(feature = "steno")]
 use crate::steno::StenoKey;
@@ -42,8 +42,9 @@ pub enum Action {
     Key(KeyCode),
     /// Modifier Combination, used in tap hold
     Modifier(ModifierCombination),
-    /// Key stroke with modifier combination triggered.
-    KeyWithModifier(KeyCode, ModifierCombination),
+    /// Key stroke with modifier combination triggered. Modifiers only apply to
+    /// HID keyboard keys, so this carries a [`HidKeyCode`] rather than a full [`KeyCode`].
+    KeyWithModifier(HidKeyCode, ModifierCombination),
     /// Activate a layer
     LayerOn(u8),
     /// Activate a layer with modifier combination triggered.
@@ -65,7 +66,7 @@ pub enum Action {
     /// Oneshot modifier, keep the modifier active until the next key is triggered.
     OneShotModifier(ModifierCombination),
     /// Oneshot key, keep the key active until the next key is triggered.
-    OneShotKey(KeyCode),
+    OneShotKey(HidKeyCode),
     /// Actions for controlling lights
     Light(LightAction),
     /// Actions for controlling the keyboard

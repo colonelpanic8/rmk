@@ -386,10 +386,7 @@ fn wire_values_locked() {
         ),
         (
             "Action::KeyWithModifier(A,LShift)",
-            encode(&Action::KeyWithModifier(
-                KeyCode::Hid(HidKeyCode::A),
-                ModifierCombination::LSHIFT
-            )),
+            encode(&Action::KeyWithModifier(HidKeyCode::A, ModifierCombination::LSHIFT)),
         ),
         ("Action::LayerOn(1)", encode(&Action::LayerOn(1))),
         (
@@ -408,10 +405,7 @@ fn wire_values_locked() {
             "Action::OneShotModifier(LAlt)",
             encode(&Action::OneShotModifier(ModifierCombination::LALT))
         ),
-        (
-            "Action::OneShotKey(Hid(B))",
-            encode(&Action::OneShotKey(KeyCode::Hid(HidKeyCode::B)))
-        ),
+        ("Action::OneShotKey(Hid(B))", encode(&Action::OneShotKey(HidKeyCode::B))),
         ("Action::Light(RgbTog)", encode(&Action::Light(LightAction::RgbTog))),
         (
             "Action::KeyboardControl(Bootloader)",
