@@ -2006,19 +2006,20 @@ mod test {
         ]
     }
 
-    fn test_keyboard_with_config(config: BehaviorConfig) -> Keyboard<'static> {
+    fn create_test_keyboard_with_config(config: BehaviorConfig) -> Keyboard<'static> {
         // Box::leak is acceptable in tests: nextest runs each #[test] in its own process,
         // so the leaked memory is reclaimed when the process exits.
         let behavior_config: &'static mut BehaviorConfig = Box::leak(Box::new(config));
         let per_key_config: &'static PositionalConfig<5, 14> = Box::leak(Box::new(PositionalConfig::default()));
-        let keymap_data = Box::leak(Box::new(crate::keymap::KeymapData::new(get_keymap())));
-        let keymap = block_on(KeyMap::new(keymap_data, behavior_config, per_key_config));
-        let keymap = Box::leak(Box::new(keymap));
-        Keyboard::new(keymap)
+        let data = Box::leak(Box::new(crate::keymap::KeymapData::new(get_keymap())));
+        let keymap = block_on(KeyMap::new(data, behavior_config, per_key_config));
+        let keymap_ref = Box::leak(Box::new(keymap));
+
+        Keyboard::new(keymap_ref)
     }
 
-    fn test_keyboard() -> Keyboard<'static> {
-        test_keyboard_with_config(BehaviorConfig::default())
+    fn create_test_keyboard() -> Keyboard<'static> {
+        create_test_keyboard_with_config(BehaviorConfig::default())
     }
 
     async fn force_timeout_first_hold(keyboard: &mut Keyboard<'static>) {
@@ -2026,11 +2027,11 @@ mod test {
         keyboard.process_buffered_key(key).await;
     }
 
-    fn test_keyboard_with_forks(fork1: Fork, fork2: Fork) -> Keyboard<'static> {
+    fn create_test_keyboard_with_forks(fork1: Fork, fork2: Fork) -> Keyboard<'static> {
         let mut cfg = ForksConfig::default();
         let _ = cfg.forks.push(fork1);
         let _ = cfg.forks.push(fork2);
-        test_keyboard_with_config(BehaviorConfig {
+        create_test_keyboard_with_config(BehaviorConfig {
             fork: cfg,
             ..BehaviorConfig::default()
         })
@@ -2039,7 +2040,7 @@ mod test {
     #[test]
     fn test_register_key() {
         let main = async {
-            let mut keyboard = test_keyboard();
+            let mut keyboard = create_test_keyboard();
             keyboard.register_key(HidKeyCode::A, KeyboardEvent::key(2, 1, true));
             assert_eq!(keyboard.held_keycodes[0], HidKeyCode::A);
         };
@@ -2049,7 +2050,7 @@ mod test {
     #[test]
     fn test_basic_key_press_release() {
         let main = async {
-            let mut keyboard = test_keyboard();
+            let mut keyboard = create_test_keyboard();
 
             // Press A key
             keyboard.process_inner(KeyboardEvent::key(0, 0, true)).await;
@@ -2065,7 +2066,7 @@ mod test {
     #[test]
     fn test_modifier_key() {
         let main = async {
-            let mut keyboard = test_keyboard();
+            let mut keyboard = create_test_keyboard();
 
             // Press Shift key
             keyboard.register_key(HidKeyCode::LShift, KeyboardEvent::key(3, 0, true));
@@ -2084,7 +2085,7 @@ mod test {
     #[test]
     fn test_multiple_keys() {
         let main = async {
-            let mut keyboard = test_keyboard();
+            let mut keyboard = create_test_keyboard();
 
             keyboard.process_inner(KeyboardEvent::key(0, 0, true)).await;
             assert!(keyboard.held_keycodes.contains(&HidKeyCode::Grave));
@@ -2112,7 +2113,7 @@ mod test {
     #[test]
     fn test_repeat_key_single() {
         let main = async {
-            let mut keyboard = test_keyboard();
+            let mut keyboard = create_test_keyboard();
             keyboard.keymap.set_action_at(
                 KeyboardEventPos::Key(KeyPos { row: 0, col: 0 }),
                 0,
@@ -2153,7 +2154,7 @@ mod test {
     #[test]
     fn test_repeat_key_th() {
         let main = async {
-            let mut keyboard = test_keyboard();
+            let mut keyboard = create_test_keyboard();
             keyboard.keymap.set_action_at(
                 KeyboardEventPos::Key(KeyPos { row: 0, col: 0 }),
                 0,
@@ -2223,7 +2224,7 @@ mod test {
     #[test]
     fn test_key_action_transparent() {
         let main = async {
-            let mut keyboard = test_keyboard();
+            let mut keyboard = create_test_keyboard();
 
             // Activate layer 1
             keyboard.process_action_layer_switch(1, KeyboardEvent::key(0, 0, true));
@@ -2242,7 +2243,7 @@ mod test {
     #[test]
     fn test_key_action_no() {
         let main = async {
-            let mut keyboard = test_keyboard();
+            let mut keyboard = create_test_keyboard();
 
             // Press No key
             keyboard.process_inner(KeyboardEvent::key(4, 3, true)).await;
@@ -2295,7 +2296,7 @@ mod test {
                 bindable: false,
             };
 
-            let mut keyboard = test_keyboard_with_forks(fork1, fork2);
+            let mut keyboard = create_test_keyboard_with_forks(fork1, fork2);
 
             // Press Dot key, by itself it should emit '.'
             keyboard.process_inner(KeyboardEvent::key(3, 9, true)).await;
@@ -2400,7 +2401,7 @@ mod test {
                 bindable: false,
             };
 
-            let mut keyboard = test_keyboard_with_forks(fork1, fork2);
+            let mut keyboard = create_test_keyboard_with_forks(fork1, fork2);
 
             // disable th on a
             keyboard.keymap.set_action_at(

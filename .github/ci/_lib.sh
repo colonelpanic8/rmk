@@ -40,6 +40,7 @@ RMK_FEATURESETS=(
     "async_matrix,storage"
     "vial,host_lock,storage"
     "vial,_ble"
+    "vial,_ble,_no_usb,steno,passkey_entry"
     "split,async_matrix"
     "split,async_matrix,_ble"
     "split,vial,async_matrix"
@@ -50,6 +51,7 @@ RMK_FEATURESETS=(
     "vial,storage,steno"
     "split,vial,storage,async_matrix,_ble,steno"
     "rynk,bulk,_ble,split,storage,async_matrix"
+    "rynk,bulk,_ble,_no_usb,steno"
     "rynk,storage"
     "rynk"
 )
