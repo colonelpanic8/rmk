@@ -44,13 +44,6 @@ pub(crate) fn parse_split_peripheral_mod(
     let hardware = toml_config
         .hardware()
         .expect("failed to resolve hardware config");
-    // nRF54 differs from nRF52 in flash (RRAMC), USB (USBHS) and MPSL wiring;
-    // codegen for it is not implemented yet.
-    if hardware.chip.chip.starts_with("nrf54") {
-        panic!(
-            "keyboard.toml codegen for nRF54 chips is not implemented yet — use the Rust API (see examples/use_rust/nrf54lm20_ble)"
-        );
-    }
     let identity = toml_config
         .identity()
         .expect("failed to resolve identity config");

@@ -44,13 +44,6 @@ pub(crate) fn parse_keyboard_mod(item_mod: syn::ItemMod) -> TokenStream2 {
     let hardware = keyboard_config
         .hardware()
         .expect("failed to resolve hardware config");
-    // nRF54 differs from nRF52 in flash (RRAMC), USB (USBHS) and MPSL wiring;
-    // codegen for it is not implemented yet.
-    if hardware.chip.chip.starts_with("nrf54") {
-        panic!(
-            "keyboard.toml codegen for nRF54 chips is not implemented yet — use the Rust API (see examples/use_rust/nrf54lm20_ble)"
-        );
-    }
     let behavior = keyboard_config
         .behavior()
         .expect("failed to resolve behavior config");

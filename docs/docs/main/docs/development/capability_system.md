@@ -105,8 +105,9 @@ plus a `firmware_features()` entry so generators emit it). See how the display d
   degrade resolution errors to `cargo:warning`s with a features-only fallback, so the IDE keeps
   working while `keyboard.toml` is mid-edit.
 - **Chip facts** — has-USB comes from `usb_interrupt_map.rs`, high-speed USB from
-  `chip::usb_high_speed()`, chip defaults from `rmk-config/src/default_config/<chip>.toml`. New
-  chips need all three (see the nRF54 entries for a chip whose `#[rmk_keyboard]` codegen is still
-  pending — the resolution layer can lead the macro).
+  `chip::usb_high_speed()`, chip defaults from `rmk-config/src/default_config/<chip>.toml`. A new
+  chip needs all three plus the `rmk-macro` codegen for its init/flash/interrupt wiring — add them
+  together, so `keyboard.toml` support is real when the chip name parses (see the nRF54 TODO in
+  `chip.rs` for a pending example).
 - **Testing feature combinations** — CI's feature matrix (`.github/ci/_lib.sh`) exercises the
   featureland path; the bundled `use_config` examples exercise the toml path end to end.

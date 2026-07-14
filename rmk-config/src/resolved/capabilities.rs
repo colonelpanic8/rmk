@@ -231,11 +231,6 @@ impl Capabilities {
         let (dfu_rp, dfu_nrf) = if dfu {
             match chip.series {
                 ChipSeries::Rp2040 => (true, false),
-                // The dfu_nrf path drives NVMC; nRF54's RRAM has no support yet.
-                ChipSeries::Nrf52 if chip.chip.starts_with("nrf54") => {
-                    errs.push("[dfu] is enabled but DFU is not supported on nRF54 chips".to_string());
-                    (false, false)
-                }
                 ChipSeries::Nrf52 => (false, true),
                 ChipSeries::Stm32 => (false, false),
                 ChipSeries::Esp32 => {
@@ -390,7 +385,6 @@ impl Capabilities {
         if caps.dfu {
             let flavor = match facts.chip.series {
                 ChipSeries::Rp2040 => Some("dfu_rp"),
-                ChipSeries::Nrf52 if facts.chip.chip.starts_with("nrf54") => None,
                 ChipSeries::Nrf52 => Some("dfu_nrf"),
                 ChipSeries::Stm32 => Some("dfu"),
                 ChipSeries::Esp32 => None,
@@ -820,57 +814,5 @@ scl = "PIN_1"
         let toml = cfg(&format!("{RP2040_USB}{DISPLAY_SECTION}"));
         let features = toml.firmware_features().unwrap();
         assert_eq!(features, vec!["oled_async", "rp2040"]);
-    }
-
-    /// Load through the real chip-default merge (nrf54 defaults are new).
-    fn load_with_chip_defaults(name: &str, user_toml: &str) -> KeyboardTomlConfig {
-        let path = std::env::temp_dir().join(format!(
-            "rmk-caps-{name}-{}-{}.toml",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::write(&path, user_toml).unwrap();
-        let config = KeyboardTomlConfig::load_for_build(&path).unwrap();
-        std::fs::remove_file(&path).ok();
-        config
-    }
-
-    #[test]
-    fn nrf54_resolves_with_chip_defaults() {
-        let base = "[keyboard]\nname = \"t\"\nvendor_id = 1\nproduct_id = 1\n";
-
-        // nrf54lm20: high-speed USB + BLE from the chip defaults.
-        let toml = load_with_chip_defaults("lm20", &format!("{base}chip = \"nrf54lm20\""));
-        let closure = ["nrf54lm20_ble", "_nrf_ble", "_ble", "_usb_high_speed", "storage"];
-        let caps = Capabilities::resolve(Some(&toml), &feats(&closure)).unwrap();
-        assert!(caps.usb && caps.usb_high_speed && caps.ble && caps.storage);
-        assert_eq!(toml.firmware_features().unwrap(), vec!["nrf54lm20_ble"]);
-        // The hint names the chip feature when BLE is on without it.
-        let err = err_text(Capabilities::resolve(Some(&toml), &feats(&["defmt"])));
-        assert!(err.contains("nrf54lm20_ble"), "{err}");
-
-        // nrf54l15: BLE-only, no USB.
-        let toml = load_with_chip_defaults("l15", &format!("{base}chip = \"nrf54l15\""));
-        let caps = Capabilities::resolve(
-            Some(&toml),
-            &feats(&["nrf54l15_ble", "_nrf_ble", "_ble", "_no_usb", "storage"]),
-        )
-        .unwrap();
-        assert!(!caps.usb && caps.ble);
-    }
-
-    #[test]
-    fn dfu_is_rejected_on_nrf54() {
-        let toml = cfg(
-            "[keyboard]\nname = \"t\"\nvendor_id = 1\nproduct_id = 1\nchip = \"nrf54lm20\"\nusb_enable = true\n\n[ble]\nenabled = true\n\n[dfu]\nenabled = true",
-        );
-        let err = err_text(Capabilities::resolve(
-            Some(&toml),
-            &feats(&["nrf54lm20_ble", "_nrf_ble", "_ble", "_usb_high_speed", "storage"]),
-        ));
-        assert!(err.contains("not supported on nRF54"), "{err}");
     }
 }
