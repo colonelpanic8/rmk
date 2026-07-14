@@ -393,10 +393,11 @@ mod tests {
 
     use embedded_io_async::ErrorKind;
     use rmk_types::action::KeyAction;
+    use rmk_types::battery::BatteryStatus;
     use rmk_types::connection::{ConnectionStatus, ConnectionType};
     use rmk_types::protocol::rynk::{
-        GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, SetComboBulkRequest, SetKeymapBulkRequest,
-        SetMorseBulkRequest, TopicEvent,
+        GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, PeripheralStatus, SetComboBulkRequest,
+        SetKeymapBulkRequest, SetMorseBulkRequest, TopicEvent,
     };
     use tokio::time::timeout;
 
@@ -766,6 +767,24 @@ mod tests {
         let r = client.get_battery_status().await;
         assert!(matches!(r, Err(RynkHostError::Unsupported(Cmd::GetBatteryStatus, _))));
         assert!(client.is_alive(), "a locally-gated reject must not kill the link");
+    }
+
+    #[tokio::test]
+    async fn wired_split_peripheral_status_is_supported() {
+        let status = PeripheralStatus {
+            connected: true,
+            battery: BatteryStatus::Unavailable,
+        };
+        let mut capabilities = caps();
+        capabilities.is_split = true;
+        capabilities.ble_enabled = false;
+        let t = MockTransport::new(vec![
+            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
+            Step::Chunk(reply(Cmd::GetCapabilities, 2, capabilities)),
+            Step::Chunk(reply(Cmd::GetPeripheralStatus, 3, status)),
+        ]);
+        let mut client = Client::connect(t).await.unwrap();
+        assert_eq!(client.get_peripheral_status(0).await.unwrap(), status);
     }
 
     #[tokio::test]
