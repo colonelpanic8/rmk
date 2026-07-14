@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::keycode::{KeyCode, SpecialKey};
 use crate::modifier::ModifierCombination;
-#[cfg(feature = "steno")]
+#[cfg(rmk_steno)]
 use crate::steno::StenoKey;
 
 /// A single basic action that a keyboard can execute.
@@ -81,6 +81,6 @@ pub enum Action {
     /// A Plover HID stenography key. Press/release of this key updates the
     /// in-progress steno chord; on first release the accumulated chord is
     /// sent to the host as a vendor HID report.
-    #[cfg(feature = "steno")]
+    #[cfg(rmk_steno)]
     Steno(StenoKey),
 }

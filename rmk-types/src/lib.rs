@@ -41,7 +41,7 @@ pub mod ble;
 pub mod combo;
 pub mod connection;
 pub mod constants;
-#[cfg(feature = "dfu")]
+#[cfg(rmk_dfu)]
 pub mod dfu;
 pub mod fmt;
 pub mod fork;
@@ -51,7 +51,7 @@ pub mod modifier;
 pub mod morse;
 pub mod mouse_button;
 pub mod protocol;
-#[cfg(feature = "steno")]
+#[cfg(rmk_steno)]
 pub mod steno;
 
 /// Compute the maximum varint-encoded length for a given max value.

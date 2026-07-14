@@ -26,7 +26,7 @@ impl MaxSize for MatrixState {
 
 /// Status of a single split peripheral. Wired peripherals report
 /// `connected: true` with `battery: Unavailable`.
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
@@ -59,7 +59,7 @@ mod tests {
         assert_max_size_bound(&state);
     }
 
-    #[cfg(all(feature = "_ble", feature = "split"))]
+    #[cfg(all(rmk_ble, rmk_split))]
     #[test]
     fn round_trip_peripheral_status() {
         use crate::battery::{BatteryStatus, ChargeState};

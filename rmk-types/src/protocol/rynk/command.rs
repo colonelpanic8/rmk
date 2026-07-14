@@ -14,22 +14,22 @@ use super::{
     LockStatus, MacroData, MatrixState, ProtocolVersion, RynkError, SetComboRequest, SetEncoderRequest, SetForkRequest,
     SetKeyRequest, SetMacroRequest, SetMorseRequest, StorageResetMode,
 };
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 use super::{
     GetComboBulkRequest, GetComboBulkResponse, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMorseBulkRequest,
     GetMorseBulkResponse, SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest,
 };
 use crate::action::{EncoderAction, KeyAction};
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use crate::battery::BatteryStatus;
-#[cfg(feature = "_ble")]
+#[cfg(rmk_ble)]
 use crate::ble::BleStatus;
 use crate::combo::Combo;
 use crate::connection::{ConnectionStatus, ConnectionType};
 use crate::fork::Fork;
 use crate::led_indicator::LedIndicator;
 use crate::morse::Morse;
-#[cfg(feature = "split")]
+#[cfg(rmk_split)]
 use crate::protocol::rynk::PeripheralStatus;
 
 /// CMD high bit marking a topic (server → host push).
@@ -106,7 +106,7 @@ macro_rules! endpoints {
     (@floor $name:ident) => { <$name as Endpoint>::MAX_PAYLOAD };
     (@floor $marker:ident $name:ident) => { 0 };
     // Gate one generated item on the feature named by the row's marker.
-    (@gate bulk $item:item) => { #[cfg(feature = "bulk")] $item };
+    (@gate bulk $item:item) => { #[cfg(rmk_bulk)] $item };
     (@gate $item:item) => { $item };
     ($( $(#[$meta:meta])* $(@ $marker:ident)? $name:ident = $cmd:literal : $req:ty => $resp:ty; )*) => {
         #[allow(non_upper_case_globals)]
@@ -265,19 +265,19 @@ endpoints! {
     GetConnectionType = 0x0701: () => ConnectionType;
     /// Full `ConnectionStatus` snapshot.
     GetConnectionStatus = 0x0702: () => ConnectionStatus;
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     GetBleStatus = 0x0703: () => BleStatus;
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     SwitchBleProfile = 0x0704: u8 => ();
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     ClearBleProfile = 0x0705: u8 => ();
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
     GetMatrixState = 0x0802: () => MatrixState;
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     GetBatteryStatus = 0x0803: () => BatteryStatus;
-    #[cfg(feature = "split")]
+    #[cfg(rmk_split)]
     GetPeripheralStatus = 0x0804: u8 => PeripheralStatus;
     /// Latest WPM, sourced from the `WpmUpdate` topic snapshot.
     GetWpm = 0x0805: () => u16;
@@ -295,7 +295,7 @@ topics! {
     ConnectionChange = 0x8003: ConnectionStatus;
     SleepState = 0x8004: bool;
     LedIndicatorChange = 0x8005: LedIndicator;
-    #[cfg(feature = "_ble")]
+    #[cfg(rmk_ble)]
     BatteryStatusChange = 0x8006: BatteryStatus;
 }
 
@@ -306,7 +306,7 @@ topics! {
 pub const RYNK_MAX_PAYLOAD: usize = max_const(MAX_ENDPOINT_PAYLOAD, MAX_TOPIC_PAYLOAD);
 
 // Bulk counts live here because they need payload `POSTCARD_MAX_SIZE`.
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 mod bulk_capacity {
     use postcard::experimental::max_size::MaxSize;
 
@@ -342,7 +342,7 @@ mod bulk_capacity {
     }
 }
 
-#[cfg(feature = "bulk")]
+#[cfg(rmk_bulk)]
 pub use bulk_capacity::{bulk_keymap_size_for_buffer, bulk_size_for_buffer};
 
 #[cfg(test)]
@@ -424,7 +424,7 @@ mod tests {
     /// buffer, and — crucially — their worst-case encoded frame fits the buffer
     /// they were derived from. That fit is what lets the firmware serve a full
     /// bulk message out of its `RYNK_BUFFER_SIZE` buffer.
-    #[cfg(feature = "bulk")]
+    #[cfg(rmk_bulk)]
     #[test]
     fn bulk_counts_derive_from_buffer_and_fit() {
         use super::{bulk_keymap_size_for_buffer, bulk_size_for_buffer};

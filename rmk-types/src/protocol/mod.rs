@@ -11,6 +11,6 @@
 //! The two protocols are mutually exclusive at the firmware level
 //! (`rynk` and `vial` features cannot be enabled together).
 
-#[cfg(feature = "rynk")]
+#[cfg(rmk_rynk)]
 pub mod rynk;
 pub mod vial;
