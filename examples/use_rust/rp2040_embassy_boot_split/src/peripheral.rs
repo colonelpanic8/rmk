@@ -5,7 +5,6 @@
 mod macros;
 
 use defmt::*;
-use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_futures::join::join3;
 use embassy_rp::gpio::{Input, Level, Output};
@@ -13,7 +12,6 @@ use embassy_rp::peripherals::{UART0, USB};
 use embassy_rp::uart::{self, BufferedUart};
 use embassy_rp::usb::{Driver, InterruptHandler};
 use embassy_rp::{bind_interrupts, dma};
-use panic_probe as _;
 use rmk::config::DeviceConfig;
 use rmk::debounce::default_debouncer::DefaultDebouncer;
 use rmk::matrix::Matrix;
@@ -24,6 +22,7 @@ use rmk::split::peripheral::run_rmk_split_peripheral;
 use rmk::storage::{async_flash_wrapper, new_storage_for_split_peripheral};
 use rmk::watchdog::Rp2040Watchdog;
 use static_cell::StaticCell;
+use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;

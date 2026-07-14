@@ -56,19 +56,15 @@ jobs:
         run: cargo install --locked --git https://github.com/embassy-rs/cargo-batch cargo --bin cargo-batch
       - run: .github/ci/check.sh
 
-  test:
+  test-crates:
+    name: test (crates)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt, llvm-tools
-          targets: thumbv6m-none-eabi,thumbv7m-none-eabi,thumbv7em-none-eabi,thumbv7em-none-eabihf,thumbv8m.main-none-eabihf,riscv32imc-unknown-none-elf,riscv32imac-unknown-none-elf
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ci-test
-          # test.sh writes to target/ci/test via CARGO_TARGET_DIR; cache it
-          # explicitly so rust-cache doesn't miss it.
+          shared-key: ci-test-crates
           cache-directories: |
             target/ci
       - uses: taiki-e/install-action@v2
@@ -77,6 +73,52 @@ jobs:
       - name: Install cargo-expand
         run: cargo install --locked cargo-expand
       - run: .github/ci/test.sh
+        env:
+          RMK_TEST_SCOPE: crates
+
+  test-rmk:
+    name: test (rmk ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            index: 0
+          - shard: 2
+            index: 1
+          - shard: 3
+            index: 2
+          - shard: 4
+            index: 3
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-test-rmk-${{ matrix.shard }}
+          cache-directories: |
+            target/ci
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9
+      - run: .github/ci/test.sh
+        env:
+          RMK_TEST_SCOPE: rmk
+          RMK_TEST_SHARD_INDEX: ${{ matrix.index }}
+          RMK_TEST_SHARD_COUNT: 4
+
+  # Preserve one stable required-check name while the work runs in parallel.
+  test:
+    name: test
+    if: ${{ always() }}
+    needs: [test-crates, test-rmk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all test jobs passed
+        run: |
+          test "${{ needs.test-crates.result }}" = success
+          test "${{ needs.test-rmk.result }}" = success
 
   # Host tooling lives in its own workspace, so it gets its own job.
   host:

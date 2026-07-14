@@ -7,7 +7,6 @@ mod macros;
 mod keymap;
 
 use defmt::{info, unwrap};
-use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Input, Output};
 use embassy_nrf::interrupt::{self, InterruptExt};
@@ -21,7 +20,6 @@ use keymap::{COL, ROW};
 use nrf_mpsl::Flash;
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{self as sdc, mpsl};
-use panic_probe as _;
 use rmk::ble::{BleTransport, build_ble_stack};
 use rmk::config::{
     BehaviorConfig, BleBatteryConfig, DeviceConfig, PositionalConfig, RmkConfig, StorageConfig, VialConfig,
@@ -39,6 +37,7 @@ use rmk::watchdog::Nrf52Watchdog;
 use rmk::{HostResources, KeymapData, initialize_keymap_and_storage, run_all};
 use static_cell::StaticCell;
 use vial::{VIAL_KEYBOARD_DEF, VIAL_KEYBOARD_ID};
+use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     USBD => usb::InterruptHandler<USBD>;

@@ -7,7 +7,6 @@ mod macros;
 mod keymap;
 
 use defmt::{info, unwrap};
-use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_nrf::config::{ClockSpeed, Config as NrfConfig, HfclkSource, LfclkSource};
 use embassy_nrf::mode::Blocking;
@@ -16,7 +15,6 @@ use keymap::{COL, ROW, SIZE};
 use nrf_mpsl::Flash;
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{self as sdc, mpsl};
-use panic_probe as _;
 use rmk::ble::{BleTransport, build_ble_stack};
 use rmk::config::{BehaviorConfig, DeviceConfig, PositionalConfig, RmkConfig, StorageConfig, VialConfig};
 use rmk::debounce::default_debouncer::DefaultDebouncer;
@@ -27,6 +25,7 @@ use rmk::processor::builtin::wpm::WpmProcessor;
 use rmk::{DefaultPacketPool, HostResources, KeymapData, PacketPool, initialize_keymap_and_storage, run_all};
 use static_cell::StaticCell;
 use vial::{VIAL_KEYBOARD_DEF, VIAL_KEYBOARD_ID};
+use {defmt_rtt as _, panic_probe as _};
 
 type RandomSource = cracen::Cracen<'static, Blocking>;
 

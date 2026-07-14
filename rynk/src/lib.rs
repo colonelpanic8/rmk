@@ -45,8 +45,7 @@ pub mod layout;
 pub use api::IncomingTopic;
 pub use device::RynkDevice;
 pub use driver::{Client, RynkHostError, TopicFrame};
-pub use embedded_io_async as io;
 pub use layout::LayoutInfo;
-pub use rmk_types;
 /// The decoded topic union carried by [`IncomingTopic::Topic`]
 pub use rmk_types::protocol::rynk::TopicEvent;
+pub use {embedded_io_async as io, rmk_types};

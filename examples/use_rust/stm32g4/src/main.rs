@@ -6,14 +6,12 @@ mod macros;
 mod keymap;
 
 use defmt::info;
-use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::peripherals::USB;
 use embassy_stm32::usb::{Driver, InterruptHandler};
 use embassy_stm32::{Config, bind_interrupts};
 use keymap::{COL, ROW};
-use panic_halt as _;
 use rmk::config::{BehaviorConfig, PositionalConfig, RmkConfig};
 use rmk::debounce::default_debouncer::DefaultDebouncer;
 use rmk::keyboard::Keyboard;
@@ -21,6 +19,7 @@ use rmk::matrix::Matrix;
 use rmk::processor::builtin::wpm::WpmProcessor;
 use rmk::usb::UsbTransport;
 use rmk::{KeymapData, initialize_keymap, run_all};
+use {defmt_rtt as _, panic_halt as _};
 bind_interrupts!(struct Irqs {
     USB_LP => InterruptHandler<USB>;
 });

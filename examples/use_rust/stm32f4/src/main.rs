@@ -7,7 +7,6 @@ mod keymap;
 mod vial;
 
 use defmt::info;
-use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::flash::Flash;
 use embassy_stm32::gpio::{Input, Output};
@@ -17,7 +16,6 @@ use embassy_stm32::time::Hertz;
 use embassy_stm32::usb::{Driver, InterruptHandler};
 use embassy_stm32::{Config, bind_interrupts};
 use keymap::{COL, ROW};
-use panic_probe as _;
 use rmk::config::{BehaviorConfig, PositionalConfig, RmkConfig, StorageConfig, VialConfig};
 use rmk::debounce::default_debouncer::DefaultDebouncer;
 use rmk::host::HostService;
@@ -29,6 +27,7 @@ use rmk::usb::UsbTransport;
 use rmk::{KeymapData, initialize_keymap_and_storage, run_all};
 use static_cell::StaticCell;
 use vial::{VIAL_KEYBOARD_DEF, VIAL_KEYBOARD_ID};
+use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     OTG_FS => InterruptHandler<USB_OTG_FS>;

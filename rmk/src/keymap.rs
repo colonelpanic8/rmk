@@ -864,7 +864,7 @@ mod test {
         // Mirrors the auto-mouse Either3::Third guard.
         assert!(keymap.activate_layer_if_inactive(2));
         let self_activated = true;
-        assert!(!(self_activated && !keymap.is_layer_active(2)));
+        assert!(!self_activated || keymap.is_layer_active(2));
         keymap.deactivate_layer_if_active(2);
         assert!(self_activated && !keymap.is_layer_active(2));
     }
