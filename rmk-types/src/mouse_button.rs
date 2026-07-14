@@ -30,7 +30,7 @@ pub struct MouseButtons {
 }
 
 // u8 on the wire (postcard); named bools on serde-wasm-bindgen / serde_json (TS).
-crate::bitfield_named_serde!(MouseButtons, {
+crate::bitfield_named_serde!(MouseButtons, "MouseButtons", {
     button1 = with_button1,
     button2 = with_button2,
     button3 = with_button3,

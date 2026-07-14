@@ -39,7 +39,7 @@ macro_rules! impl_debug_list {
 /// wire), the `.d.ts` decl, and the self-describing wasm ABI — all from one field table.
 #[macro_export]
 macro_rules! bitfield_named_serde {
-    ($bitfield:ident, { $( $field:ident = $setter:ident ),+ $(,)? }) => {
+    ($bitfield:ident, $typescript_type:literal, { $( $field:ident = $setter:ident ),+ $(,)? }) => {
         impl serde::Serialize for $bitfield {
             fn serialize<S: serde::Serializer>(&self, serializer: S) -> ::core::result::Result<S::Ok, S::Error> {
                 if serializer.is_human_readable() {
@@ -77,7 +77,7 @@ macro_rules! bitfield_named_serde {
         };
 
         // Self-describing wasm ABI, marshaled via the human-readable `Serialize` object.
-        $crate::wasm_object_abi!($bitfield);
+        $crate::wasm_object_abi!($bitfield, $typescript_type);
     };
 }
 
@@ -90,12 +90,18 @@ macro_rules! bitfield_named_serde {
 /// its TS shape with a `typescript_custom_section` (`export type <Type> = …`).
 #[macro_export]
 macro_rules! wasm_object_abi {
-    ($ty:ident) => {
+    ($ty:ident, $typescript_type:literal) => {
         #[cfg(feature = "wasm")]
         const _: () = {
             use ::wasm_bindgen::convert::{IntoWasmAbi, OptionIntoWasmAbi};
-            use ::wasm_bindgen::describe::{NAMED_EXTERNREF, WasmDescribe, inform};
+            use ::wasm_bindgen::describe::WasmDescribe;
             use ::wasm_bindgen::prelude::*;
+
+            #[wasm_bindgen]
+            extern "C" {
+                #[wasm_bindgen(typescript_type = $typescript_type)]
+                type WasmObject;
+            }
 
             impl From<$ty> for JsValue {
                 #[inline]
@@ -107,12 +113,7 @@ macro_rules! wasm_object_abi {
             impl WasmDescribe for $ty {
                 #[inline]
                 fn describe() {
-                    let name = stringify!($ty);
-                    inform(NAMED_EXTERNREF);
-                    inform(name.len() as u32);
-                    for c in name.chars() {
-                        inform(c as u32);
-                    }
+                    WasmObject::describe();
                 }
             }
 

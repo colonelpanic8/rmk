@@ -46,7 +46,7 @@ crate::impl_debug_list!(ModifierCombination, |self| [
 .filter_map(|(state, label)| state.then_some(label)));
 
 // u8 on the wire (postcard); named bools on serde-wasm-bindgen / serde_json (TS).
-crate::bitfield_named_serde!(ModifierCombination, {
+crate::bitfield_named_serde!(ModifierCombination, "ModifierCombination", {
     left_ctrl = with_left_ctrl,
     left_shift = with_left_shift,
     left_alt = with_left_alt,

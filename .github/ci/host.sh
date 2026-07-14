@@ -24,6 +24,10 @@ log_section "Wasm package build"
 # wasm-pack emits the JS package plus generated .d.ts files under rynk-wasm/pkg/.
 # The generated package is intentionally ignored rather than checked in.
 (cd rynk-wasm && wasm-pack build --target web >/dev/null)
+npx --yes --package typescript@5.9.3 tsc \
+    --noEmit --strict --target ES2022 --lib ES2022,DOM,ESNext.Disposable \
+    --module ES2022 --moduleResolution bundler \
+    rynk-wasm/wasm-smoke.ts
 
 log_section "Clippy"
 cargo +stable clippy --workspace --lib --tests --examples -- -D warnings
