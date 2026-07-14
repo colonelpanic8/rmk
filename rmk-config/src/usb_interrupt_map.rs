@@ -13,6 +13,7 @@ static USB_INFO: Lazy<HashMap<String, UsbInfo>> = Lazy::new(|| {
     m.insert("nrf52840".to_string(), UsbInfo::new("", "", "USBD", "USBD"));
     m.insert("nrf52820".to_string(), UsbInfo::new("", "", "USBD", "USBD"));
     m.insert("nrf52833".to_string(), UsbInfo::new("", "", "USBD", "USBD"));
+    m.insert("nrf54lm20".to_string(), UsbInfo::new("", "", "USBHS", "USBHS"));
     m.insert("rp2040".to_string(), UsbInfo::new("", "", "USB", "USBCTRL_IRQ"));
     m.insert(
         "stm32h730vb".to_string(),

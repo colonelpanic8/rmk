@@ -1,0 +1,12 @@
+# Default config for nRF54LM20 (values match examples/use_rust/nrf54lm20_ble)
+[keyboard]
+usb_enable = true
+
+[ble]
+enabled = true
+
+[storage]
+enabled = true
+# RRAM storage region used by the reference example
+start_addr = 0x120000
+num_sectors = 6

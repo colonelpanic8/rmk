@@ -48,6 +48,8 @@ impl ChipModel {
             "nrf52833" => Ok(include_str!("default_config/nrf52833.toml")),
             "nrf52832" => Ok(include_str!("default_config/nrf52832.toml")),
             "nrf52810" | "nrf52811" => Ok(include_str!("default_config/nrf52810.toml")),
+            "nrf54lm20" => Ok(include_str!("default_config/nrf54lm20.toml")),
+            "nrf54l15" => Ok(include_str!("default_config/nrf54l15.toml")),
             "rp2040" => Ok(include_str!("default_config/rp2040.toml")),
             s if s.starts_with("stm32") => Ok(include_str!("default_config/stm32.toml")),
             s if s.starts_with("esp32") => {
@@ -100,7 +102,10 @@ impl KeyboardTomlConfig {
                     chip,
                     board: None,
                 })
-            } else if chip.to_lowercase().starts_with("nrf52") {
+            } else if chip.to_lowercase().starts_with("nrf52") || chip.to_lowercase().starts_with("nrf54") {
+                // nRF54 rides the Nrf52 series for capability resolution and
+                // constants; #[rmk_keyboard] codegen rejects it until the
+                // RRAMC/USBHS/MPSL differences are implemented.
                 Ok(ChipModel {
                     series: ChipSeries::Nrf52,
                     chip,
@@ -120,7 +125,7 @@ impl KeyboardTomlConfig {
                 })
             } else {
                 Err(format!(
-                    "Unsupported chip \"{chip}\" — supported chip families are stm32*, nrf52*, rp2040 and esp32*"
+                    "Unsupported chip \"{chip}\" — supported chip families are stm32*, nrf52*, nrf54*, rp2040 and esp32*"
                 ))
             }
         } else {
