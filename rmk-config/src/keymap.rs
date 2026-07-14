@@ -71,8 +71,14 @@ impl KeyboardTomlConfig {
             ));
         }
         let num_layers = self.num_layers();
+        if num_layers == 0 {
+            return Err(
+                "keyboard.toml: [keymap] must define at least one layer using `[[keymap.layer]]` or `layers`"
+                    .to_string(),
+            );
+        }
 
-        // Defined layers need `[layout].map`; no layers means a transparent default.
+        // Defined layers need `[layout].map`; explicitly reserved layers are transparent.
         let mut keymap = Vec::with_capacity(num_layers as usize);
         let key_info = match layout.map.as_deref() {
             Some(map) => {
@@ -701,6 +707,24 @@ mod tests {
              [keymap]\nlayers = 1\n[[keymap.layer]]\nkeys = \"A\"\n[[keymap.layer]]\nkeys = \"B\"\n",
         );
         assert!(cfg.get_keymap_config().is_err());
+    }
+
+    #[test]
+    fn empty_keymap_is_rejected() {
+        let cfg = config("[layout]\nrows = 1\ncols = 1\nmap = \"(0,0)\"\n[keymap]\n");
+        let Err(err) = cfg.get_keymap_config() else {
+            panic!("empty keymap must be rejected");
+        };
+        assert!(err.contains("must define at least one layer"));
+    }
+
+    #[test]
+    fn explicit_zero_layers_is_rejected() {
+        let cfg = config("[layout]\nrows = 1\ncols = 1\nmap = \"(0,0)\"\n[keymap]\nlayers = 0\n");
+        let Err(err) = cfg.get_keymap_config() else {
+            panic!("zero keymap layers must be rejected");
+        };
+        assert!(err.contains("must define at least one layer"));
     }
 
     #[test]
