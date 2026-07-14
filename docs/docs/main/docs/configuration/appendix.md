@@ -20,6 +20,14 @@ board = "nice!nano_v2"
 # USB is enabled by default for most chips
 # Set to false if you don't want USB
 usb_enable = true
+# Use async matrix scanning (requires input pins with wait support), default is false
+async_matrix = false
+# Hardware watchdog, enabled by default
+watchdog = true
+# Plover HID stenography support, default is false
+steno = false
+# Bootloader integration for the bootloader jump key: "adafruit" or "zsa_voyager"
+bootloader = "adafruit"
 
 # Set matrix IO for the board. This section is for non-split keyboards and is in conflict with the [split] section
 [matrix]

@@ -52,7 +52,7 @@ cargo +nightly size --release
 
 RMK provides several options that you can use to reduce the binary size:
 
-1. If you don't need storage, you can disable the `storage` feature to save some flash. To disable `storage` feature you need to disable default features of `rmk` crate, and then enable other features you need.
+1. If you don't need storage, set `enabled = false` in the `[storage]` section of `keyboard.toml` to save some flash (pure Rust API users: build without the `storage` feature).
 
 2. You can also fully remove `defmt` by removing `defmt` feature from `rmk` crate and similar feature gates from all other dependencies.
 

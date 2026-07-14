@@ -64,7 +64,7 @@ RMK must be compiled with the `dfu` feature and the platform-specific feature:
 If configuring manually, ensure:
 
 - `Cargo.toml` uses the `dfu_rp` (RP2040) or `dfu_nrf` (nRF52840) feature
-- `keyboard.toml` has `[dfu]` section
+- `keyboard.toml` has a `[dfu]` section with `enabled = true`
 - The flash partitioning in `memory.x` matches your bootloader and flash size (see `rmk/examples/use_rust/rp2040_embassy_boot/` for RP2040 or `rmk/examples/use_rust/nrf52840_embassy_boot/` for nRF)
 
 **Important:** For RP2040 the bootymcbootface version (2MB, 4MB, ...) and the RMK settings must use the **same flash size**. Example: bootymcbootface 2 MB → RMK with 2 MB flash configuration. So that means, if you have a RP2040 with bigger flash, you can always use a bootymcbootface and a memory.x in your firmware for a smaller flash size, but the both must be for the same flash size.

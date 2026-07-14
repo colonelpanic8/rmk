@@ -25,9 +25,8 @@ For keyboards connected using only a single wire, e.g. a 3-pole TRS cable, for t
 
 To use the RP2040's PIO UART driver, you need to enable the `rp2040` feature gate in your `Cargo.toml`:
 
-```toml {3}
+```toml
 rmk = { version = "...", features = [
-    "split",
     "rp2040", # Enable PIO UART driver for rp2040
 ] }
 ```
@@ -51,13 +50,11 @@ keyboard.toml
 Cargo.toml
 ```
 
-In `Cargo.toml`, the `split` feature should be enabled, and the `[[bin]]` section should be added for both central and peripheral:
+Split support is activated by the `[split]` section in `keyboard.toml` (the `split` Cargo feature is only needed with the pure Rust API). Add the `[[bin]]` section for both central and peripheral in `Cargo.toml`:
 
 ```toml
 rmk = { version = "...", features = [
     "nrf52840_ble",
-    "split", # Enable split keyboard feature
-    "async_matrix",
 ] }
 
 # ..

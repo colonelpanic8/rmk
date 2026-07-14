@@ -40,14 +40,13 @@ vial_enabled = false
 rynk_enabled = true
 ```
 
-Then disable RMK's default features, which include Vial, and enable `rynk`
-explicitly. Add the other features your keyboard needs:
+Then disable RMK's default features so the default `vial` feature doesn't
+conflict — `rynk` itself is activated by the `[host]` section above. Keep the
+dependency features your keyboard needs:
 
 ```toml title="Cargo.toml"
 rmk = { version = "...", default-features = false, features = [
     "defmt",
-    "storage",
-    "rynk",
     "watchdog",
     "rp2040",
 ] }

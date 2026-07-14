@@ -24,7 +24,14 @@ Async matrix is a power-saving feature that transforms how the matrix operates, 
 
 To enable it, add the `async_matrix` feature in `Cargo.toml`:
 
-```toml
+```toml title="keyboard.toml"
+[keyboard]
+async_matrix = true
+```
+
+With the pure Rust API, enable the `async_matrix` Cargo feature instead:
+
+```toml title="Cargo.toml"
 rmk = { version = "...", features = ["async_matrix"] }
 ```
 

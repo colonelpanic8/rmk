@@ -22,7 +22,7 @@ In `Cargo.toml`, keep RMK's default features and add the features your keyboard 
 rmk = { version = "...", features = ["rp2040"] }
 ```
 
-Add any chip, BLE, split, display, or other features your board needs.
+Add any chip, BLE, display, or other dependency features your board needs — capabilities like split and storage activate from `keyboard.toml`.
 
 ## Port Vial
 
@@ -61,9 +61,6 @@ rynk_enabled = true
 ```toml title="Cargo.toml"
 rmk = { version = "...", default-features = false, features = [
   "defmt",
-  "storage",
-  "rynk",
-  "watchdog",
   "rp2040",
 ] }
 ```

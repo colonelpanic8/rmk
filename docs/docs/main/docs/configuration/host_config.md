@@ -7,8 +7,9 @@ RMK currently supports two mutually exclusive protocols:
 - `vial_enabled`: the Vial/VIA-compatible protocol for the Vial app.
 
 The `keyboard.toml` values must match the `rmk` Cargo features. If
-`host.rynk_enabled = true`, enable the `rynk` Cargo feature. If
-`host.vial_enabled = true`, enable the `vial` Cargo feature. Do not enable both.
+`host.rynk_enabled = true`, disable the `rmk` crate's default features so the
+default `vial` feature doesn't conflict — the protocol itself is activated by
+this section. Do not enable both.
 
 ## Configuration Example
 

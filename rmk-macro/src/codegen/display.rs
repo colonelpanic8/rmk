@@ -34,6 +34,8 @@ pub(crate) fn expand_display_interrupt(
     chip_series: &ChipSeries,
     display_config: &DisplayConfig,
 ) -> TokenStream {
+    // TODO: SPI display codegen — needed before the TFT models (st7789, …)
+    // behind the `lcd_async` feature can be configured from keyboard.toml.
     match &display_config.protocol {
         CommunicationProtocol::I2c(i2c) => expand_i2c_interrupt(chip_series, i2c),
         CommunicationProtocol::Spi(_) => panic!("SPI display interface is not yet supported"),

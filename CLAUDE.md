@@ -54,7 +54,9 @@ Matrix / InputDevices → Events (pub/sub channels) -> InputProcessors/Keyboard(
 
 ### `keyboard.toml` and compile-time constants
 
-`keyboard.toml` is parsed by `rmk-config` (`KeyboardTomlConfig`) at two points: by `rmk-types/build.rs` at build time, and by `rmk-macro` at macro-expansion time. The path defaults to `keyboard.toml` next to `Cargo.toml` and can be overridden with `KEYBOARD_TOML_PATH` in user space's `.cargo/config.toml`.
+`keyboard.toml` is parsed by `rmk-config` (`KeyboardTomlConfig`) at three points: by `rmk/build.rs` and `rmk-types/build.rs` at build time, and by `rmk-macro` at macro-expansion time. The path comes from `KEYBOARD_TOML_PATH` in user space's `.cargo/config.toml`.
+
+Capability activation is resolved by `rmk_config::resolved::Capabilities` from `(keyboard.toml, cargo features)`: the toml is authoritative when present (features are validated against it in `rmk/build.rs` with fix-it errors); without a toml, features activate capabilities directly (pure-Rust users, tests, docs.rs). Both build scripts emit the result as `rmk_*` rustc cfgs — capability code gates on `#[cfg(rmk_split)]` etc., never on capability feature names. Only dependency-selecting features (defmt/log/usb_log, chip BLE aliases, rp2040, dfu flavors, display driver families) keep `#[cfg(feature = ...)]` gates.
 
 Config is loaded in three layers (later overrides earlier): `event_default.toml` → chip-specific default (from `rmk-config/src/default_config/<chip>.toml`, selected via `[keyboard].chip`) → user `keyboard.toml`.
 

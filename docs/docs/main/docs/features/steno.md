@@ -15,9 +15,10 @@ options also work because the firmware reports every state change.
 
 ## Setup
 
-### 1. Enable the feature
+### 1. Enable steno
 
-Add the `steno` feature to your `Cargo.toml`:
+Set `steno = true` in the `[keyboard]` section of `keyboard.toml`. With the
+pure Rust API, enable the `steno` Cargo feature instead:
 
 ```toml
 rmk = { version = "...", features = ["steno"] }
