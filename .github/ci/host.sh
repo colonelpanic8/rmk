@@ -21,13 +21,14 @@ cargo +stable check -p rynk --lib --target wasm32-unknown-unknown
 cargo +stable check -p rynk-wasm --target wasm32-unknown-unknown
 
 log_section "Wasm package build"
-# wasm-pack emits the JS package plus generated .d.ts files under rynk-wasm/pkg/.
-# The generated package is intentionally ignored rather than checked in.
-(cd rynk-wasm && wasm-pack build --target web >/dev/null)
+# wasm-pack emits the JS package + generated .d.ts under rynk-wasm/pkg/ (ignored, not checked in).
+# --dev keeps wasm-bindgen's type descriptors un-optimized, so a malformed one surfaces as invalid TS below.
+(cd rynk-wasm && wasm-pack build --dev --target web >/dev/null)
+# Typecheck the whole generated .d.ts: a broken descriptor for any exported type fails CI.
 npx --yes --package typescript@5.9.3 tsc \
     --noEmit --strict --target ES2022 --lib ES2022,DOM,ESNext.Disposable \
     --module ES2022 --moduleResolution bundler \
-    rynk-wasm/wasm-smoke.ts
+    rynk-wasm/pkg/rynk_wasm.d.ts
 
 log_section "Clippy"
 cargo +stable clippy --workspace --lib --tests --examples -- -D warnings
