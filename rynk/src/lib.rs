@@ -23,9 +23,8 @@
 //!   [`flush`](io::Write::flush). A successful `write` MUST commit the returned
 //!   bytes; on a lossy medium (e.g. BLE) use acknowledged writes, since a lost
 //!   chunk desyncs the firmware's reassembler with no mid-frame resync.
-//! - **`read` must be cancel-safe**: dropping its future must not lose
-//!   delivered bytes. The client relies on this for caller-owned timeouts plus
-//!   [`Client::resync`].
+//! - Cancelling an operation while it is reading abandons the byte stream.
+//!   Drop the client and reconnect before issuing another operation.
 //! - `read` may return arbitrary chunk boundaries; the client reassembles
 //!   frames. `Ok(0)` means the link is gone and surfaces as
 //!   [`RynkHostError::Disconnected`].

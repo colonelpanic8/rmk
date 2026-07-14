@@ -21,7 +21,8 @@
 //!
 //! ## Link lifecycle
 //!
-//! - Reads are cancel-safe: bytes move into `rx_buf` only after `read` returns.
+//! - Cancelling a read makes the stream boundary unknowable; the next operation
+//!   latches the link dead and requires reconnecting.
 //! - Broken links latch dead so later calls fail fast.
 
 use std::collections::VecDeque;
@@ -91,6 +92,8 @@ pub enum RynkHostError {
     TrailingBytes { cmd: Cmd },
     #[error("response cmd mismatch: sent {sent:?}, got {got:?}")]
     CmdMismatch { sent: Cmd, got: Cmd },
+    #[error("inbound frame is {frame_len} bytes; negotiated maximum is {max}")]
+    InboundTooLarge { frame_len: usize, max: usize },
     /// A topic-range `Cmd` was passed to a request method.
     #[error("{0:?} is a topic, not a request")]
     TopicCmd(Cmd),
@@ -116,6 +119,7 @@ impl From<RynkHostError> for wasm_bindgen::JsValue {
             RynkHostError::Layout(_) => "LayoutDecodeError",
             RynkHostError::TrailingBytes { .. } => "ResponseTrailingBytes",
             RynkHostError::CmdMismatch { .. } => "ResponseCommandMismatch",
+            RynkHostError::InboundTooLarge { .. } => "ResponseTooLarge",
             RynkHostError::TopicCmd(_) => "InvalidRequestCommand",
         };
         let err = js_sys::Error::new(&e.to_string());
@@ -126,7 +130,8 @@ impl From<RynkHostError> for wasm_bindgen::JsValue {
 
 /// Rynk client over any byte link implementing the embedded-io-async
 /// [`Read`] + [`Write`] traits. See the crate docs for the transport contract.
-/// [`next_event`](crate::Client::next_event) is always cancel-safe.
+/// Cancelling an in-progress read invalidates the stream; reconnect before
+/// issuing another operation.
 pub struct Client<T: Read + Write> {
     transport: T,
     /// Per-read scratch; committed to `rx_buf` only after `read` returns.
@@ -140,6 +145,9 @@ pub struct Client<T: Read + Write> {
     dead: bool,
     /// Set across the `write_all` in `send_request`, cleared once it completes.
     send_in_flight: bool,
+    /// Set while assembling an inbound frame. If the future is cancelled, the
+    /// flag remains set so the next operation rejects the desynchronized link.
+    receive_in_flight: bool,
     /// Queued topic frames.
     events: VecDeque<TopicFrame>,
     /// Topics dropped from a full queue.
@@ -160,6 +168,7 @@ impl<T: Read + Write> Client<T> {
             next_seq: 1,
             dead: false,
             send_in_flight: false,
+            receive_in_flight: false,
             events: VecDeque::new(),
             events_dropped: 0,
             tx_buf: vec![0u8; RYNK_MIN_BUFFER_SIZE],
@@ -232,12 +241,6 @@ impl<T: Read + Write> Client<T> {
     /// Counts only overflow the client can observe; re-read critical state.
     pub fn events_dropped(&self) -> u64 {
         self.events_dropped
-    }
-
-    /// Drop any half-read frame from the RX buffer after a caller-owned timeout
-    /// or cancellation. Does not revive a dead link.
-    pub fn resync(&mut self) {
-        self.rx_buf.clear();
     }
 
     /// Read the next topic push as a raw [`TopicFrame`]. Queued topics come first.
@@ -319,8 +322,8 @@ impl<T: Read + Write> Client<T> {
     /// Encode one request into the TX scratch, write it, and return its SEQ
     /// (cycling `1..=255`).
     async fn send_request<Req: Serialize>(&mut self, cmd: Cmd, req: &Req) -> Result<u8, RynkHostError> {
-        if self.dead || self.send_in_flight {
-            // A cancelled mid-write leaves the stream desynced.
+        if self.dead || self.send_in_flight || self.receive_in_flight {
+            // A cancelled wire operation leaves the stream desynced.
             self.dead = true;
             return Err(RynkHostError::Disconnected);
         }
@@ -345,21 +348,27 @@ impl<T: Read + Write> Client<T> {
 
     /// Read the next complete frame; read failures mark the link dead.
     async fn next_frame(&mut self) -> Result<(RynkHeader, Vec<u8>), RynkHostError> {
-        if self.send_in_flight {
-            // A prior send was cancelled mid-write.
+        if self.send_in_flight || self.receive_in_flight {
+            // A prior wire operation was cancelled.
             self.dead = true;
             return Err(RynkHostError::Disconnected);
         }
+        self.receive_in_flight = true;
+        let result = self.next_frame_inner().await;
+        self.receive_in_flight = false;
+        result
+    }
+
+    async fn next_frame_inner(&mut self) -> Result<(RynkHeader, Vec<u8>), RynkHostError> {
         loop {
             let header = self.rx_buf.first_chunk::<RYNK_HEADER_SIZE>().map(RynkHeader::parse);
             if let Some(header) = header {
                 let frame_len = header.frame_len();
 
-                // Oversized headers mean desync; drop buffered bytes.
-                if frame_len > self.max_frame_size() {
-                    log::debug!("rynk: oversized frame header, dropping {} bytes", self.rx_buf.len());
-                    self.rx_buf.clear();
-                    continue;
+                let max = self.max_frame_size();
+                if frame_len > max {
+                    self.dead = true;
+                    return Err(RynkHostError::InboundTooLarge { frame_len, max });
                 }
 
                 if self.rx_buf.len() >= frame_len {
@@ -587,30 +596,30 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn caller_timeout_then_resyncs_phantom_frame() {
-        let mut c = raw_client(vec![
-            Step::Chunk(header(Cmd::GetWpm.raw(), 0xEE, 100)),
-            Step::Hang,
-            Step::Chunk(reply(Cmd::GetWpm, 2, 42u16)),
-        ]);
+    async fn cancelled_mid_read_latches_link_dead() {
+        let mut c = raw_client(vec![Step::Chunk(header(Cmd::GetWpm.raw(), 0xEE, 100)), Step::Hang]);
         let r1 = timeout(Duration::from_millis(10), c.get_wpm()).await;
         assert!(r1.is_err());
-        c.resync();
-        let got = c.get_wpm().await.unwrap();
-        assert_eq!(got, 42);
+        assert!(c.is_alive(), "cancellation is detected by the next operation");
+        let r2 = c.get_wpm().await;
+        assert!(matches!(r2, Err(RynkHostError::Disconnected)));
+        assert!(!c.is_alive());
     }
 
     #[tokio::test]
-    async fn oversized_inbound_frame_dropped_then_resyncs() {
+    async fn oversized_inbound_frame_is_fatal() {
+        let mut oversized_then_valid = header(Cmd::GetWpm.raw(), 3, u16::MAX);
+        oversized_then_valid.extend_from_slice(&reply(Cmd::GetWpm, 3, 42u16));
         let t = MockTransport::new(vec![
             Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
             Step::Chunk(reply(Cmd::GetCapabilities, 2, caps())),
-            Step::Chunk(header(Cmd::GetWpm.raw(), 3, u16::MAX)),
-            Step::Chunk(reply(Cmd::GetWpm, 3, 42u16)),
+            Step::Chunk(oversized_then_valid),
         ]);
         let mut client = Client::connect(t).await.unwrap();
-        assert_eq!(client.get_wpm().await.unwrap(), 42);
-        assert!(client.is_alive(), "an oversized inbound frame is dropped, not fatal");
+        let result = client.get_wpm().await;
+        assert!(matches!(result, Err(RynkHostError::InboundTooLarge { .. })));
+        assert!(!client.is_alive());
+        assert!(matches!(client.get_wpm().await, Err(RynkHostError::Disconnected)));
     }
 
     #[tokio::test]
@@ -710,36 +719,25 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn caller_cancel_mid_reply_wait_then_next_request_ok() {
-        // Late reply to the cancelled request must not satisfy request 2.
-        let mut c = raw_client(vec![
-            Step::Hang,
-            Step::Chunk(reply(Cmd::GetWpm, 1, 11u16)), // late reply to request 1
-            Step::Chunk(reply(Cmd::GetWpm, 2, 42u16)), // reply to request 2
-        ]);
+    async fn caller_cancel_mid_reply_wait_latches_link_dead() {
+        let mut c = raw_client(vec![Step::Hang]);
         let cancelled = timeout(Duration::from_millis(10), c.get_wpm()).await;
         assert!(cancelled.is_err(), "outer timeout cancels request 1 mid-wait");
         assert!(c.is_alive());
-        let got = c.get_wpm().await.unwrap();
-        assert_eq!(got, 42);
+        assert!(matches!(c.get_wpm().await, Err(RynkHostError::Disconnected)));
+        assert!(!c.is_alive());
     }
 
     #[tokio::test(start_paused = true)]
-    async fn caller_cancel_next_event_mid_reassembly_then_request_ok() {
-        // Cancelled topic reassembly must not corrupt the next request.
-        let mut tail = vec![7u8]; // the LayerChange payload, arriving after cancel
-        tail.extend_from_slice(&reply(Cmd::GetWpm, 1, 42u16));
+    async fn caller_cancel_next_event_mid_reassembly_latches_link_dead() {
         let mut c = raw_client(vec![
             Step::Chunk(header(Cmd::LayerChange.raw(), 0, 1)), // topic header, payload pending
             Step::Hang,
-            Step::Chunk(tail),
         ]);
         let cancelled = timeout(Duration::from_millis(10), c.next_event()).await;
         assert!(cancelled.is_err());
-        let got = c.get_wpm().await.unwrap();
-        assert_eq!(got, 42);
-        let ev = c.next_event().await.unwrap();
-        assert!(matches!(ev, IncomingTopic::Topic(TopicEvent::LayerChange(7))));
+        assert!(matches!(c.get_wpm().await, Err(RynkHostError::Disconnected)));
+        assert!(!c.is_alive());
     }
 
     #[tokio::test]

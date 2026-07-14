@@ -166,7 +166,8 @@ consumers get from the compiler.
 Topic pushes are pulled, not delivered by callback: drive `next_event()` in a
 loop. It parks until the next recognized topic and rejects with `Disconnected`
 at EOF, mirroring the native `Client::next_event()` used by `rynk-serial` /
-`rynk-ble`. `resync()` and `events_dropped()` round out the housekeeping surface.
+`rynk-ble`. `events_dropped()` reports topic queue overflow. If an operation is
+cancelled while reading, close the link and reconnect before issuing another.
 
 Available method groups mirror the native `rynk::Client` API:
 
