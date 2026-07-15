@@ -14,7 +14,6 @@ pub struct SetMorseRequest {
     pub config: Morse,
 }
 
-// Bulk payloads grouped here; re-exported flat below.
 mod bulk {
     use postcard::experimental::max_size::MaxSize;
     use serde::{Deserialize, Serialize};

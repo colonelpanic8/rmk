@@ -37,9 +37,7 @@ defmt = [
 ]
 # Feature for proc-macro code generation only, not included in firmware
 _codegen = []
-# Feature for RMK native (rynk) protocol support. Bulk transfer endpoints
-# (multi-element keymap/combo/morse) are always included; they stream over the
-# session buffer, so they add no RAM over the single-element endpoints.
+# Enable RMK's Rynk protocol
 rynk = []
 # Host tool
 host = ["rynk", "_ble", "split", "steno", "serde/alloc"]

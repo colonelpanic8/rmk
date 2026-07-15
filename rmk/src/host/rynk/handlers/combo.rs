@@ -35,7 +35,6 @@ impl Handle<SetCombo> for RynkService<'_> {
 }
 
 impl Handle<GetComboBulk> for RynkService<'_> {
-    // Streams the page straight into the response buffer — no `Vec` of `Combo`.
     async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let req = msg.decode_request::<GetComboBulkRequest>()?;
         // Empty slots read back as the empty config, same as the single Get; an
@@ -57,13 +56,10 @@ impl Handle<GetComboBulk> for RynkService<'_> {
 }
 
 impl Handle<SetComboBulk> for RynkService<'_> {
-    // Decodes the payload one `Combo` at a time instead of into a `Vec`.
     async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
-        // Payload: `start_index` (u8) then a postcard seq of `Combo`.
         let (start_index, rest) = postcard::take_from_bytes::<u8>(msg.payload()).map_err(|_| RynkError::Malformed)?;
         let (count, elements) = take_seq_len(rest)?;
 
-        // Validate the whole run first, so it applies whole or not at all.
         let num_combos = self.ctx.with_combos(|combos| combos.len());
         let start = bulk_write_start(start_index as usize, count, num_combos)?;
         validate_bulk_elements::<ComboConfig>(elements, count)?;

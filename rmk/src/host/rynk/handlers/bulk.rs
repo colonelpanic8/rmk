@@ -1,10 +1,3 @@
-//! Shared logic for the bulk transfer handlers: flat-index arithmetic plus the
-//! streaming decode helpers that let a `Set*Bulk` handler walk its payload
-//! element by element instead of materializing the whole `Vec`.
-//!
-//! Per-resource addressing (combo/morse slot index, keymap `layer/row/col`) is
-//! translated to a flat index by each handler before calling the arithmetic.
-
 use rmk_types::protocol::rynk::RynkError;
 use serde::de::DeserializeOwned;
 
@@ -24,25 +17,19 @@ pub(super) fn bulk_write_start(start: usize, len: usize, total: usize) -> Result
     Ok(start)
 }
 
-/// Decode the postcard varint a bulk `Vec` payload begins with — the element
-/// count — returning it and the remaining element bytes. The count never exceeds
-/// the reported bulk budget (`u8::MAX`), so a `u16` decode covers every valid
-/// frame and rejects an overlong varint as malformed.
+/// Valid bulk counts fit in `u16`.
 pub(super) fn take_seq_len(bytes: &[u8]) -> Result<(usize, &[u8]), RynkError> {
     let (len, rest) = postcard::take_from_bytes::<u16>(bytes).map_err(|_| RynkError::Malformed)?;
     Ok((len as usize, rest))
 }
 
-/// Decode one bulk element and advance `cursor` past it.
 pub(super) fn take_element<T: DeserializeOwned>(cursor: &mut &[u8]) -> Result<T, RynkError> {
     let (value, rest) = postcard::take_from_bytes::<T>(cursor).map_err(|_| RynkError::Malformed)?;
     *cursor = rest;
     Ok(value)
 }
 
-/// Pass one of the two-pass bulk write: confirm all `count` elements decode
-/// cleanly, so a malformed tail aborts the whole write before any element lands
-/// (all-or-nothing). Pass two re-decodes the same bytes and applies each.
+/// Validates all elements first so malformed input cannot cause a partial write.
 pub(super) fn validate_bulk_elements<T: DeserializeOwned>(mut bytes: &[u8], count: usize) -> Result<(), RynkError> {
     for _ in 0..count {
         take_element::<T>(&mut bytes)?;

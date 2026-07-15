@@ -14,8 +14,6 @@ pub(crate) const fn max_const(a: usize, b: usize) -> usize {
     if a > b { a } else { b }
 }
 
-/// `const fn` min, paired with [`max_const`] to clamp the buffer-derived bulk
-/// counts between 1 and `u8::MAX` in [`super::command`].
 pub(crate) const fn min_const(a: usize, b: usize) -> usize {
     if a < b { a } else { b }
 }

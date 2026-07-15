@@ -102,7 +102,6 @@ impl RynkService<'_> {
 }
 
 impl Handle<GetKeymapBulk> for RynkService<'_> {
-    // Streams the page straight into the response buffer — no `Vec` of `KeyAction`.
     async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let req = msg.decode_request::<GetKeymapBulkRequest>()?;
         // From the start key the page reads forward through the flat keymap,
@@ -116,20 +115,17 @@ impl Handle<GetKeymapBulk> for RynkService<'_> {
 }
 
 impl Handle<SetKeymapBulk> for RynkService<'_> {
-    // Decodes the payload one `KeyAction` at a time instead of into a `Vec`.
     async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
-        // Payload: layer/start_row/start_col (3×u8) then a postcard seq of `KeyAction`.
         let ([layer, start_row, start_col], rest) =
             postcard::take_from_bytes::<[u8; 3]>(msg.payload()).map_err(|_| RynkError::Malformed)?;
         let (count, elements) = take_seq_len(rest)?;
 
-        // Validate the whole run first, so it applies whole or not at all.
         let start = self.keymap_flat_start(layer, start_row, start_col)?;
         let (rows, cols, num_layers) = self.ctx.keymap_dimensions();
         let start = bulk_write_start(start, count, num_layers * rows * cols)?;
         validate_bulk_elements::<KeyAction>(elements, count)?;
 
-        // Row-major, layer-major flat walk from the validated start.
+        // Bulk order advances columns, then rows, then layers.
         let mut cursor = elements;
         for offset in start..start + count {
             let action = take_element::<KeyAction>(&mut cursor)?;

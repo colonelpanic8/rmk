@@ -30,11 +30,8 @@ impl Handle<SetMorse> for RynkService<'_> {
 }
 
 impl Handle<GetMorseBulk> for RynkService<'_> {
-    // Streams the page straight into the response buffer — no `Vec` of `Morse`.
     async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let req = msg.decode_request::<GetMorseBulkRequest>()?;
-        // `bulk_page` keeps every index in range, so `get_morse` is always
-        // `Some`; the `unwrap_or_default` fallback is unreachable.
         let page = bulk_page(req.start_index as usize, BULK_SIZE, self.ctx.morses_len());
         let count = page.len();
         msg.encode_bulk_ok(count, page.map(|idx| self.ctx.get_morse(idx as u8).unwrap_or_default()))
@@ -42,13 +39,10 @@ impl Handle<GetMorseBulk> for RynkService<'_> {
 }
 
 impl Handle<SetMorseBulk> for RynkService<'_> {
-    // Decodes the payload one `Morse` at a time instead of into a `Vec`.
     async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
-        // Payload: `start_index` (u8) then a postcard seq of `Morse`.
         let (start_index, rest) = postcard::take_from_bytes::<u8>(msg.payload()).map_err(|_| RynkError::Malformed)?;
         let (count, elements) = take_seq_len(rest)?;
 
-        // Validate the whole run first, so it applies whole or not at all.
         let start = bulk_write_start(start_index as usize, count, self.ctx.morses_len())?;
         validate_bulk_elements::<Morse>(elements, count)?;
 

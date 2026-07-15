@@ -49,8 +49,6 @@ impl Handle<GetCapabilities> for RynkService<'_> {
             // Protocol limits
             max_payload_size: (constants::RYNK_BUFFER_SIZE - RYNK_HEADER_SIZE) as u16,
             macro_chunk_size: constants::MACRO_DATA_SIZE as u16,
-            // Bulk endpoints are always available under `rynk`; they stream over
-            // the session buffer, so the budgets come straight from its size.
             max_bulk_keys: constants::BULK_KEYMAP_SIZE as u8,
             max_bulk_configs: constants::BULK_SIZE as u8,
             bulk_transfer_supported: true,

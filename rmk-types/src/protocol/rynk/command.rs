@@ -121,15 +121,12 @@ const fn assert_unique(cmds: &[u16]) {
 
 /// Macro for defining the endpoint (request/response) table.
 ///
-/// A row may carry an optional `@bulk` marker before its name: the endpoint is
-/// left out of the `MAX_ENDPOINT_PAYLOAD` fold. Its payload is sized dynamically
-/// (bulk transfer, whose element count tracks `RYNK_BUFFER_SIZE`), so it must not
-/// drive the buffer floor — the buffer drives it, not the other way around.
+/// `@bulk` excludes an endpoint from `MAX_ENDPOINT_PAYLOAD`.
+/// `RYNK_BUFFER_SIZE` determines bulk capacity, so bulk endpoints cannot also set the buffer floor.
 macro_rules! endpoints {
     // Fold contribution of one row: its max payload, or 0 when marked `@bulk`.
     (@floor $name:ident) => { <$name as Endpoint>::MAX_PAYLOAD };
     (@floor $marker:ident $name:ident) => { 0 };
-    // The `@bulk` marker only affects the fold above; items are always emitted.
     (@gate bulk $item:item) => { $item };
     (@gate $item:item) => { $item };
     // Whether the row carries the `@bulk` marker.

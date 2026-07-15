@@ -130,7 +130,6 @@ fn get_capabilities() {
         assert_eq!(caps.storage_enabled, cfg!(feature = "storage"));
         assert_eq!(caps.ble_enabled, cfg!(feature = "_ble"));
         assert_eq!(caps.is_split, cfg!(feature = "split"));
-        // Bulk is always supported; budgets derive from the session buffer.
         assert!(caps.bulk_transfer_supported);
         assert_eq!(caps.max_bulk_keys as usize, rmk_types::constants::BULK_KEYMAP_SIZE);
         assert_eq!(caps.max_bulk_configs as usize, rmk_types::constants::BULK_SIZE);
@@ -667,17 +666,13 @@ fn keymap_bulk_get_caps_page_at_budget() {
 
 #[test]
 fn keymap_bulk_set_malformed_element_aborts_whole_write() {
-    // A run whose range is valid but whose second element is undecodable must
-    // leave every slot untouched: the streaming write validates all elements
-    // decode (pass one) before applying any (pass two) — all-or-nothing.
     let service = service_3x4x4();
     link_session(&service, async |client| {
         let good = KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A)));
         let mut scratch = [0u8; 16];
         let good_bytes = postcard::to_slice(&good, &mut scratch).unwrap();
 
-        // Payload: layer/row/col = 0/0/0, count = 2, one good action, then a byte
-        // that is not a valid `KeyAction` discriminant.
+        // 0x7F is not a valid `KeyAction` discriminant.
         let mut payload = vec![0u8, 0, 0, 2];
         payload.extend_from_slice(good_bytes);
         payload.push(0x7F);
@@ -696,7 +691,6 @@ fn keymap_bulk_set_malformed_element_aborts_whole_write() {
             "a malformed element rejects the whole write"
         );
 
-        // The first, valid element must not have landed.
         let first = client
             .request::<_, KeyAction>(
                 Cmd::GetKeyAction,

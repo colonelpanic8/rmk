@@ -100,9 +100,7 @@ impl<'a> RynkMessage<'a> {
         &self.buf[..self.frame_len()]
     }
 
-    /// The request payload bytes, bounded by the declared `LEN`. Public so bulk
-    /// handlers can stream-decode a variable-length payload element by element
-    /// instead of materializing the whole `Vec`.
+    /// Returns the payload bytes specified by the header length.
     pub fn payload(&self) -> &[u8] {
         let payload_len = self.header().payload_len as usize;
         &self.buf[RYNK_HEADER_SIZE..RYNK_HEADER_SIZE + payload_len]
@@ -127,21 +125,17 @@ impl<'a> RynkMessage<'a> {
         Ok(())
     }
 
-    /// Stream an `Ok`-wrapped bulk response into the payload without materializing
-    /// a `Vec`: the postcard `Ok` tag, the sequence length, then each item in turn.
-    /// These bytes match `Ok(Response { <field>: items })` exactly — postcard
-    /// encodes a `Vec` as `varint(len)` then its elements — so a host decoding the
-    /// owned response type interoperates unchanged.
+    /// Encodes a sequence directly into an `Ok` response without allocating a `Vec`.
+    /// The bytes match postcard's `Ok` tag, sequence length, and element encoding.
     pub fn encode_bulk_ok<T, I>(&mut self, count: usize, items: I) -> Result<(), RynkError>
     where
         T: Serialize,
         I: IntoIterator<Item = T>,
     {
         let body = &mut self.buf[RYNK_HEADER_SIZE..];
-        // postcard encodes `Result::Ok` as variant tag 0, then the payload.
+        // postcard encodes `Result::Ok` with tag 0.
         *body.first_mut().ok_or(RynkError::Internal)? = 0;
         let mut used = 1;
-        // Sequence length prefix: postcard writes a `Vec`'s length as this varint.
         used += postcard::to_slice(&count, &mut body[used..])
             .map_err(|_| RynkError::Internal)?
             .len();
