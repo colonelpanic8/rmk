@@ -6,8 +6,8 @@ use rmk_types::protocol::rynk::command::{GetCombo, GetComboBulk, SetCombo, SetCo
 use rmk_types::protocol::rynk::{GetComboBulkRequest, RynkError, RynkMessage, SetComboRequest};
 
 use super::super::RynkService;
-use super::Handle;
 use super::bulk::{bulk_page, bulk_write_start, take_element, take_seq_len, validate_bulk_elements};
+use super::{Handle, HandleBulk};
 
 impl Handle<GetCombo> for RynkService<'_> {
     async fn handle(&self, idx: u8) -> Result<ComboConfig, RynkError> {
@@ -34,8 +34,8 @@ impl Handle<SetCombo> for RynkService<'_> {
     }
 }
 
-impl Handle<GetComboBulk> for RynkService<'_> {
-    async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+impl HandleBulk<GetComboBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let req = msg.decode_request::<GetComboBulkRequest>()?;
         // Empty slots read back as the empty config, same as the single Get; an
         // out-of-range `start_index` yields an empty page.
@@ -55,8 +55,8 @@ impl Handle<GetComboBulk> for RynkService<'_> {
     }
 }
 
-impl Handle<SetComboBulk> for RynkService<'_> {
-    async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+impl HandleBulk<SetComboBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let (start_index, rest) = postcard::take_from_bytes::<u8>(msg.payload()).map_err(|_| RynkError::Malformed)?;
         let (count, elements) = take_seq_len(rest)?;
 

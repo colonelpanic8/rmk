@@ -17,7 +17,7 @@ use rmk_types::protocol::rynk::{
 #[allow(unused_imports)] // re-exported at `crate::host` for downstream users
 pub use uart::run_rynk_uart;
 
-use self::handlers::Handle;
+use self::handlers::Serve;
 use super::context::KeyboardContext;
 use super::lock::HostLock;
 use crate::config::{DeviceConfig, RmkConfig};
@@ -129,64 +129,64 @@ impl<'a> RynkService<'a> {
         }
 
         if let Err(e) = match cmd {
-            Cmd::GetVersion => Handle::<command::GetVersion>::handle_message(self, msg).await,
-            Cmd::GetCapabilities => Handle::<command::GetCapabilities>::handle_message(self, msg).await,
-            Cmd::Reboot => Handle::<command::Reboot>::handle_message(self, msg).await,
-            Cmd::BootloaderJump => Handle::<command::BootloaderJump>::handle_message(self, msg).await,
-            Cmd::StorageReset => Handle::<command::StorageReset>::handle_message(self, msg).await,
-            Cmd::GetLockStatus => Handle::<command::GetLockStatus>::handle_message(self, msg).await,
-            Cmd::UnlockPoll => Handle::<command::UnlockPoll>::handle_message(self, msg).await,
-            Cmd::Lock => Handle::<command::Lock>::handle_message(self, msg).await,
-            Cmd::GetDeviceInfo => Handle::<command::GetDeviceInfo>::handle_message(self, msg).await,
+            Cmd::GetVersion => Serve::<command::GetVersion, _>::serve(self, msg).await,
+            Cmd::GetCapabilities => Serve::<command::GetCapabilities, _>::serve(self, msg).await,
+            Cmd::Reboot => Serve::<command::Reboot, _>::serve(self, msg).await,
+            Cmd::BootloaderJump => Serve::<command::BootloaderJump, _>::serve(self, msg).await,
+            Cmd::StorageReset => Serve::<command::StorageReset, _>::serve(self, msg).await,
+            Cmd::GetLockStatus => Serve::<command::GetLockStatus, _>::serve(self, msg).await,
+            Cmd::UnlockPoll => Serve::<command::UnlockPoll, _>::serve(self, msg).await,
+            Cmd::Lock => Serve::<command::Lock, _>::serve(self, msg).await,
+            Cmd::GetDeviceInfo => Serve::<command::GetDeviceInfo, _>::serve(self, msg).await,
 
-            Cmd::GetKeyAction => Handle::<command::GetKeyAction>::handle_message(self, msg).await,
-            Cmd::SetKeyAction => Handle::<command::SetKeyAction>::handle_message(self, msg).await,
-            Cmd::GetDefaultLayer => Handle::<command::GetDefaultLayer>::handle_message(self, msg).await,
-            Cmd::SetDefaultLayer => Handle::<command::SetDefaultLayer>::handle_message(self, msg).await,
-            Cmd::GetEncoderAction => Handle::<command::GetEncoderAction>::handle_message(self, msg).await,
-            Cmd::SetEncoderAction => Handle::<command::SetEncoderAction>::handle_message(self, msg).await,
-            Cmd::GetKeymapBulk => Handle::<command::GetKeymapBulk>::handle_message(self, msg).await,
-            Cmd::SetKeymapBulk => Handle::<command::SetKeymapBulk>::handle_message(self, msg).await,
+            Cmd::GetKeyAction => Serve::<command::GetKeyAction, _>::serve(self, msg).await,
+            Cmd::SetKeyAction => Serve::<command::SetKeyAction, _>::serve(self, msg).await,
+            Cmd::GetDefaultLayer => Serve::<command::GetDefaultLayer, _>::serve(self, msg).await,
+            Cmd::SetDefaultLayer => Serve::<command::SetDefaultLayer, _>::serve(self, msg).await,
+            Cmd::GetEncoderAction => Serve::<command::GetEncoderAction, _>::serve(self, msg).await,
+            Cmd::SetEncoderAction => Serve::<command::SetEncoderAction, _>::serve(self, msg).await,
+            Cmd::GetKeymapBulk => Serve::<command::GetKeymapBulk, _>::serve(self, msg).await,
+            Cmd::SetKeymapBulk => Serve::<command::SetKeymapBulk, _>::serve(self, msg).await,
 
-            Cmd::GetMacro => Handle::<command::GetMacro>::handle_message(self, msg).await,
-            Cmd::SetMacro => Handle::<command::SetMacro>::handle_message(self, msg).await,
+            Cmd::GetMacro => Serve::<command::GetMacro, _>::serve(self, msg).await,
+            Cmd::SetMacro => Serve::<command::SetMacro, _>::serve(self, msg).await,
 
-            Cmd::GetCombo => Handle::<command::GetCombo>::handle_message(self, msg).await,
-            Cmd::SetCombo => Handle::<command::SetCombo>::handle_message(self, msg).await,
-            Cmd::GetComboBulk => Handle::<command::GetComboBulk>::handle_message(self, msg).await,
-            Cmd::SetComboBulk => Handle::<command::SetComboBulk>::handle_message(self, msg).await,
+            Cmd::GetCombo => Serve::<command::GetCombo, _>::serve(self, msg).await,
+            Cmd::SetCombo => Serve::<command::SetCombo, _>::serve(self, msg).await,
+            Cmd::GetComboBulk => Serve::<command::GetComboBulk, _>::serve(self, msg).await,
+            Cmd::SetComboBulk => Serve::<command::SetComboBulk, _>::serve(self, msg).await,
 
-            Cmd::GetMorse => Handle::<command::GetMorse>::handle_message(self, msg).await,
-            Cmd::SetMorse => Handle::<command::SetMorse>::handle_message(self, msg).await,
-            Cmd::GetMorseBulk => Handle::<command::GetMorseBulk>::handle_message(self, msg).await,
-            Cmd::SetMorseBulk => Handle::<command::SetMorseBulk>::handle_message(self, msg).await,
+            Cmd::GetMorse => Serve::<command::GetMorse, _>::serve(self, msg).await,
+            Cmd::SetMorse => Serve::<command::SetMorse, _>::serve(self, msg).await,
+            Cmd::GetMorseBulk => Serve::<command::GetMorseBulk, _>::serve(self, msg).await,
+            Cmd::SetMorseBulk => Serve::<command::SetMorseBulk, _>::serve(self, msg).await,
 
-            Cmd::GetFork => Handle::<command::GetFork>::handle_message(self, msg).await,
-            Cmd::SetFork => Handle::<command::SetFork>::handle_message(self, msg).await,
+            Cmd::GetFork => Serve::<command::GetFork, _>::serve(self, msg).await,
+            Cmd::SetFork => Serve::<command::SetFork, _>::serve(self, msg).await,
 
-            Cmd::GetBehaviorConfig => Handle::<command::GetBehaviorConfig>::handle_message(self, msg).await,
-            Cmd::SetBehaviorConfig => Handle::<command::SetBehaviorConfig>::handle_message(self, msg).await,
+            Cmd::GetBehaviorConfig => Serve::<command::GetBehaviorConfig, _>::serve(self, msg).await,
+            Cmd::SetBehaviorConfig => Serve::<command::SetBehaviorConfig, _>::serve(self, msg).await,
 
-            Cmd::GetConnectionType => Handle::<command::GetConnectionType>::handle_message(self, msg).await,
-            Cmd::GetConnectionStatus => Handle::<command::GetConnectionStatus>::handle_message(self, msg).await,
+            Cmd::GetConnectionType => Serve::<command::GetConnectionType, _>::serve(self, msg).await,
+            Cmd::GetConnectionStatus => Serve::<command::GetConnectionStatus, _>::serve(self, msg).await,
             #[cfg(feature = "_ble")]
-            Cmd::GetBleStatus => Handle::<command::GetBleStatus>::handle_message(self, msg).await,
+            Cmd::GetBleStatus => Serve::<command::GetBleStatus, _>::serve(self, msg).await,
             #[cfg(feature = "_ble")]
-            Cmd::SwitchBleProfile => Handle::<command::SwitchBleProfile>::handle_message(self, msg).await,
+            Cmd::SwitchBleProfile => Serve::<command::SwitchBleProfile, _>::serve(self, msg).await,
             #[cfg(feature = "_ble")]
-            Cmd::ClearBleProfile => Handle::<command::ClearBleProfile>::handle_message(self, msg).await,
+            Cmd::ClearBleProfile => Serve::<command::ClearBleProfile, _>::serve(self, msg).await,
 
-            Cmd::GetCurrentLayer => Handle::<command::GetCurrentLayer>::handle_message(self, msg).await,
-            Cmd::GetMatrixState => Handle::<command::GetMatrixState>::handle_message(self, msg).await,
+            Cmd::GetCurrentLayer => Serve::<command::GetCurrentLayer, _>::serve(self, msg).await,
+            Cmd::GetMatrixState => Serve::<command::GetMatrixState, _>::serve(self, msg).await,
             #[cfg(feature = "_ble")]
-            Cmd::GetBatteryStatus => Handle::<command::GetBatteryStatus>::handle_message(self, msg).await,
+            Cmd::GetBatteryStatus => Serve::<command::GetBatteryStatus, _>::serve(self, msg).await,
             #[cfg(feature = "split")]
-            Cmd::GetPeripheralStatus => Handle::<command::GetPeripheralStatus>::handle_message(self, msg).await,
-            Cmd::GetWpm => Handle::<command::GetWpm>::handle_message(self, msg).await,
-            Cmd::GetSleepState => Handle::<command::GetSleepState>::handle_message(self, msg).await,
-            Cmd::GetLedIndicator => Handle::<command::GetLedIndicator>::handle_message(self, msg).await,
+            Cmd::GetPeripheralStatus => Serve::<command::GetPeripheralStatus, _>::serve(self, msg).await,
+            Cmd::GetWpm => Serve::<command::GetWpm, _>::serve(self, msg).await,
+            Cmd::GetSleepState => Serve::<command::GetSleepState, _>::serve(self, msg).await,
+            Cmd::GetLedIndicator => Serve::<command::GetLedIndicator, _>::serve(self, msg).await,
 
-            Cmd::GetLayout => Handle::<command::GetLayout>::handle_message(self, msg).await,
+            Cmd::GetLayout => Serve::<command::GetLayout, _>::serve(self, msg).await,
 
             // Direct `dispatch` callers should not turn topics into replies.
             cmd if cmd.is_topic() => Err(RynkError::Invalid),

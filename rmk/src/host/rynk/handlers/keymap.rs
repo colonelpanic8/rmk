@@ -11,8 +11,8 @@ use rmk_types::protocol::rynk::{
 };
 
 use super::super::RynkService;
-use super::Handle;
 use super::bulk::{bulk_page, bulk_write_start, take_element, take_seq_len, validate_bulk_elements};
+use super::{Handle, HandleBulk};
 
 impl Handle<GetKeyAction> for RynkService<'_> {
     async fn handle(&self, pos: KeyPosition) -> Result<KeyAction, RynkError> {
@@ -101,8 +101,8 @@ impl RynkService<'_> {
     }
 }
 
-impl Handle<GetKeymapBulk> for RynkService<'_> {
-    async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+impl HandleBulk<GetKeymapBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let req = msg.decode_request::<GetKeymapBulkRequest>()?;
         // From the start key the page reads forward through the flat keymap,
         // crossing row and layer boundaries freely, and stops at the keymap's end.
@@ -114,8 +114,8 @@ impl Handle<GetKeymapBulk> for RynkService<'_> {
     }
 }
 
-impl Handle<SetKeymapBulk> for RynkService<'_> {
-    async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+impl HandleBulk<SetKeymapBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let ([layer, start_row, start_col], rest) =
             postcard::take_from_bytes::<[u8; 3]>(msg.payload()).map_err(|_| RynkError::Malformed)?;
         let (count, elements) = take_seq_len(rest)?;

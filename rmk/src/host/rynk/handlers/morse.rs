@@ -6,8 +6,8 @@ use rmk_types::protocol::rynk::command::{GetMorse, GetMorseBulk, SetMorse, SetMo
 use rmk_types::protocol::rynk::{GetMorseBulkRequest, RynkError, RynkMessage, SetMorseRequest};
 
 use super::super::RynkService;
-use super::Handle;
 use super::bulk::{bulk_page, bulk_write_start, take_element, take_seq_len, validate_bulk_elements};
+use super::{Handle, HandleBulk};
 
 impl Handle<GetMorse> for RynkService<'_> {
     async fn handle(&self, idx: u8) -> Result<Morse, RynkError> {
@@ -29,8 +29,8 @@ impl Handle<SetMorse> for RynkService<'_> {
     }
 }
 
-impl Handle<GetMorseBulk> for RynkService<'_> {
-    async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+impl HandleBulk<GetMorseBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let req = msg.decode_request::<GetMorseBulkRequest>()?;
         let page = bulk_page(req.start_index as usize, BULK_SIZE, self.ctx.morses_len());
         let count = page.len();
@@ -38,8 +38,8 @@ impl Handle<GetMorseBulk> for RynkService<'_> {
     }
 }
 
-impl Handle<SetMorseBulk> for RynkService<'_> {
-    async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+impl HandleBulk<SetMorseBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let (start_index, rest) = postcard::take_from_bytes::<u8>(msg.payload()).map_err(|_| RynkError::Malformed)?;
         let (count, elements) = take_seq_len(rest)?;
 
