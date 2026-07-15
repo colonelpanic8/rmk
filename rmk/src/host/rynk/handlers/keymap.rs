@@ -12,7 +12,7 @@ use rmk_types::protocol::rynk::{
 
 use super::super::RynkService;
 use super::Handle;
-use super::bulk::{bulk_page, bulk_write_start, take_seq_len, validate_bulk_elements};
+use super::bulk::{bulk_page, bulk_write_start, take_element, take_seq_len, validate_bulk_elements};
 
 impl Handle<GetKeyAction> for RynkService<'_> {
     async fn handle(&self, pos: KeyPosition) -> Result<KeyAction, RynkError> {
@@ -132,8 +132,7 @@ impl Handle<SetKeymapBulk> for RynkService<'_> {
         // Row-major, layer-major flat walk from the validated start.
         let mut cursor = elements;
         for offset in start..start + count {
-            let (action, next) = postcard::take_from_bytes::<KeyAction>(cursor).map_err(|_| RynkError::Malformed)?;
-            cursor = next;
+            let action = take_element::<KeyAction>(&mut cursor)?;
             let layer = (offset / (rows * cols)) as u8;
             let row = (offset / cols % rows) as u8;
             let col = (offset % cols) as u8;

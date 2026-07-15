@@ -7,7 +7,7 @@ use rmk_types::protocol::rynk::{GetComboBulkRequest, RynkError, RynkMessage, Set
 
 use super::super::RynkService;
 use super::Handle;
-use super::bulk::{bulk_page, bulk_write_start, take_seq_len, validate_bulk_elements};
+use super::bulk::{bulk_page, bulk_write_start, take_element, take_seq_len, validate_bulk_elements};
 
 impl Handle<GetCombo> for RynkService<'_> {
     async fn handle(&self, idx: u8) -> Result<ComboConfig, RynkError> {
@@ -63,18 +63,14 @@ impl Handle<SetComboBulk> for RynkService<'_> {
         let (start_index, rest) = postcard::take_from_bytes::<u8>(msg.payload()).map_err(|_| RynkError::Malformed)?;
         let (count, elements) = take_seq_len(rest)?;
 
-        // Validate the whole run first, so it applies whole or not at all: the
-        // range fits, and every element decodes (pass one).
+        // Validate the whole run first, so it applies whole or not at all.
         let num_combos = self.ctx.with_combos(|combos| combos.len());
         let start = bulk_write_start(start_index as usize, count, num_combos)?;
         validate_bulk_elements::<ComboConfig>(elements, count)?;
 
-        // Pass two: re-decode and apply. Range and decode are already checked,
-        // so `set_combo` succeeds for every slot.
         let mut cursor = elements;
         for idx in start..start + count {
-            let (config, next) = postcard::take_from_bytes::<ComboConfig>(cursor).map_err(|_| RynkError::Malformed)?;
-            cursor = next;
+            let config = take_element::<ComboConfig>(&mut cursor)?;
             self.ctx.set_combo(idx as u8, config).await;
         }
         msg.encode_response(&())

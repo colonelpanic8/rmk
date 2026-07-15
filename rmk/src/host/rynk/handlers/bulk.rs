@@ -33,13 +33,19 @@ pub(super) fn take_seq_len(bytes: &[u8]) -> Result<(usize, &[u8]), RynkError> {
     Ok((len as usize, rest))
 }
 
+/// Decode one bulk element and advance `cursor` past it.
+pub(super) fn take_element<T: DeserializeOwned>(cursor: &mut &[u8]) -> Result<T, RynkError> {
+    let (value, rest) = postcard::take_from_bytes::<T>(cursor).map_err(|_| RynkError::Malformed)?;
+    *cursor = rest;
+    Ok(value)
+}
+
 /// Pass one of the two-pass bulk write: confirm all `count` elements decode
 /// cleanly, so a malformed tail aborts the whole write before any element lands
 /// (all-or-nothing). Pass two re-decodes the same bytes and applies each.
 pub(super) fn validate_bulk_elements<T: DeserializeOwned>(mut bytes: &[u8], count: usize) -> Result<(), RynkError> {
     for _ in 0..count {
-        let (_, rest) = postcard::take_from_bytes::<T>(bytes).map_err(|_| RynkError::Malformed)?;
-        bytes = rest;
+        take_element::<T>(&mut bytes)?;
     }
     Ok(())
 }

@@ -7,7 +7,7 @@ use rmk_types::protocol::rynk::{GetMorseBulkRequest, RynkError, RynkMessage, Set
 
 use super::super::RynkService;
 use super::Handle;
-use super::bulk::{bulk_page, bulk_write_start, take_seq_len, validate_bulk_elements};
+use super::bulk::{bulk_page, bulk_write_start, take_element, take_seq_len, validate_bulk_elements};
 
 impl Handle<GetMorse> for RynkService<'_> {
     async fn handle(&self, idx: u8) -> Result<Morse, RynkError> {
@@ -54,8 +54,7 @@ impl Handle<SetMorseBulk> for RynkService<'_> {
 
         let mut cursor = elements;
         for idx in start..start + count {
-            let (config, next) = postcard::take_from_bytes::<Morse>(cursor).map_err(|_| RynkError::Malformed)?;
-            cursor = next;
+            let config = take_element::<Morse>(&mut cursor)?;
             self.ctx.update_morse(idx as u8, |m| *m = config).await;
         }
         msg.encode_response(&())

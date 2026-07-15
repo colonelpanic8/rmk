@@ -128,12 +128,9 @@ impl<'a> RynkMessage<'a> {
     }
 
     /// Stream an `Ok`-wrapped bulk response into the payload without materializing
-    /// a `Vec`: writes the postcard `Ok` tag, the sequence length, then each item
-    /// from `items` in turn, and updates `LEN`.
-    ///
-    /// The bytes are identical to encoding `Ok(Response { <seq field>: items })`
-    /// — a single-field response struct flattens to its `Vec`, which postcard
-    /// encodes as `varint(len)` followed by the elements — so a host decoding the
+    /// a `Vec`: the postcard `Ok` tag, the sequence length, then each item in turn.
+    /// These bytes match `Ok(Response { <field>: items })` exactly — postcard
+    /// encodes a `Vec` as `varint(len)` then its elements — so a host decoding the
     /// owned response type interoperates unchanged.
     pub fn encode_bulk_ok<T, I>(&mut self, count: usize, items: I) -> Result<(), RynkError>
     where
