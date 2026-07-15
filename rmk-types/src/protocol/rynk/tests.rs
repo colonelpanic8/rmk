@@ -126,10 +126,17 @@ mod snapshot {
     /// Compare actual snapshot text against the on-disk file.
     /// When `UPDATE_SNAPSHOTS` is set, write the file instead.
     pub fn assert_snapshot(rel_path: &str, actual: String) {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src/protocol/rynk")
-            .join(rel_path);
+        assert_snapshot_at(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("src/protocol/rynk")
+                .join(rel_path),
+            actual,
+        );
+    }
 
+    /// [`assert_snapshot`] for a generated file at an arbitrary path (e.g. the
+    /// protocol reference under `docs/`).
+    pub fn assert_snapshot_at(path: PathBuf, actual: String) {
         if env::var_os("UPDATE_SNAPSHOTS").is_some() {
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -933,4 +940,177 @@ fn wire_frames_locked() {
         &view,
     );
     snapshot::assert_snapshot("snapshots/wire_frames.snap", actual);
+}
+
+/// The human-readable protocol reference under `docs/`, rendered from the
+/// `ENDPOINT_META`/`TOPIC_META` tables. Those tables are not feature-gated, so
+/// every feature set renders identical output; a diff fails CI (regenerate with
+/// `UPDATE_SNAPSHOTS=1`), keeping the doc in lockstep with the wire contract.
+mod protocol_reference {
+    extern crate alloc;
+    extern crate std;
+
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use std::path::PathBuf;
+
+    use super::super::command::{ENDPOINT_META, EndpointMeta, TOPIC_META, TopicMeta};
+    use super::ProtocolVersion;
+    use super::snapshot::assert_snapshot_at;
+
+    /// Repo-relative location of the generated page.
+    const DOC_PATH: &str = "docs/docs/main/docs/development/rynk_protocol.md";
+
+    /// Pull the doc text (Notes) and `cfg` feature out of a row's stringified
+    /// attributes. `///` docs stringify as raw strings `#[doc = r"…"]`, wrapping
+    /// after `doc =` when long — hence the whitespace skip and raw-delimiter scan.
+    fn parse_attrs(attrs: &str) -> (String, Option<&str>) {
+        let mut notes = String::new();
+        let mut rest = attrs;
+        while let Some(i) = rest.find("doc =") {
+            rest = rest[i + 5..].trim_start();
+            rest = rest.strip_prefix('r').unwrap_or(rest);
+            let hashes = rest.len() - rest.trim_start_matches('#').len();
+            rest = &rest[hashes..]; // now at the opening quote
+            let close = format!("\"{}", "#".repeat(hashes));
+            let Some(body) = rest.strip_prefix('"').and_then(|s| s.split(&close).next()) else {
+                break;
+            };
+            if !notes.is_empty() {
+                notes.push(' ');
+            }
+            notes.push_str(body.trim());
+            rest = &rest[1 + body.len() + close.len()..];
+        }
+        // Rustdoc intra-links render as broken md links; keep just the code span.
+        let notes = notes.replace("[`", "`").replace("`]", "`");
+        let feature = attrs.find("feature = \"").and_then(|i| {
+            let s = &attrs[i + 11..];
+            s.find('"').map(|end| &s[..end])
+        });
+        (notes, feature)
+    }
+
+    /// Render `rows` as a column-aligned GFM table.
+    fn table(header: &[&str], rows: &[Vec<String>]) -> String {
+        let mut widths: Vec<usize> = header.iter().map(|h| h.chars().count()).collect();
+        for row in rows {
+            for (w, cell) in widths.iter_mut().zip(row) {
+                *w = (*w).max(cell.chars().count());
+            }
+        }
+        let mut out = String::new();
+        let emit = |out: &mut String, cells: &[String]| {
+            out.push('|');
+            for (w, cell) in widths.iter().zip(cells) {
+                out.push_str(&format!(" {:w$} |", cell, w = w));
+            }
+            out.push('\n');
+        };
+        emit(&mut out, &header.iter().map(|h| String::from(*h)).collect::<Vec<_>>());
+        emit(&mut out, &widths.iter().map(|w| "-".repeat(*w)).collect::<Vec<_>>());
+        for row in rows {
+            emit(&mut out, row);
+        }
+        out
+    }
+
+    fn endpoint_rows() -> Vec<Vec<String>> {
+        ENDPOINT_META
+            .iter()
+            .map(
+                |EndpointMeta {
+                     name,
+                     cmd,
+                     request,
+                     response,
+                     attrs,
+                     bulk,
+                 }| {
+                    let (notes, feature) = parse_attrs(attrs);
+                    let feature = if *bulk {
+                        String::from("`bulk`")
+                    } else {
+                        feature.map(|f| format!("`{f}`")).unwrap_or_default()
+                    };
+                    alloc::vec![
+                        format!("`0x{cmd:04X}`"),
+                        format!("`{name}`"),
+                        format!("`{request}`"),
+                        format!("`{response}`"),
+                        feature,
+                        notes,
+                    ]
+                },
+            )
+            .collect()
+    }
+
+    fn topic_rows() -> Vec<Vec<String>> {
+        TOPIC_META
+            .iter()
+            .map(
+                |TopicMeta {
+                     name,
+                     cmd,
+                     payload,
+                     attrs,
+                 }| {
+                    let (notes, feature) = parse_attrs(attrs);
+                    alloc::vec![
+                        format!("`0x{cmd:04X}`"),
+                        format!("`{name}`"),
+                        format!("`{payload}`"),
+                        feature.map(|f| format!("`{f}`")).unwrap_or_default(),
+                        notes,
+                    ]
+                },
+            )
+            .collect()
+    }
+
+    fn render() -> String {
+        let v = ProtocolVersion::CURRENT;
+        format!(
+            "{header}\n\n\
+             # Rynk Protocol Reference\n\n\
+             Current protocol version: **{major}.{minor}**.\n\n\
+             Every transport (USB CDC, BLE GATT, BLE HID) carries the same frame — a 5-byte header plus a [postcard](https://docs.rs/postcard)-encoded payload:\n\n\
+             ```text\n\
+             ┌──────────────┬───────────┬────────────────────┐\n\
+             │ CMD u16 LE   │ SEQ u8    │ LEN u16 LE         │  ← 5-byte header\n\
+             ├──────────────┴───────────┴────────────────────┤\n\
+             │              postcard-encoded payload         │  ← LEN bytes\n\
+             └───────────────────────────────────────────────┘\n\
+             ```\n\n\
+             - **Requests** use CMD `0x0000..=0x7FFF`. The response echoes CMD and SEQ and wraps its payload in postcard `Result<T, RynkError>` (`T = ()` for `Set*`).\n\
+             - **Topics** use CMD `0x8000..=0xFFFF` (server → host push, SEQ `0`, bare payload).\n\n\
+             Which commands a firmware answers depends on the RMK Cargo features it was built with: a row with no **Feature** is present once `rynk` is on, and the rest need their feature (`_ble`, `bulk`, `split`, …) compiled in. A command the firmware wasn't built with answers `UnknownCmd`.\n\n\
+             ## Endpoints\n\n\
+             {endpoints}\n\
+             ## Topics\n\n\
+             Topics are best-effort pushes; the `Get*` endpoints above mirror their payloads so a host can recover a missed push.\n\n\
+             {topics}\n\
+             ## Compatibility\n\n\
+             - `GetVersion` (`0x0001`) and its `Result<ProtocolVersion, RynkError>` reply are frozen across all versions.\n\
+             - Within a major version, adding a CMD or topic is a `minor` bump: old firmware answers `UnknownCmd`, old hosts ignore unknown topics.\n\
+             - Reshaping an existing request/response — including appending a field — is a `major` bump.\n",
+            header = "<!-- GENERATED — do not edit. Rendered from the `endpoints!`/`topics!` tables in\n     rmk-types/src/protocol/rynk/command.rs. Regenerate with:\n     UPDATE_SNAPSHOTS=1 cargo test -p rmk-types --features rynk protocol_reference -->",
+            major = v.major,
+            minor = v.minor,
+            endpoints = table(
+                &["CMD", "Name", "Request", "Response", "Feature", "Notes"],
+                &endpoint_rows()
+            ),
+            topics = table(&["CMD", "Name", "Payload", "Feature", "Notes"], &topic_rows()),
+        )
+    }
+
+    #[test]
+    fn protocol_reference_is_current() {
+        // rmk-types/../ is the repo root.
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join(DOC_PATH);
+        assert_snapshot_at(path, render());
+    }
 }
