@@ -261,7 +261,8 @@ impl<'a> Keyboard<'a> {
     pub fn morse_timeout(keymap: &KeyMap, key_action: &KeyAction, hold_timeout_needed: bool) -> Duration {
         // Check per-key profile config first
         match key_action {
-            KeyAction::TapHold(_, _, profile) => {
+            KeyAction::TapHold(_, _, idx) => {
+                let profile = keymap.morse_profile(*idx);
                 let timeout = if hold_timeout_needed {
                     profile.hold_timeout_ms()
                 } else {
@@ -305,8 +306,8 @@ impl<'a> Keyboard<'a> {
     pub fn tap_hold_mode(keymap: &KeyMap, key_action: &KeyAction) -> MorseMode {
         // Check per-key profile config first
         match key_action {
-            KeyAction::TapHold(_, _, profile) => {
-                if let Some(mode) = profile.mode() {
+            KeyAction::TapHold(_, _, idx) => {
+                if let Some(mode) = keymap.morse_profile(*idx).mode() {
                     return mode;
                 }
             }
@@ -329,8 +330,8 @@ impl<'a> Keyboard<'a> {
     pub fn is_unilateral_tap_enabled(keymap: &KeyMap, key_action: &KeyAction) -> bool {
         // try to look for a per-key profile config
         match key_action {
-            KeyAction::TapHold(_, _, profile) => {
-                if let Some(enabled) = profile.unilateral_tap() {
+            KeyAction::TapHold(_, _, idx) => {
+                if let Some(enabled) = keymap.morse_profile(*idx).unilateral_tap() {
                     return enabled;
                 }
             }
@@ -350,7 +351,8 @@ impl<'a> Keyboard<'a> {
 
     pub fn is_flow_tap_enabled(keymap: &KeyMap, key_action: &KeyAction) -> bool {
         match key_action {
-            KeyAction::TapHold(_, _, profile) => profile
+            KeyAction::TapHold(_, _, idx) => keymap
+                .morse_profile(*idx)
                 .enable_flow_tap()
                 .unwrap_or_else(|| keymap.morse_enable_flow_tap()),
             KeyAction::Morse(index) => keymap
