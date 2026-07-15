@@ -12,7 +12,7 @@ use embassy_futures::select::{Either, select};
 use embedded_io_async::{Read, Write};
 use rmk_types::constants::RYNK_BUFFER_SIZE;
 use rmk_types::protocol::rynk::{
-    Cmd, FirmwareVersion, RYNK_HEADER_SIZE, RYNK_MIN_BUFFER_SIZE, RynkError, RynkHeader, RynkMessage, command,
+    Cmd, FirmwareVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage, command,
 };
 #[allow(unused_imports)] // re-exported at `crate::host` for downstream users
 pub use uart::run_rynk_uart;
@@ -34,15 +34,6 @@ impl Drop for RelockGuard<'_, '_> {
         self.0.lock();
     }
 }
-
-// Use `core::assert!` explicitly: in a `defmt` build the crate-level `assert!`
-// expands to `defmt::assert!`, whose panic path is not `const`-callable.
-const _: () = core::assert!(
-    rmk_types::constants::RYNK_BUFFER_SIZE >= RYNK_MIN_BUFFER_SIZE,
-    "rynk_buffer_size is smaller than RYNK_MIN_BUFFER_SIZE — set [rmk] \
-     rynk_buffer_size in keyboard.toml, or disable features to shrink the \
-     floor",
-);
 
 const RMK_VERSION: FirmwareVersion = {
     const fn component(s: &str) -> u8 {

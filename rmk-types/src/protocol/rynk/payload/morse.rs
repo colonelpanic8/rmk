@@ -49,9 +49,13 @@ mod bulk {
         pub configs: BulkMorses,
     }
 
-    // Bulk endpoints size from the buffer; this only satisfies `Endpoint: MaxSize`.
+    // Firmware sizes its fixed buffer from these exact bounds; host builds leave
+    // the fields unbounded and never need `MaxSize`.
+    #[cfg(not(feature = "host"))]
     impl MaxSize for SetMorseBulkRequest {
-        const POSTCARD_MAX_SIZE: usize = crate::constants::RYNK_BUFFER_SIZE;
+        // start_index, then the bounded configs vector.
+        const POSTCARD_MAX_SIZE: usize =
+            <u8 as MaxSize>::POSTCARD_MAX_SIZE + crate::heapless_vec_max_size::<Morse, BULK_SIZE>();
     }
 
     /// Bulk response for getting multiple morse configs at once.
@@ -63,8 +67,9 @@ mod bulk {
         pub configs: BulkMorses,
     }
 
+    #[cfg(not(feature = "host"))]
     impl MaxSize for GetMorseBulkResponse {
-        const POSTCARD_MAX_SIZE: usize = crate::constants::RYNK_BUFFER_SIZE;
+        const POSTCARD_MAX_SIZE: usize = crate::heapless_vec_max_size::<Morse, BULK_SIZE>();
     }
 
     impl GetMorseBulkResponse {

@@ -16,14 +16,11 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::RynkError;
-use super::command::{Cmd, RYNK_MAX_PAYLOAD};
+use super::command::Cmd;
 use super::endpoint::Topic;
 
 /// Size in bytes of the fixed Rynk header.
 pub const RYNK_HEADER_SIZE: usize = 5;
-
-/// Minimum buffer size required to hold any single Rynk message (header + max-payload).
-pub const RYNK_MIN_BUFFER_SIZE: usize = RYNK_HEADER_SIZE + RYNK_MAX_PAYLOAD;
 
 /// The fixed header of a [`RynkMessage`].
 #[derive(Debug, Clone, Copy)]
@@ -174,18 +171,7 @@ impl<'a> TryFrom<&'a mut [u8]> for RynkMessage<'a> {
 
 #[cfg(test)]
 mod tests {
-    use postcard::experimental::max_size::MaxSize;
-
-    use super::super::DeviceInfo;
     use super::*;
-
-    #[test]
-    fn rynk_min_buffer_size_covers_largest_known_response() {
-        // DeviceInfo is the largest non-bulk response.
-        let wrapped = <Result<DeviceInfo, RynkError> as MaxSize>::POSTCARD_MAX_SIZE;
-        assert!(RYNK_MAX_PAYLOAD >= wrapped);
-        assert!(RYNK_MIN_BUFFER_SIZE >= wrapped + RYNK_HEADER_SIZE);
-    }
 
     #[test]
     fn build_round_trip() {

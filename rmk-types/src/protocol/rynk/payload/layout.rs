@@ -39,10 +39,7 @@ impl MaxSize for LayoutChunk {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::rynk::command::GetLayout;
-    use crate::protocol::rynk::endpoint::Endpoint;
     use crate::protocol::rynk::tests::{assert_max_size_bound, round_trip};
-    use crate::protocol::rynk::{RYNK_HEADER_SIZE, RYNK_MIN_BUFFER_SIZE, RynkError};
 
     #[test]
     fn round_trip_layout_chunk() {
@@ -61,19 +58,5 @@ mod tests {
         };
         round_trip(&full);
         assert_max_size_bound(&full);
-    }
-
-    /// Layout is built-in, so a full `GetLayout` frame must always fit the
-    /// auto-sized rynk buffer floor. Verifies the blob page can't overrun it.
-    #[test]
-    fn layout_chunk_fits_the_buffer_floor() {
-        let wrapped = <Result<LayoutChunk, RynkError> as MaxSize>::POSTCARD_MAX_SIZE;
-        assert!(
-            RYNK_MIN_BUFFER_SIZE >= RYNK_HEADER_SIZE + wrapped,
-            "RYNK_MIN_BUFFER_SIZE ({RYNK_MIN_BUFFER_SIZE}) must hold a header + a full LayoutChunk response ({})",
-            RYNK_HEADER_SIZE + wrapped,
-        );
-        // GetLayout's own MAX_PAYLOAD is folded into the buffer floor.
-        assert!(RYNK_MIN_BUFFER_SIZE >= RYNK_HEADER_SIZE + <GetLayout as Endpoint>::MAX_PAYLOAD);
     }
 }

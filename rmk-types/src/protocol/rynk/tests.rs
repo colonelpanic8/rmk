@@ -1026,14 +1026,9 @@ mod protocol_reference {
                      request,
                      response,
                      attrs,
-                     bulk,
                  }| {
                     let (notes, feature) = parse_attrs(attrs);
-                    let feature = if *bulk {
-                        String::from("`bulk`")
-                    } else {
-                        feature.map(|f| format!("`{f}`")).unwrap_or_default()
-                    };
+                    let feature = feature.map(|f| format!("`{f}`")).unwrap_or_default();
                     alloc::vec![
                         format!("`0x{cmd:04X}`"),
                         format!("`{name}`"),
@@ -1086,7 +1081,7 @@ mod protocol_reference {
              ```\n\n\
              - **Requests** use CMD `0x0000..=0x7FFF`. The response echoes CMD and SEQ and wraps its payload in postcard `Result<T, RynkError>` (`T = ()` for `Set*`).\n\
              - **Topics** use CMD `0x8000..=0xFFFF` (server → host push, SEQ `0`, bare payload).\n\n\
-             Which commands a firmware answers depends on the RMK Cargo features it was built with: a row with no **Feature** is present once `rynk` is on, and the rest need their feature (`_ble`, `bulk`, `split`, …) compiled in. A command the firmware wasn't built with answers `UnknownCmd`.\n\n\
+             Which commands a firmware answers depends on the RMK Cargo features it was built with: a row with no **Feature** is present once `rynk` is on, and the rest need their feature (`_ble`, `split`, …) compiled in. A command the firmware wasn't built with answers `UnknownCmd`.\n\n\
              ## Endpoints\n\n\
              {endpoints}\n\
              ## Topics\n\n\
