@@ -288,7 +288,7 @@
           connected = true;
           log(`✓ connected via ${label} (${client.label()}) — ${caps.num_layers}×${caps.num_rows}×${caps.num_cols} keymap, `
             + `${caps.max_combos} combos, ${caps.max_forks} forks, ${caps.max_morse} morse, `
-            + `${caps.max_macros} macros, ble=${caps.ble_enabled}\n`);
+            + `${caps.macro_space_size} bytes macro storage, ble=${caps.ble_enabled}\n`);
 
           // Exercise the typed client surface.
           await show("version",         () => client.get_version());
