@@ -81,6 +81,34 @@ impl defmt::Format for Cmd {
     }
 }
 
+/// A command-table row as data for the generated protocol reference. Not
+/// feature-gated — the reference lists the whole protocol; a row's gate rides
+/// along in [`attrs`](Self::attrs)/[`bulk`](Self::bulk). `#[cfg(test)]`, so
+/// these stringified names never reach a firmware binary.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+pub struct EndpointMeta {
+    pub name: &'static str,
+    pub cmd: u16,
+    pub request: &'static str,
+    pub response: &'static str,
+    /// Stringified row attributes: doc comments and the `cfg` gate.
+    pub attrs: &'static str,
+    /// Carries the `@bulk` marker (gated behind the `bulk` feature).
+    pub bulk: bool,
+}
+
+/// Push counterpart of [`EndpointMeta`]; test-only, same rules.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+pub struct TopicMeta {
+    pub name: &'static str,
+    pub cmd: u16,
+    pub payload: &'static str,
+    /// Stringified row attributes: doc comments and the `cfg` gate.
+    pub attrs: &'static str,
+}
+
 /// Compile-time guard: Check whether the command value is unique.
 const fn assert_unique(cmds: &[u16]) {
     let mut i = 0;
@@ -108,6 +136,9 @@ macro_rules! endpoints {
     // Gate one generated item on the feature named by the row's marker.
     (@gate bulk $item:item) => { #[cfg(feature = "bulk")] $item };
     (@gate $item:item) => { $item };
+    // Whether the row carries the `@bulk` marker.
+    (@is_bulk bulk) => { true };
+    (@is_bulk) => { false };
     ($( $(#[$meta:meta])* $(@ $marker:ident)? $name:ident = $cmd:literal : $req:ty => $resp:ty; )*) => {
         #[allow(non_upper_case_globals)]
         impl Cmd {
@@ -135,6 +166,19 @@ macro_rules! endpoints {
             $( $(#[$meta])* { m = max_const(m, endpoints!(@floor $($marker)? $name)); } )*
             m
         };
+        /// Endpoint rows as data, in table order — the protocol-reference source
+        /// (see [`EndpointMeta`]).
+        #[cfg(test)]
+        pub const ENDPOINT_META: &[EndpointMeta] = &[
+            $( EndpointMeta {
+                name: stringify!($name),
+                cmd: $cmd,
+                request: stringify!($req),
+                response: stringify!($resp),
+                attrs: stringify!($(#[$meta])*),
+                bulk: endpoints!(@is_bulk $($marker)?),
+            }, )*
+        ];
     };
 }
 
@@ -165,6 +209,16 @@ macro_rules! topics {
             $( $(#[$meta])* { m = max_const(m, <$name as Topic>::MAX_PAYLOAD); } )*
             m
         };
+        /// Topic rows as data, in table order (see [`ENDPOINT_META`]).
+        #[cfg(test)]
+        pub const TOPIC_META: &[TopicMeta] = &[
+            $( TopicMeta {
+                name: stringify!($name),
+                cmd: $cmd,
+                payload: stringify!($payload),
+                attrs: stringify!($(#[$meta])*),
+            }, )*
+        ];
 
         /// A decoded topic push (server → host), one variant per row of the
         /// topic table above — generated from it. `Serialize` lets the host
