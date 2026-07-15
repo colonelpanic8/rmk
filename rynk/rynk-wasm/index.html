@@ -165,7 +165,9 @@
           // Release locks so a failed attempt can be retried.
           async close() {
             try { await reader.cancel(); } catch {}
+            reader.releaseLock();
             try { await writer.abort(); } catch {}
+            writer.releaseLock();
             try { await port.close(); } catch {}
           },
         };
