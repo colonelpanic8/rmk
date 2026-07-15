@@ -82,7 +82,6 @@ fn generate_constants(bc: &BuildConstants) -> String {
 
     // Host uses protocol ceilings; firmware uses keyboard.toml/default capacities.
     let is_host = env::var("CARGO_FEATURE_HOST").is_ok();
-    let is_bulk = env::var("CARGO_FEATURE_BULK").is_ok();
 
     // Protocol ceilings — always emitted so rmk-types source code can reference them.
     lines.push(format!(
@@ -129,7 +128,7 @@ fn generate_constants(bc: &BuildConstants) -> String {
     }
 
     // Bulk counts derive from the buffer and must hold at least one element.
-    if is_bulk {
+    if env::var("CARGO_FEATURE_RYNK").is_ok() {
         lines.push(
             "pub const BULK_SIZE: usize = \
              crate::protocol::rynk::bulk_size_for_buffer(RYNK_BUFFER_SIZE);"

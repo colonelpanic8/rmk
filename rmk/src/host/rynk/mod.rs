@@ -108,9 +108,10 @@ impl<'a> RynkService<'a> {
             | Cmd::SetCombo
             | Cmd::SetMorse
             | Cmd::SetFork
-            | Cmd::SetBehaviorConfig => self.write_requires_unlock,
-            #[cfg(feature = "bulk")]
-            Cmd::SetKeymapBulk | Cmd::SetComboBulk | Cmd::SetMorseBulk => self.write_requires_unlock,
+            | Cmd::SetBehaviorConfig
+            | Cmd::SetKeymapBulk
+            | Cmd::SetComboBulk
+            | Cmd::SetMorseBulk => self.write_requires_unlock,
             _ => false,
         }
     }
@@ -144,9 +145,7 @@ impl<'a> RynkService<'a> {
             Cmd::SetDefaultLayer => Handle::<command::SetDefaultLayer>::handle_message(self, msg).await,
             Cmd::GetEncoderAction => Handle::<command::GetEncoderAction>::handle_message(self, msg).await,
             Cmd::SetEncoderAction => Handle::<command::SetEncoderAction>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
             Cmd::GetKeymapBulk => Handle::<command::GetKeymapBulk>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
             Cmd::SetKeymapBulk => Handle::<command::SetKeymapBulk>::handle_message(self, msg).await,
 
             Cmd::GetMacro => Handle::<command::GetMacro>::handle_message(self, msg).await,
@@ -154,16 +153,12 @@ impl<'a> RynkService<'a> {
 
             Cmd::GetCombo => Handle::<command::GetCombo>::handle_message(self, msg).await,
             Cmd::SetCombo => Handle::<command::SetCombo>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
             Cmd::GetComboBulk => Handle::<command::GetComboBulk>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
             Cmd::SetComboBulk => Handle::<command::SetComboBulk>::handle_message(self, msg).await,
 
             Cmd::GetMorse => Handle::<command::GetMorse>::handle_message(self, msg).await,
             Cmd::SetMorse => Handle::<command::SetMorse>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
             Cmd::GetMorseBulk => Handle::<command::GetMorseBulk>::handle_message(self, msg).await,
-            #[cfg(feature = "bulk")]
             Cmd::SetMorseBulk => Handle::<command::SetMorseBulk>::handle_message(self, msg).await,
 
             Cmd::GetFork => Handle::<command::GetFork>::handle_message(self, msg).await,

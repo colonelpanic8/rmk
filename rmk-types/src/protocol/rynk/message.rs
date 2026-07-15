@@ -100,7 +100,10 @@ impl<'a> RynkMessage<'a> {
         &self.buf[..self.frame_len()]
     }
 
-    fn payload(&self) -> &[u8] {
+    /// The request payload bytes, bounded by the declared `LEN`. Public so bulk
+    /// handlers can stream-decode a variable-length payload element by element
+    /// instead of materializing the whole `Vec`.
+    pub fn payload(&self) -> &[u8] {
         let payload_len = self.header().payload_len as usize;
         &self.buf[RYNK_HEADER_SIZE..RYNK_HEADER_SIZE + payload_len]
     }
@@ -121,6 +124,36 @@ impl<'a> RynkMessage<'a> {
             .map(|s| s.len())
             .map_err(|_| RynkError::Internal)?;
         self.set_payload_len(n as u16);
+        Ok(())
+    }
+
+    /// Stream an `Ok`-wrapped bulk response into the payload without materializing
+    /// a `Vec`: writes the postcard `Ok` tag, the sequence length, then each item
+    /// from `items` in turn, and updates `LEN`.
+    ///
+    /// The bytes are identical to encoding `Ok(Response { <seq field>: items })`
+    /// — a single-field response struct flattens to its `Vec`, which postcard
+    /// encodes as `varint(len)` followed by the elements — so a host decoding the
+    /// owned response type interoperates unchanged.
+    pub fn encode_bulk_ok<T, I>(&mut self, count: usize, items: I) -> Result<(), RynkError>
+    where
+        T: Serialize,
+        I: IntoIterator<Item = T>,
+    {
+        let body = &mut self.buf[RYNK_HEADER_SIZE..];
+        // postcard encodes `Result::Ok` as variant tag 0, then the payload.
+        *body.first_mut().ok_or(RynkError::Internal)? = 0;
+        let mut used = 1;
+        // Sequence length prefix: postcard writes a `Vec`'s length as this varint.
+        used += postcard::to_slice(&count, &mut body[used..])
+            .map_err(|_| RynkError::Internal)?
+            .len();
+        for item in items {
+            used += postcard::to_slice(&item, &mut body[used..])
+                .map_err(|_| RynkError::Internal)?
+                .len();
+        }
+        self.set_payload_len(used as u16);
         Ok(())
     }
 

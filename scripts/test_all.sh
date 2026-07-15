@@ -16,7 +16,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../.github/ci/_lib.sh"
 nx=(nextest run --config-file "$repo_root/.config/nextest.toml")
 
 # rmk-types: default-features run + host-feature run (the latter enables
-# rynk/bulk/_ble/split/steno, which is required to compile the wire-format
+# rynk/_ble/split/steno, which is required to compile the wire-format
 # snapshot tests under src/protocol/rynk/snapshots/) + steno-only run.
 cargo "${nx[@]}" --manifest-path rmk-types/Cargo.toml
 cargo "${nx[@]}" --manifest-path rmk-types/Cargo.toml --features host

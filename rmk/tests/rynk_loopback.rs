@@ -74,7 +74,6 @@ fn service_with_encoders() -> RynkService<'static> {
 }
 
 /// 3x4 service for bulk edge and row-wrap cases.
-#[cfg(feature = "bulk")]
 fn service_3x4() -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
     let per_key: &'static PositionalConfig<3, 4> = Box::leak(Box::new(PositionalConfig::default()));
@@ -85,7 +84,6 @@ fn service_3x4() -> RynkService<'static> {
 }
 
 /// 48-key service for full and over-budget bulk runs.
-#[cfg(feature = "bulk")]
 fn service_3x4x4() -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
     let per_key: &'static PositionalConfig<3, 4> = Box::leak(Box::new(PositionalConfig::default()));
@@ -96,7 +94,6 @@ fn service_3x4x4() -> RynkService<'static> {
 }
 
 /// Distinct action per bulk slot catches wrong-position writes.
-#[cfg(feature = "bulk")]
 fn bulk_action(i: usize) -> KeyAction {
     KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::from(4 + i as u8))))
 }
@@ -133,18 +130,10 @@ fn get_capabilities() {
         assert_eq!(caps.storage_enabled, cfg!(feature = "storage"));
         assert_eq!(caps.ble_enabled, cfg!(feature = "_ble"));
         assert_eq!(caps.is_split, cfg!(feature = "split"));
-        // Bulk flag and budgets must move together.
-        assert_eq!(caps.bulk_transfer_supported, cfg!(feature = "bulk"));
-        #[cfg(feature = "bulk")]
-        {
-            assert_eq!(caps.max_bulk_keys as usize, rmk_types::constants::BULK_KEYMAP_SIZE);
-            assert_eq!(caps.max_bulk_configs as usize, rmk_types::constants::BULK_SIZE);
-        }
-        #[cfg(not(feature = "bulk"))]
-        {
-            assert_eq!(caps.max_bulk_keys, 0);
-            assert_eq!(caps.max_bulk_configs, 0);
-        }
+        // Bulk is always supported; budgets derive from the session buffer.
+        assert!(caps.bulk_transfer_supported);
+        assert_eq!(caps.max_bulk_keys as usize, rmk_types::constants::BULK_KEYMAP_SIZE);
+        assert_eq!(caps.max_bulk_configs as usize, rmk_types::constants::BULK_SIZE);
     });
 }
 
@@ -427,7 +416,6 @@ fn get_set_encoder_round_trip() {
     });
 }
 
-#[cfg(feature = "bulk")]
 #[test]
 fn keymap_bulk_round_trip_wraps_row_boundary() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -478,7 +466,6 @@ fn keymap_bulk_round_trip_wraps_row_boundary() {
     });
 }
 
-#[cfg(feature = "bulk")]
 #[test]
 fn keymap_bulk_round_trip_wraps_layer_boundary() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -542,7 +529,6 @@ fn keymap_bulk_round_trip_wraps_layer_boundary() {
     });
 }
 
-#[cfg(feature = "bulk")]
 #[test]
 fn keymap_bulk_max_capacity_round_trip() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -579,7 +565,6 @@ fn keymap_bulk_max_capacity_round_trip() {
     });
 }
 
-#[cfg(feature = "bulk")]
 #[test]
 fn keymap_bulk_clamps_and_rejects() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -652,7 +637,6 @@ fn keymap_bulk_clamps_and_rejects() {
     });
 }
 
-#[cfg(feature = "bulk")]
 #[test]
 fn keymap_bulk_get_caps_page_at_budget() {
     use rmk_types::constants::BULK_KEYMAP_SIZE;
@@ -677,6 +661,57 @@ fn keymap_bulk_get_caps_page_at_budget() {
             got.actions.len(),
             BULK_KEYMAP_SIZE,
             "page capped at the per-message budget even though 48 keys remain"
+        );
+    });
+}
+
+#[test]
+fn keymap_bulk_set_malformed_element_aborts_whole_write() {
+    // A run whose range is valid but whose second element is undecodable must
+    // leave every slot untouched: the streaming write validates all elements
+    // decode (pass one) before applying any (pass two) — all-or-nothing.
+    let service = service_3x4x4();
+    link_session(&service, async |client| {
+        let good = KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A)));
+        let mut scratch = [0u8; 16];
+        let good_bytes = postcard::to_slice(&good, &mut scratch).unwrap();
+
+        // Payload: layer/row/col = 0/0/0, count = 2, one good action, then a byte
+        // that is not a valid `KeyAction` discriminant.
+        let mut payload = vec![0u8, 0, 0, 2];
+        payload.extend_from_slice(good_bytes);
+        payload.push(0x7F);
+
+        let mut frame = vec![0u8; RYNK_HEADER_SIZE];
+        frame[0..2].copy_from_slice(&Cmd::SetKeymapBulk.to_le_bytes());
+        frame[2] = 0x40;
+        frame[3..5].copy_from_slice(&(payload.len() as u16).to_le_bytes());
+        frame.extend_from_slice(&payload);
+        client.send_raw(&frame).await;
+
+        let reply = client.recv_response(0x40).await;
+        assert_eq!(
+            reply.envelope::<()>(),
+            Err(RynkError::Malformed),
+            "a malformed element rejects the whole write"
+        );
+
+        // The first, valid element must not have landed.
+        let first = client
+            .request::<_, KeyAction>(
+                Cmd::GetKeyAction,
+                0x41,
+                &KeyPosition {
+                    layer: 0,
+                    row: 0,
+                    col: 0,
+                },
+            )
+            .await;
+        assert_eq!(
+            first,
+            Ok(KeyAction::No),
+            "all-or-nothing: no element is written when a later one is malformed"
         );
     });
 }
@@ -752,7 +787,6 @@ fn combo_rejects_out_of_range() {
     });
 }
 
-#[cfg(feature = "bulk")]
 #[test]
 fn combo_bulk_round_trip_with_empty_slots() {
     use rmk_types::constants::BULK_SIZE;
@@ -792,7 +826,6 @@ fn combo_bulk_round_trip_with_empty_slots() {
     });
 }
 
-#[cfg(feature = "bulk")]
 #[test]
 fn combo_bulk_clamps_and_rejects() {
     use rmk_types::constants::BULK_SIZE;
@@ -891,7 +924,6 @@ fn morse_rejects_out_of_range() {
     });
 }
 
-#[cfg(feature = "bulk")]
 #[test]
 fn morse_bulk_round_trip() {
     use rmk_types::constants::BULK_SIZE;
@@ -932,7 +964,6 @@ fn morse_bulk_round_trip() {
     });
 }
 
-#[cfg(feature = "bulk")]
 #[test]
 fn morse_bulk_clamps_and_rejects() {
     use rmk_types::constants::BULK_SIZE;

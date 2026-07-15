@@ -24,8 +24,7 @@ pub struct SetKeyRequest {
     pub action: KeyAction,
 }
 
-// Keep the bulk cfg on this module; public payloads are re-exported below.
-#[cfg(feature = "bulk")]
+// Bulk payloads grouped here; re-exported flat below.
 mod bulk {
     use postcard::experimental::max_size::MaxSize;
     use serde::{Deserialize, Serialize};
@@ -100,7 +99,6 @@ mod bulk {
     }
 }
 
-#[cfg(feature = "bulk")]
 pub use bulk::*;
 
 #[cfg(test)]
@@ -130,7 +128,7 @@ mod tests {
     }
 
     // Firmware-only: exercises heapless keymap bulk capacity.
-    #[cfg(all(feature = "bulk", not(feature = "host")))]
+    #[cfg(not(feature = "host"))]
     mod bulk {
         use heapless::Vec;
 

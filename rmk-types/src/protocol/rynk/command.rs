@@ -10,14 +10,11 @@
 use super::endpoint::{Endpoint, Topic, max_const};
 use super::message::RynkMessage;
 use super::{
-    BehaviorConfig, DeviceCapabilities, DeviceInfo, GetEncoderRequest, GetMacroRequest, KeyPosition, LayoutChunk,
-    LockStatus, MacroData, MatrixState, ProtocolVersion, RynkError, SetComboRequest, SetEncoderRequest, SetForkRequest,
-    SetKeyRequest, SetMacroRequest, SetMorseRequest, StorageResetMode,
-};
-#[cfg(feature = "bulk")]
-use super::{
-    GetComboBulkRequest, GetComboBulkResponse, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMorseBulkRequest,
-    GetMorseBulkResponse, SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest,
+    BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
+    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
+    KeyPosition, LayoutChunk, LockStatus, MacroData, MatrixState, ProtocolVersion, RynkError, SetComboBulkRequest,
+    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
+    SetMorseBulkRequest, SetMorseRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -124,17 +121,16 @@ const fn assert_unique(cmds: &[u16]) {
 
 /// Macro for defining the endpoint (request/response) table.
 ///
-/// A row may carry an optional `@bulk` marker before its name: the endpoint
-/// is gated behind the `bulk` feature and left out of the
-/// `MAX_ENDPOINT_PAYLOAD` fold. Its payload is sized dynamically (bulk
-/// transfer, whose element count tracks `RYNK_BUFFER_SIZE`), so it must not
+/// A row may carry an optional `@bulk` marker before its name: the endpoint is
+/// left out of the `MAX_ENDPOINT_PAYLOAD` fold. Its payload is sized dynamically
+/// (bulk transfer, whose element count tracks `RYNK_BUFFER_SIZE`), so it must not
 /// drive the buffer floor — the buffer drives it, not the other way around.
 macro_rules! endpoints {
     // Fold contribution of one row: its max payload, or 0 when marked `@bulk`.
     (@floor $name:ident) => { <$name as Endpoint>::MAX_PAYLOAD };
     (@floor $marker:ident $name:ident) => { 0 };
-    // Gate one generated item on the feature named by the row's marker.
-    (@gate bulk $item:item) => { #[cfg(feature = "bulk")] $item };
+    // The `@bulk` marker only affects the fold above; items are always emitted.
+    (@gate bulk $item:item) => { $item };
     (@gate $item:item) => { $item };
     // Whether the row carries the `@bulk` marker.
     (@is_bulk bulk) => { true };
@@ -360,7 +356,6 @@ topics! {
 pub const RYNK_MAX_PAYLOAD: usize = max_const(MAX_ENDPOINT_PAYLOAD, MAX_TOPIC_PAYLOAD);
 
 // Bulk counts live here because they need payload `POSTCARD_MAX_SIZE`.
-#[cfg(feature = "bulk")]
 mod bulk_capacity {
     use postcard::experimental::max_size::MaxSize;
 
@@ -396,7 +391,6 @@ mod bulk_capacity {
     }
 }
 
-#[cfg(feature = "bulk")]
 pub use bulk_capacity::{bulk_keymap_size_for_buffer, bulk_size_for_buffer};
 
 #[cfg(test)]
@@ -478,7 +472,6 @@ mod tests {
     /// buffer, and — crucially — their worst-case encoded frame fits the buffer
     /// they were derived from. That fit is what lets the firmware serve a full
     /// bulk message out of its `RYNK_BUFFER_SIZE` buffer.
-    #[cfg(feature = "bulk")]
     #[test]
     fn bulk_counts_derive_from_buffer_and_fit() {
         use super::{bulk_keymap_size_for_buffer, bulk_size_for_buffer};
