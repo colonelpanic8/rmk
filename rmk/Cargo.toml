@@ -283,5 +283,3 @@ _ble = ["dep:trouble-host", "dep:bt-hci", "storage", "rmk-types/_ble"]
 [lib]
 # Don't run doctest for lib
 doctest = false
-[workspace.dependencies]
-embassy-nrf = { version = "0.10", features = ["nrf52840"] }
