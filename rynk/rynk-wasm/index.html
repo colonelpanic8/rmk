@@ -22,13 +22,15 @@
        (USB <b>Web Serial</b>, or BLE via <b>WebHID</b> over the OS HID link), runs
        the permanent <code>get_version</code> probe, then dynamically loads the
        version-matched <code>rynk-wasm</code> package and drives the typed client
-       over a JS byte-link bridge. Topic pushes (layer changes, WPM, …) stream live once
-       connected — marked <code>📡</code> below. WebHID reaches the firmware's
+       over a JS byte-link bridge. Topic pushes (layer changes, WPM, …) stream live
+       after you start the topic listener — marked <code>📡</code> below. WebHID reaches
+       the firmware's
        <code>RynkHidService</code> (vendor usage page <code>0xFF60</code>) and rides
        the existing OS bond, so there is no pairing prompt.</p>
     <button id="serial">Connect via Serial (USB)</button>
     <button id="ble">Connect via BLE (WebHID)</button>
     <button id="unlock" hidden>Unlock (hold keys)</button>
+    <button id="topics" hidden>Start topic listener</button>
     <pre id="log"></pre>
 
     <script type="module">
@@ -36,6 +38,7 @@
       const serialBtn = document.getElementById("serial");
       const bleBtn = document.getElementById("ble");
       const unlockBtn = document.getElementById("unlock");
+      const topicsBtn = document.getElementById("topics");
       // Use divs so object logs can be hang-indented.
       function logLine(m, hang) {
         const div = document.createElement("div");
@@ -256,16 +259,20 @@
 
       // One live session across both transports.
       let port = null, device = null, l = null, core = null, client = null, connected = false;
+      let topicsListening = false;
 
       async function teardown() {
         // Closing the link EOFs the transport, ending any parked next_event() pump.
         if (l) await l.close();
         else if (port) { try { await port.close(); } catch {} }
         port = null; device = null; l = null; core = null; client = null; connected = false;
+        topicsListening = false;
         serialBtn.textContent = "Connect via Serial (USB)";
         bleBtn.textContent = "Connect via BLE (WebHID)";
         serialBtn.disabled = false; bleBtn.disabled = false;
         unlockBtn.hidden = true; unlockBtn.disabled = false;
+        topicsBtn.hidden = true; topicsBtn.disabled = false;
+        topicsBtn.textContent = "Start topic listener";
       }
 
       // Shared connect flow; openLink must run inside the click gesture.
@@ -313,11 +320,11 @@
           await show("matrix state",    () => client.get_matrix_state());
 
           unlockBtn.hidden = false;      // offer the unlock ceremony while connected
-          log("\n— listening for topics (type on the keyboard); click to disconnect —");
+          topicsBtn.hidden = false;
+          log("\n— ready; unlock or start the topic listener; click to disconnect —");
           thisBtn.textContent = "Disconnect";
           thisBtn.disabled = false;       // re-enable so it can disconnect
           otherBtn.disabled = true;       // one transport at a time
-          pumpTopics(client);             // pull topics until the link closes
         } catch (e) {
           log("ERROR: " + e);
           console.error(e);
@@ -343,11 +350,18 @@
 
       // Poll while the user holds the physical unlock keys.
       unlockBtn.addEventListener("click", async () => {
-        if (!client) return;
+        if (!client || topicsListening) return;
+        const c = client;
         unlockBtn.disabled = true;
+        topicsBtn.disabled = true;
         try {
-          const start = await client.get_lock_status();
-          if (!start.locked) { log("· already unlocked"); return; }
+          const start = await c.get_lock_status();
+          if (!start.locked) {
+            log("\n· already unlocked — testing gated matrix access");
+            await show("lock status",  () => c.get_lock_status());
+            await show("matrix state", () => c.get_matrix_state());
+            return;
+          }
           if (start.key_positions.length === 0) {
             log("⚠ permanently locked — set [host].unlock_keys in keyboard.toml");
             return;
@@ -355,8 +369,13 @@
           log(`\n— hold ${JSON.stringify(start.key_positions)} to unlock —`);
           const deadline = Date.now() + 30000;
           for (;;) {
-            const s = await client.unlock_poll();
-            if (!s.locked) { log("✓ unlocked — retry the gated action"); break; }
+            const s = await c.unlock_poll();
+            if (!s.locked) {
+              log("✓ unlocked — testing gated matrix access");
+              await show("lock status",  () => c.get_lock_status());
+              await show("matrix state", () => c.get_matrix_state());
+              break;
+            }
             log(`  holding… ${s.remaining_keys} key(s) left`);
             if (Date.now() > deadline) { log("✗ unlock timed out"); break; }
             await new Promise((r) => setTimeout(r, 150));
@@ -364,8 +383,24 @@
         } catch (e) {
           log(`✗ unlock ${(e && e.name) || "Error"}: ${e && e.message}`);
         } finally {
-          unlockBtn.disabled = false;
+          if (client === c && connected && !topicsListening) {
+            unlockBtn.disabled = false;
+            topicsBtn.disabled = false;
+          }
         }
+      });
+
+      // `next_event()` owns the client's only mutable borrow while it waits.
+      // Start it explicitly, after request/unlock testing, and disable request UI.
+      topicsBtn.addEventListener("click", () => {
+        if (!client || topicsListening) return;
+        const c = client;
+        topicsListening = true;
+        topicsBtn.disabled = true;
+        topicsBtn.textContent = "Listening for topics";
+        unlockBtn.disabled = true;
+        log("\n— listening for topics (type on the keyboard); further requests are disabled —");
+        pumpTopics(c);
       });
 
       // Auto-reconnect only to previously granted devices. Prefer USB, then WebHID.
