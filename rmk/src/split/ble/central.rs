@@ -13,10 +13,10 @@ use trouble_host::prelude::*;
 use crate::SPLIT_CENTRAL_SLEEP_TIMEOUT_SECONDS;
 use crate::ble::{SLEEPING_STATE, update_ble_phy, update_conn_params};
 use crate::channel::FLASH_CHANNEL;
-use crate::event::{PeripheralConnectedEvent, SleepStateEvent, publish_event};
+use crate::event::{SleepStateEvent, publish_event};
 #[cfg(feature = "storage")]
 use crate::split::ble::PeerAddress;
-use crate::split::driver::{PeripheralManager, SplitDriverError, SplitReader, SplitWriter};
+use crate::split::driver::{PeripheralManager, SplitDriverError, SplitReader, SplitWriter, set_peripheral_connected};
 use crate::split::{SPLIT_MESSAGE_MAX_SIZE, SplitMessage};
 use crate::storage::FlashOperationMessage;
 
@@ -34,6 +34,13 @@ static SCANNING_MUTEX: Mutex<crate::RawMutex, ()> = Mutex::new(());
 /// - `signal(true)`: Indicates central has entered sleep mode
 /// - `signal(false)`: Indicates activity detected, wake up or reset sleep timer
 pub(crate) static CENTRAL_SLEEP: Signal<crate::RawMutex, bool> = Signal::new();
+
+/// Update `SLEEPING_STATE` and broadcast the change. The central owns the
+/// sleep value; host services read it via `crate::state::current_sleep_state`.
+pub(crate) fn set_sleeping(sleeping: bool) {
+    SLEEPING_STATE.store(sleeping, Ordering::Release);
+    publish_event(SleepStateEvent::new(sleeping));
+}
 
 /// Gatt service used in split central to send split message to peripheral
 #[gatt_service(uuid = "4dd5fbaa-18e5-4b07-bf0a-353698659946")]
@@ -201,10 +208,7 @@ pub(crate) async fn run_ble_peripheral_manager<
         };
         wait_for_stack_started().await;
 
-        publish_event(PeripheralConnectedEvent {
-            id: peri_id,
-            connected: false,
-        });
+        set_peripheral_connected(peri_id, false);
 
         // Connect to peripheral
         match with_timeout(Duration::from_secs(5), async {
@@ -225,10 +229,7 @@ pub(crate) async fn run_ble_peripheral_manager<
             Ok(Ok(conn)) => {
                 info!("Connected to peripheral {}", peri_id);
 
-                publish_event(PeripheralConnectedEvent {
-                    id: peri_id,
-                    connected: true,
-                });
+                set_peripheral_connected(peri_id, true);
 
                 if let Err(e) =
                     run_central_manager_task::<_, _, ROW, COL, ROW_OFFSET, COL_OFFSET>(peri_id, stack, &conn).await
@@ -520,17 +521,13 @@ async fn sleep_manager_task<
 
             // Update connection parameters
             update_conn_params(stack, conn, &conn_params).await;
-            SLEEPING_STATE.store(true, Ordering::Release);
-
-            publish_event(SleepStateEvent::new(true));
+            set_sleeping(true);
         } else {
             // Wait for activity to wake up (false signal means activity/wakeup)
             let signal_value = CENTRAL_SLEEP.wait().await;
             if !signal_value {
                 info!("Waking up from sleep mode due to activity");
-                SLEEPING_STATE.store(false, Ordering::Release);
-
-                publish_event(SleepStateEvent::new(false));
+                set_sleeping(false);
 
                 // Restore normal connection parameters
                 update_conn_params(stack, conn, &defaul_central_conn_param()).await;
