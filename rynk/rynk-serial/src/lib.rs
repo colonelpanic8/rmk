@@ -138,8 +138,7 @@ mod tests {
     use std::time::Duration;
 
     use rmk_types::protocol::rynk::{
-        Cmd, DeviceCapabilities, ProtocolVersion, RYNK_HEADER_SIZE, RYNK_MIN_BUFFER_SIZE, RynkError, RynkHeader,
-        RynkMessage,
+        Cmd, DeviceCapabilities, ProtocolVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage,
     };
     use rynk::Client;
     use serde::Serialize;
@@ -170,7 +169,8 @@ mod tests {
 
     /// Header + postcard payload, framed as the firmware sends it.
     fn frame<T: Serialize>(cmd: Cmd, seq: u8, value: &T) -> Vec<u8> {
-        let mut buf = vec![0u8; RYNK_MIN_BUFFER_SIZE];
+        // Scratch large enough for any test frame.
+        let mut buf = vec![0u8; 4096];
         let msg = RynkMessage::build(&mut buf, cmd, seq, value).unwrap();
         msg.frame().to_vec()
     }

@@ -24,8 +24,6 @@ pub struct SetKeyRequest {
     pub action: KeyAction,
 }
 
-// Keep the bulk cfg on this module; public payloads are re-exported below.
-#[cfg(feature = "bulk")]
 mod bulk {
     use postcard::experimental::max_size::MaxSize;
     use serde::{Deserialize, Serialize};
@@ -64,9 +62,11 @@ mod bulk {
         pub actions: BulkActions,
     }
 
-    // Bulk endpoints size from the buffer; this only satisfies `Endpoint: MaxSize`.
+    // Firmware sizes its fixed buffer from this exact bound; host builds leave
+    // the field unbounded and never need `MaxSize`.
+    #[cfg(not(feature = "host"))]
     impl MaxSize for GetKeymapBulkResponse {
-        const POSTCARD_MAX_SIZE: usize = crate::constants::RYNK_BUFFER_SIZE;
+        const POSTCARD_MAX_SIZE: usize = crate::heapless_vec_max_size::<KeyAction, BULK_KEYMAP_SIZE>();
     }
 
     impl GetKeymapBulkResponse {
@@ -95,12 +95,14 @@ mod bulk {
         pub actions: BulkActions,
     }
 
+    #[cfg(not(feature = "host"))]
     impl MaxSize for SetKeymapBulkRequest {
-        const POSTCARD_MAX_SIZE: usize = crate::constants::RYNK_BUFFER_SIZE;
+        // layer + start_row + start_col, then the bounded actions vector.
+        const POSTCARD_MAX_SIZE: usize =
+            3 * <u8 as MaxSize>::POSTCARD_MAX_SIZE + crate::heapless_vec_max_size::<KeyAction, BULK_KEYMAP_SIZE>();
     }
 }
 
-#[cfg(feature = "bulk")]
 pub use bulk::*;
 
 #[cfg(test)]
@@ -130,7 +132,7 @@ mod tests {
     }
 
     // Firmware-only: exercises heapless keymap bulk capacity.
-    #[cfg(all(feature = "bulk", not(feature = "host")))]
+    #[cfg(not(feature = "host"))]
     mod bulk {
         use heapless::Vec;
 

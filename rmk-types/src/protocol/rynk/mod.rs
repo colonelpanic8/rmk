@@ -54,11 +54,9 @@ mod payload;
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub use self::command::{Cmd, RYNK_MAX_PAYLOAD, TopicEvent};
-#[cfg(feature = "bulk")]
-pub use self::command::{bulk_keymap_size_for_buffer, bulk_size_for_buffer};
+pub use self::command::{Cmd, TopicEvent, bulk_keymap_size_for_buffer, bulk_size_for_buffer};
 pub use self::error::RynkError;
-pub use self::message::{RYNK_HEADER_SIZE, RYNK_MIN_BUFFER_SIZE, RynkHeader, RynkMessage};
+pub use self::message::{RYNK_HEADER_SIZE, RynkHeader, RynkMessage};
 pub use self::payload::*;
 
 /// Largest single GATT write/notification on the Rynk BLE characteristics.

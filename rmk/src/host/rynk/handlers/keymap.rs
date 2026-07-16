@@ -1,21 +1,18 @@
 //! Keymap and encoder handlers (encoder is part of keymap's `0x01xx` Cmd group).
 
 use rmk_types::action::{EncoderAction, KeyAction};
-#[cfg(feature = "bulk")]
 use rmk_types::constants::BULK_KEYMAP_SIZE;
 use rmk_types::protocol::rynk::command::{
-    GetDefaultLayer, GetEncoderAction, GetKeyAction, SetDefaultLayer, SetEncoderAction, SetKeyAction,
+    GetDefaultLayer, GetEncoderAction, GetKeyAction, GetKeymapBulk, SetDefaultLayer, SetEncoderAction, SetKeyAction,
+    SetKeymapBulk,
 };
-#[cfg(feature = "bulk")]
-use rmk_types::protocol::rynk::command::{GetKeymapBulk, SetKeymapBulk};
-use rmk_types::protocol::rynk::{GetEncoderRequest, KeyPosition, RynkError, SetEncoderRequest, SetKeyRequest};
-#[cfg(feature = "bulk")]
-use rmk_types::protocol::rynk::{GetKeymapBulkRequest, GetKeymapBulkResponse, SetKeymapBulkRequest};
+use rmk_types::protocol::rynk::{
+    GetEncoderRequest, GetKeymapBulkRequest, KeyPosition, RynkError, RynkMessage, SetEncoderRequest, SetKeyRequest,
+};
 
 use super::super::RynkService;
-use super::Handle;
-#[cfg(feature = "bulk")]
-use super::bulk::{bulk_page, bulk_write_start};
+use super::bulk::{bulk_page, bulk_write_start, take_element, take_seq_len, validate_bulk_elements};
+use super::{Handle, HandleBulk};
 
 impl Handle<GetKeyAction> for RynkService<'_> {
     async fn handle(&self, pos: KeyPosition) -> Result<KeyAction, RynkError> {
@@ -90,7 +87,6 @@ impl RynkService<'_> {
     }
 }
 
-#[cfg(feature = "bulk")]
 impl RynkService<'_> {
     /// Validate a bulk keymap start position against the live geometry and
     /// return its flat, row-major, layer-major key index.
@@ -105,33 +101,39 @@ impl RynkService<'_> {
     }
 }
 
-#[cfg(feature = "bulk")]
-impl Handle<GetKeymapBulk> for RynkService<'_> {
-    async fn handle(&self, req: GetKeymapBulkRequest) -> Result<GetKeymapBulkResponse, RynkError> {
+impl HandleBulk<GetKeymapBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+        let req = msg.decode_request::<GetKeymapBulkRequest>()?;
         // From the start key the page reads forward through the flat keymap,
         // crossing row and layer boundaries freely, and stops at the keymap's end.
         let start = self.keymap_flat_start(req.layer, req.start_row, req.start_col)?;
         let (rows, cols, num_layers) = self.ctx.keymap_dimensions();
         let page = bulk_page(start, BULK_KEYMAP_SIZE, num_layers * rows * cols);
-        Ok(GetKeymapBulkResponse::from_iter_bounded(
-            page.map(|offset| self.ctx.get_action_flat(offset)),
-        ))
+        let count = page.len();
+        msg.encode_bulk_ok(count, page.map(|offset| self.ctx.get_action_flat(offset)))
     }
 }
 
-#[cfg(feature = "bulk")]
-impl Handle<SetKeymapBulk> for RynkService<'_> {
-    async fn handle(&self, req: SetKeymapBulkRequest) -> Result<(), RynkError> {
-        // Validate the whole run first, so it applies whole or not at all.
-        let start = self.keymap_flat_start(req.layer, req.start_row, req.start_col)?;
+impl HandleBulk<SetKeymapBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+        let ([layer, start_row, start_col], rest) =
+            postcard::take_from_bytes::<[u8; 3]>(msg.payload()).map_err(|_| RynkError::Malformed)?;
+        let (count, elements) = take_seq_len(rest)?;
+
+        let start = self.keymap_flat_start(layer, start_row, start_col)?;
         let (rows, cols, num_layers) = self.ctx.keymap_dimensions();
-        let start = bulk_write_start(start, req.actions.len(), num_layers * rows * cols)?;
-        for (offset, action) in (start..).zip(req.actions.iter()) {
+        let start = bulk_write_start(start, count, num_layers * rows * cols)?;
+        validate_bulk_elements::<KeyAction>(elements, count)?;
+
+        // Bulk order advances columns, then rows, then layers.
+        let mut cursor = elements;
+        for offset in start..start + count {
+            let action = take_element::<KeyAction>(&mut cursor)?;
             let layer = (offset / (rows * cols)) as u8;
             let row = (offset / cols % rows) as u8;
             let col = (offset % cols) as u8;
-            self.ctx.set_action(layer, row, col, *action).await;
+            self.ctx.set_action(layer, row, col, action).await;
         }
-        Ok(())
+        msg.encode_response(&())
     }
 }

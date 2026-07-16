@@ -1,17 +1,9 @@
 //! Rynk command handlers.
-//!
-//! Each command row implements [`Handle`] on
-//! [`RynkService`](super::RynkService), split across this directory by
-//! domain. A handler is a pure request → response function; the trait's
-//! provided [`handle_message`](Handle::handle_message) carries the shared
-//! wire glue, so implementations never touch the wire view and cannot decode
-//! or reply under the wrong `Cmd`.
 
 use rmk_types::protocol::rynk::endpoint::Endpoint;
 use rmk_types::protocol::rynk::{RynkError, RynkMessage};
 
 pub(crate) mod behavior;
-#[cfg(feature = "bulk")]
 mod bulk;
 pub(crate) mod combo;
 pub(crate) mod connection;
@@ -23,20 +15,39 @@ pub(crate) mod morse;
 pub(crate) mod status;
 pub(crate) mod system;
 
-/// One typed handler per command row: implementors define the bare
-/// [`handle`](Self::handle) primitive; dispatch calls the provided
-/// [`handle_message`](Self::handle_message) wrapper (the `Read::read` /
-/// `read_exact` naming convention).
+/// Fixed-size endpoints: a request → response function. The [`Serve`] blanket
+/// impl adds the decode → handle → encode wire glue.
 pub(super) trait Handle<E: Endpoint> {
-    /// Compute the command's response — pure request → response logic, the
-    /// wire never appears here.
     async fn handle(&self, req: E::Request) -> Result<E::Response, RynkError>;
+}
 
-    /// [`handle`](Self::handle) at the wire level, in place:
-    /// decode`E::Request`, await the handler, and encode the reply envelope.
-    async fn handle_message(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+/// Bulk endpoints stream a page straight through the session buffer, so no `Vec`
+/// is ever materialized. Implemented instead of [`Handle`].
+pub(super) trait HandleBulk<E: Endpoint> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError>;
+}
+
+/// Dispatch-mode markers so the two [`Serve`] blanket impls don't overlap; bounds
+/// alone can't disambiguate blanket impls. Inferred as `_`, never named.
+pub(super) struct Fixed;
+pub(super) struct Bulk;
+
+/// The uniform surface the dispatcher calls, blanket-derived from [`Handle`]
+/// (`Fixed`) or [`HandleBulk`] (`Bulk`). Handlers never implement it directly.
+pub(super) trait Serve<E: Endpoint, Mode> {
+    async fn serve(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError>;
+}
+
+impl<E: Endpoint, T: Handle<E>> Serve<E, Fixed> for T {
+    async fn serve(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let req = msg.decode_request::<E::Request>()?;
         let resp = self.handle(req).await?;
         msg.encode_response(&resp)
+    }
+}
+
+impl<E: Endpoint, T: HandleBulk<E>> Serve<E, Bulk> for T {
+    async fn serve(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+        self.handle_bulk(msg).await
     }
 }

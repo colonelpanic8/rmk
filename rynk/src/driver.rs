@@ -30,8 +30,7 @@ use std::collections::VecDeque;
 use embedded_io_async::{Read, Write};
 use rmk_types::protocol::rynk::endpoint::Endpoint;
 use rmk_types::protocol::rynk::{
-    Cmd, DeviceCapabilities, ProtocolVersion, RYNK_HEADER_SIZE, RYNK_MIN_BUFFER_SIZE, RynkError, RynkHeader,
-    RynkMessage,
+    Cmd, DeviceCapabilities, ProtocolVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -77,12 +76,10 @@ pub enum RynkHostError {
     /// Firmware accepted the request but answered with an error.
     #[error("device rejected {0:?}")]
     Rejected(RynkError),
-    #[error("request encode failed for {0:?} (request exceeds tx buffer?)")]
+    /// The request did not fit the device's advertised buffer, or failed to
+    /// encode. The send scratch is sized to the device's `max_payload_size`.
+    #[error("request {0:?} does not fit the device buffer (or failed to encode)")]
     Encode(Cmd),
-    /// Encoded frame exceeds the device's advertised
-    /// [`max_payload_size`](DeviceCapabilities::max_payload_size).
-    #[error("request {cmd:?} frame is {frame_len} bytes; device accepts at most {max}")]
-    TooLarge { cmd: Cmd, frame_len: usize, max: usize },
     #[error("response decode failed for {cmd:?}: {source}")]
     Deserialize { cmd: Cmd, source: postcard::Error },
     /// `GetLayout` blob inflate or decode failed.
@@ -92,8 +89,6 @@ pub enum RynkHostError {
     TrailingBytes { cmd: Cmd },
     #[error("response cmd mismatch: sent {sent:?}, got {got:?}")]
     CmdMismatch { sent: Cmd, got: Cmd },
-    #[error("inbound frame is {frame_len} bytes; negotiated maximum is {max}")]
-    InboundTooLarge { frame_len: usize, max: usize },
     /// A topic-range `Cmd` was passed to a request method.
     #[error("{0:?} is a topic, not a request")]
     TopicCmd(Cmd),
@@ -114,12 +109,10 @@ impl From<RynkHostError> for wasm_bindgen::JsValue {
             RynkHostError::Unsupported(..) => "Unsupported",
             RynkHostError::VersionMismatch { .. } => "VersionMismatch",
             RynkHostError::Encode(_) => "RequestEncodeError",
-            RynkHostError::TooLarge { .. } => "RequestTooLarge",
             RynkHostError::Deserialize { .. } => "ResponseDecodeError",
             RynkHostError::Layout(_) => "LayoutDecodeError",
             RynkHostError::TrailingBytes { .. } => "ResponseTrailingBytes",
             RynkHostError::CmdMismatch { .. } => "ResponseCommandMismatch",
-            RynkHostError::InboundTooLarge { .. } => "ResponseTooLarge",
             RynkHostError::TopicCmd(_) => "InvalidRequestCommand",
         };
         let err = js_sys::Error::new(&e.to_string());
@@ -154,7 +147,9 @@ pub struct Client<T: Read + Write> {
     events_dropped: u64,
     /// Reusable TX scratch.
     tx_buf: Vec<u8>,
-    /// Handshake capability snapshot, initialized to the protocol floor.
+    /// Device capabilities from the handshake. `Default` (all-zero) until
+    /// `connect` fills it; only `max_payload_size` is read before then, and only
+    /// to bound outbound frames — the host reads inbound frames unbounded.
     capabilities: DeviceCapabilities,
 }
 
@@ -171,16 +166,15 @@ impl<T: Read + Write> Client<T> {
             receive_in_flight: false,
             events: VecDeque::new(),
             events_dropped: 0,
-            tx_buf: vec![0u8; RYNK_MIN_BUFFER_SIZE],
-            capabilities: DeviceCapabilities {
-                max_payload_size: (RYNK_MIN_BUFFER_SIZE - RYNK_HEADER_SIZE) as u16,
-                ..Default::default()
-            },
+            // Handshake requests carry no payload; grow after `GetCapabilities`.
+            tx_buf: vec![0u8; RYNK_HEADER_SIZE],
+            capabilities: DeviceCapabilities::default(),
         }
     }
 
-    /// Largest frame either side may send: header + the device's advertised
-    /// `max_payload_size` (the protocol floor until the handshake fills it).
+    /// Largest frame the host may send: header + the device's advertised
+    /// `max_payload_size`. Zero until the handshake fills it, which still admits
+    /// the empty-payload handshake requests.
     fn max_frame_size(&self) -> usize {
         RYNK_HEADER_SIZE + self.capabilities.max_payload_size as usize
     }
@@ -330,12 +324,10 @@ impl<T: Read + Write> Client<T> {
         }
         let seq = self.next_seq;
         self.next_seq = self.next_seq.checked_add(1).unwrap_or(1);
-        let max = self.max_frame_size();
+        // The scratch is sized to the device's advertised buffer, so a request
+        // too large for the device fails to encode here — a local reject that
+        // leaves the link intact.
         let msg = RynkMessage::build(&mut self.tx_buf, cmd, seq, req).map_err(|_| RynkHostError::Encode(cmd))?;
-        let frame_len = msg.frame_len();
-        if frame_len > max {
-            return Err(RynkHostError::TooLarge { cmd, frame_len, max });
-        }
         // If dropped mid-write, the next wire op marks the link dead.
         self.send_in_flight = true;
         let result = self.transport.write_all(msg.frame()).await;
@@ -364,14 +356,11 @@ impl<T: Read + Write> Client<T> {
         loop {
             let header = self.rx_buf.first_chunk::<RYNK_HEADER_SIZE>().map(RynkHeader::parse);
             if let Some(header) = header {
+                // Frames are read by their declared length and routed; the host
+                // never rejects one by size. Replies are correlated by SEQ and
+                // decoded; topics are best-effort (decode-or-Unknown). The u16
+                // LEN already caps a single frame at ~64 KB.
                 let frame_len = header.frame_len();
-
-                let max = self.max_frame_size();
-                if frame_len > max {
-                    self.dead = true;
-                    return Err(RynkHostError::InboundTooLarge { frame_len, max });
-                }
-
                 if self.rx_buf.len() >= frame_len {
                     let payload = self.rx_buf[RYNK_HEADER_SIZE..frame_len].to_vec();
                     self.rx_buf.drain(..frame_len);
@@ -478,12 +467,18 @@ mod tests {
     }
 
     fn raw_client(steps: Vec<Step>) -> Client<MockTransport> {
-        Client::new(MockTransport::new(steps))
+        // Skip the handshake but give the client a generous send budget and a
+        // scratch sized to it, so request-sending tests work without a `connect`.
+        // Other capabilities stay at their defaults, as before.
+        let mut c = Client::new(MockTransport::new(steps));
+        c.capabilities.max_payload_size = 4096;
+        c.tx_buf.resize(c.max_frame_size(), 0);
+        c
     }
 
     /// A bare frame: header + postcard(value). Used for raw headers and topics.
     fn frame<T: Serialize>(cmd: Cmd, seq: u8, value: &T) -> Vec<u8> {
-        let mut buf = vec![0u8; RYNK_MIN_BUFFER_SIZE];
+        let mut buf = vec![0u8; READ_SCRATCH_SIZE];
         let msg = RynkMessage::build(&mut buf, cmd, seq, value).unwrap();
         msg.frame().to_vec()
     }
@@ -608,19 +603,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oversized_inbound_frame_is_fatal() {
-        let mut oversized_then_valid = header(Cmd::GetWpm.raw(), 3, u16::MAX);
-        oversized_then_valid.extend_from_slice(&reply(Cmd::GetWpm, 3, 42u16));
+    async fn oversized_inbound_topic_is_read_not_fatal() {
+        // A topic larger than the negotiated max_payload_size (256) is no longer
+        // rejected by size: the host reads it by length and surfaces it, link intact.
+        let mut big = header(0x80ff, 0, 300);
+        big.extend_from_slice(&vec![0xAB; 300]);
         let t = MockTransport::new(vec![
             Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
             Step::Chunk(reply(Cmd::GetCapabilities, 2, caps())),
-            Step::Chunk(oversized_then_valid),
+            Step::Chunk(big),
+            Step::Chunk(reply(Cmd::GetWpm, 3, 7u16)),
         ]);
         let mut client = Client::connect(t).await.unwrap();
-        let result = client.get_wpm().await;
-        assert!(matches!(result, Err(RynkHostError::InboundTooLarge { .. })));
-        assert!(!client.is_alive());
-        assert!(matches!(client.get_wpm().await, Err(RynkHostError::Disconnected)));
+        let ev = client.next_event().await.unwrap();
+        assert!(
+            matches!(ev, IncomingTopic::Unknown(ref f) if f.cmd == Cmd::from_raw(0x80ff) && f.payload.len() == 300)
+        );
+        assert!(client.is_alive());
+        assert_eq!(client.get_wpm().await.unwrap(), 7);
     }
 
     #[tokio::test]
@@ -794,13 +794,7 @@ mod tests {
         ]);
         let mut client = Client::connect(t).await.unwrap();
         let r = client.set_key(0, 0, 0, KeyAction::Morse(3)).await;
-        assert!(matches!(
-            r,
-            Err(RynkHostError::TooLarge {
-                cmd: Cmd::SetKeyAction,
-                ..
-            })
-        ));
+        assert!(matches!(r, Err(RynkHostError::Encode(Cmd::SetKeyAction))));
         assert!(
             client.is_alive(),
             "a locally-rejected oversized request must not kill the link"

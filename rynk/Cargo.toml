@@ -32,7 +32,6 @@ rmk = { path = "../rmk", default-features = false, features = [
     "log",
     "rynk",
     "storage",
-    "bulk",
     "_ble",
     "split",
     "steno",

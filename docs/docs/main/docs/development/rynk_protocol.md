@@ -19,7 +19,7 @@ Every transport (USB CDC, BLE GATT, BLE HID) carries the same frame — a 5-byte
 - **Requests** use CMD `0x0000..=0x7FFF`. The response echoes CMD and SEQ and wraps its payload in postcard `Result<T, RynkError>` (`T = ()` for `Set*`).
 - **Topics** use CMD `0x8000..=0xFFFF` (server → host push, SEQ `0`, bare payload).
 
-Which commands a firmware answers depends on the RMK Cargo features it was built with: a row with no **Feature** is present once `rynk` is on, and the rest need their feature (`_ble`, `bulk`, `split`, …) compiled in. A command the firmware wasn't built with answers `UnknownCmd`.
+Which commands a firmware answers depends on the RMK Cargo features it was built with: a row with no **Feature** is present once `rynk` is on, and the rest need their feature (`_ble`, `split`, …) compiled in. A command the firmware wasn't built with answers `UnknownCmd`.
 
 ## Endpoints
 
@@ -41,18 +41,18 @@ Which commands a firmware answers depends on the RMK Cargo features it was built
 | `0x0104` | `SetDefaultLayer`     | `u8`                   | `()`                    |         |                                                                              |
 | `0x0105` | `GetEncoderAction`    | `GetEncoderRequest`    | `EncoderAction`         |         |                                                                              |
 | `0x0106` | `SetEncoderAction`    | `SetEncoderRequest`    | `()`                    |         |                                                                              |
-| `0x0107` | `GetKeymapBulk`       | `GetKeymapBulkRequest` | `GetKeymapBulkResponse` | `bulk`  |                                                                              |
-| `0x0108` | `SetKeymapBulk`       | `SetKeymapBulkRequest` | `()`                    | `bulk`  |                                                                              |
+| `0x0107` | `GetKeymapBulk`       | `GetKeymapBulkRequest` | `GetKeymapBulkResponse` |         |                                                                              |
+| `0x0108` | `SetKeymapBulk`       | `SetKeymapBulkRequest` | `()`                    |         |                                                                              |
 | `0x0201` | `GetMacro`            | `GetMacroRequest`      | `MacroData`             |         |                                                                              |
 | `0x0202` | `SetMacro`            | `SetMacroRequest`      | `()`                    |         |                                                                              |
 | `0x0301` | `GetCombo`            | `u8`                   | `Combo`                 |         |                                                                              |
 | `0x0302` | `SetCombo`            | `SetComboRequest`      | `()`                    |         |                                                                              |
-| `0x0303` | `GetComboBulk`        | `GetComboBulkRequest`  | `GetComboBulkResponse`  | `bulk`  |                                                                              |
-| `0x0304` | `SetComboBulk`        | `SetComboBulkRequest`  | `()`                    | `bulk`  |                                                                              |
+| `0x0303` | `GetComboBulk`        | `GetComboBulkRequest`  | `GetComboBulkResponse`  |         |                                                                              |
+| `0x0304` | `SetComboBulk`        | `SetComboBulkRequest`  | `()`                    |         |                                                                              |
 | `0x0401` | `GetMorse`            | `u8`                   | `Morse`                 |         |                                                                              |
 | `0x0402` | `SetMorse`            | `SetMorseRequest`      | `()`                    |         |                                                                              |
-| `0x0403` | `GetMorseBulk`        | `GetMorseBulkRequest`  | `GetMorseBulkResponse`  | `bulk`  |                                                                              |
-| `0x0404` | `SetMorseBulk`        | `SetMorseBulkRequest`  | `()`                    | `bulk`  |                                                                              |
+| `0x0403` | `GetMorseBulk`        | `GetMorseBulkRequest`  | `GetMorseBulkResponse`  |         |                                                                              |
+| `0x0404` | `SetMorseBulk`        | `SetMorseBulkRequest`  | `()`                    |         |                                                                              |
 | `0x0501` | `GetFork`             | `u8`                   | `Fork`                  |         |                                                                              |
 | `0x0502` | `SetFork`             | `SetForkRequest`       | `()`                    |         |                                                                              |
 | `0x0601` | `GetBehaviorConfig`   | `()`                   | `BehaviorConfig`        |         |                                                                              |

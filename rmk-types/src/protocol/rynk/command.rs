@@ -7,17 +7,17 @@
 //! - `0x8000..=0xFFFF` (Bit 15 = 1): Topics (Server -> Host push).
 //!
 
-use super::endpoint::{Endpoint, Topic, max_const};
+#[cfg(not(feature = "host"))]
+use postcard::experimental::max_size::MaxSize;
+
+use super::endpoint::{Endpoint, Topic};
 use super::message::RynkMessage;
 use super::{
-    BehaviorConfig, DeviceCapabilities, DeviceInfo, GetEncoderRequest, GetMacroRequest, KeyPosition, LayoutChunk,
-    LockStatus, MacroData, MatrixState, ProtocolVersion, RynkError, SetComboRequest, SetEncoderRequest, SetForkRequest,
-    SetKeyRequest, SetMacroRequest, SetMorseRequest, StorageResetMode,
-};
-#[cfg(feature = "bulk")]
-use super::{
-    GetComboBulkRequest, GetComboBulkResponse, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMorseBulkRequest,
-    GetMorseBulkResponse, SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest,
+    BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
+    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
+    KeyPosition, LayoutChunk, LockStatus, MacroData, MatrixState, ProtocolVersion, RynkError, SetComboBulkRequest,
+    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
+    SetMorseBulkRequest, SetMorseRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -31,6 +31,16 @@ use crate::led_indicator::LedIndicator;
 use crate::morse::Morse;
 #[cfg(feature = "split")]
 use crate::protocol::rynk::PeripheralStatus;
+
+/// `const fn` max/min used by the firmware payload-size fold and the bulk
+/// capacity math below.
+pub(crate) const fn max_const(a: usize, b: usize) -> usize {
+    if a > b { a } else { b }
+}
+
+pub(crate) const fn min_const(a: usize, b: usize) -> usize {
+    if a < b { a } else { b }
+}
 
 /// CMD high bit marking a topic (server → host push).
 const RYNK_TOPIC_BIT: u16 = 0x8000;
@@ -94,8 +104,6 @@ pub struct EndpointMeta {
     pub response: &'static str,
     /// Stringified row attributes: doc comments and the `cfg` gate.
     pub attrs: &'static str,
-    /// Carries the `@bulk` marker (gated behind the `bulk` feature).
-    pub bulk: bool,
 }
 
 /// Push counterpart of [`EndpointMeta`]; test-only, same rules.
@@ -124,46 +132,45 @@ const fn assert_unique(cmds: &[u16]) {
 
 /// Macro for defining the endpoint (request/response) table.
 ///
-/// A row may carry an optional `@bulk` marker before its name: the endpoint
-/// is gated behind the `bulk` feature and left out of the
-/// `MAX_ENDPOINT_PAYLOAD` fold. Its payload is sized dynamically (bulk
-/// transfer, whose element count tracks `RYNK_BUFFER_SIZE`), so it must not
-/// drive the buffer floor — the buffer drives it, not the other way around.
+/// Rows are uniform `Name = cmd: Req => Resp;`. Under non-`host` builds the table
+/// folds every request and wrapped response into `MAX_ENDPOINT_PAYLOAD`,
+/// which the firmware buffer must hold; host builds skip the fold, since bulk
+/// payloads are unbounded there and carry no `MaxSize`.
 macro_rules! endpoints {
-    // Fold contribution of one row: its max payload, or 0 when marked `@bulk`.
-    (@floor $name:ident) => { <$name as Endpoint>::MAX_PAYLOAD };
-    (@floor $marker:ident $name:ident) => { 0 };
-    // Gate one generated item on the feature named by the row's marker.
-    (@gate bulk $item:item) => { #[cfg(feature = "bulk")] $item };
-    (@gate $item:item) => { $item };
-    // Whether the row carries the `@bulk` marker.
-    (@is_bulk bulk) => { true };
-    (@is_bulk) => { false };
-    ($( $(#[$meta:meta])* $(@ $marker:ident)? $name:ident = $cmd:literal : $req:ty => $resp:ty; )*) => {
+    // Per-row size: the larger of its request and its wrapped response.
+    (@size $req:ty, $resp:ty) => {
+        max_const(
+            <$req as MaxSize>::POSTCARD_MAX_SIZE,
+            <Result<$resp, RynkError> as MaxSize>::POSTCARD_MAX_SIZE,
+        )
+    };
+    ($( $(#[$meta:meta])* $name:ident = $cmd:literal : $req:ty => $resp:ty; )*) => {
         #[allow(non_upper_case_globals)]
         impl Cmd {
-            $( endpoints!(@gate $($marker)? $(#[$meta])* pub const $name: Self = Cmd::from_raw($cmd);); )*
+            $( $(#[$meta])* pub const $name: Self = Cmd::from_raw($cmd); )*
         }
         $(
-            endpoints!(@gate $($marker)? $(#[$meta])* pub enum $name {});
-            endpoints!(@gate $($marker)?
-                $(#[$meta])*
-                impl Endpoint for $name {
-                    const CMD: Cmd = Cmd::$name;
-                    type Request = $req;
-                    type Response = $resp;
-                }
-            );
+            $(#[$meta])*
+            pub enum $name {}
+            $(#[$meta])*
+            impl Endpoint for $name {
+                const CMD: Cmd = Cmd::$name;
+                type Request = $req;
+                type Response = $resp;
+            }
         )*
         const _: () = {
             $( core::assert!(!Cmd::from_raw($cmd).is_topic(), "request CMD value in the topic range"); )*
             assert_unique(&[$($cmd),*]);
         };
-        /// Largest non-bulk payload across the endpoint table — the buffer floor.
+        /// Largest request-or-wrapped-response across the whole endpoint table
+        /// (bulk included) — folded firmware-side only, where every payload is a
+        /// bounded type with a `MaxSize`.
+        #[cfg(not(feature = "host"))]
         #[allow(unused_doc_comments)] // row docs also land on the fold statements
         const MAX_ENDPOINT_PAYLOAD: usize = {
             let mut m = 0;
-            $( $(#[$meta])* { m = max_const(m, endpoints!(@floor $($marker)? $name)); } )*
+            $( $(#[$meta])* { m = max_const(m, endpoints!(@size $req, $resp)); } )*
             m
         };
         /// Endpoint rows as data, in table order — the protocol-reference source
@@ -176,7 +183,6 @@ macro_rules! endpoints {
                 request: stringify!($req),
                 response: stringify!($resp),
                 attrs: stringify!($(#[$meta])*),
-                bulk: endpoints!(@is_bulk $($marker)?),
             }, )*
         ];
     };
@@ -202,11 +208,13 @@ macro_rules! topics {
             $( core::assert!(Cmd::from_raw($cmd).is_topic(), "topic CMD value outside the topic range"); )*
             assert_unique(&[$($cmd),*]);
         };
-        /// Largest payload across the whole topic table.
+        /// Largest payload across the whole topic table — folded firmware-side
+        /// only, to feed the firmware buffer assertion.
+        #[cfg(not(feature = "host"))]
         #[allow(unused_doc_comments)]
         const MAX_TOPIC_PAYLOAD: usize = {
             let mut m = 0;
-            $( $(#[$meta])* { m = max_const(m, <$name as Topic>::MAX_PAYLOAD); } )*
+            $( $(#[$meta])* { m = max_const(m, <$payload as MaxSize>::POSTCARD_MAX_SIZE); } )*
             m
         };
         /// Topic rows as data, in table order (see [`ENDPOINT_META`]).
@@ -288,8 +296,8 @@ endpoints! {
     SetDefaultLayer = 0x0104: u8 => ();
     GetEncoderAction = 0x0105: GetEncoderRequest => EncoderAction;
     SetEncoderAction = 0x0106: SetEncoderRequest => ();
-    @bulk GetKeymapBulk = 0x0107: GetKeymapBulkRequest => GetKeymapBulkResponse;
-    @bulk SetKeymapBulk = 0x0108: SetKeymapBulkRequest => ();
+    GetKeymapBulk = 0x0107: GetKeymapBulkRequest => GetKeymapBulkResponse;
+    SetKeymapBulk = 0x0108: SetKeymapBulkRequest => ();
 
     // Macro (0x02xx).
     GetMacro = 0x0201: GetMacroRequest => MacroData;
@@ -298,14 +306,14 @@ endpoints! {
     // Combo (0x03xx).
     GetCombo = 0x0301: u8 => Combo;
     SetCombo = 0x0302: SetComboRequest => ();
-    @bulk GetComboBulk = 0x0303: GetComboBulkRequest => GetComboBulkResponse;
-    @bulk SetComboBulk = 0x0304: SetComboBulkRequest => ();
+    GetComboBulk = 0x0303: GetComboBulkRequest => GetComboBulkResponse;
+    SetComboBulk = 0x0304: SetComboBulkRequest => ();
 
     // Morse (0x04xx).
     GetMorse = 0x0401: u8 => Morse;
     SetMorse = 0x0402: SetMorseRequest => ();
-    @bulk GetMorseBulk = 0x0403: GetMorseBulkRequest => GetMorseBulkResponse;
-    @bulk SetMorseBulk = 0x0404: SetMorseBulkRequest => ();
+    GetMorseBulk = 0x0403: GetMorseBulkRequest => GetMorseBulkResponse;
+    SetMorseBulk = 0x0404: SetMorseBulkRequest => ();
 
     // Fork (0x05xx).
     GetFork = 0x0501: u8 => Fork;
@@ -353,19 +361,29 @@ topics! {
     BatteryStatusChange = 0x8006: BatteryStatus;
 }
 
-/// Maximum postcard-encoded payload size across every non-`@bulk` Rynk
-/// message, folded from the tables above so adding a command can never
-/// under-size the buffer. Bulk endpoints are excluded (see [`endpoints`]);
-/// their size derives from the buffer instead.
-pub const RYNK_MAX_PAYLOAD: usize = max_const(MAX_ENDPOINT_PAYLOAD, MAX_TOPIC_PAYLOAD);
+/// Largest rynk frame payload the firmware must buffer, folded from the tables
+/// above (bulk included) so adding a command can never under-size the buffer.
+/// Firmware-only: on `host` builds the bulk payloads are unbounded (no `MaxSize`).
+#[cfg(not(feature = "host"))]
+const FIRMWARE_MAX_PAYLOAD: usize = max_const(MAX_ENDPOINT_PAYLOAD, MAX_TOPIC_PAYLOAD);
+
+/// The configured buffer must hold every rynk frame this firmware build can send
+/// or receive, header included. Both operands are rmk-types constants — the
+/// buffer is generated from `keyboard.toml`, the fold from the command tables —
+/// so this self-check needs no cross-crate plumbing. `host` builds have unbounded
+/// bulk payloads (no `MaxSize`), so the fold and this assert are absent there.
+#[cfg(not(feature = "host"))]
+const _: () = core::assert!(
+    crate::constants::RYNK_BUFFER_SIZE >= super::message::RYNK_HEADER_SIZE + FIRMWARE_MAX_PAYLOAD,
+    "rynk_buffer_size is too small to hold the largest rynk frame (including bulk); increase it"
+);
 
 // Bulk counts live here because they need payload `POSTCARD_MAX_SIZE`.
-#[cfg(feature = "bulk")]
 mod bulk_capacity {
     use postcard::experimental::max_size::MaxSize;
 
-    use super::super::endpoint::{max_const, min_const};
     use super::super::message::RYNK_HEADER_SIZE;
+    use super::{max_const, min_const};
     use crate::action::KeyAction;
     use crate::combo::Combo;
     use crate::morse::Morse;
@@ -396,7 +414,6 @@ mod bulk_capacity {
     }
 }
 
-#[cfg(feature = "bulk")]
 pub use bulk_capacity::{bulk_keymap_size_for_buffer, bulk_size_for_buffer};
 
 #[cfg(test)]
@@ -408,7 +425,7 @@ mod tests {
     use postcard::experimental::max_size::MaxSize;
 
     use super::*;
-    use crate::protocol::rynk::{RYNK_HEADER_SIZE, RYNK_MIN_BUFFER_SIZE, RynkError};
+    use crate::protocol::rynk::{RYNK_HEADER_SIZE, RynkError};
 
     #[test]
     fn topic_mask_is_the_high_bit() {
@@ -444,7 +461,7 @@ mod tests {
     fn topic_event_round_trips_through_the_wire() {
         // The generated enum encodes to a topic frame the host decodes back to
         // the same variant — the producer and consumer halves share one table.
-        let mut buf = [0u8; RYNK_MIN_BUFFER_SIZE];
+        let mut buf = [0u8; 64];
         let ev = TopicEvent::LayerChange(7);
         let msg = ev.encode(&mut buf).unwrap();
 
@@ -478,7 +495,6 @@ mod tests {
     /// buffer, and — crucially — their worst-case encoded frame fits the buffer
     /// they were derived from. That fit is what lets the firmware serve a full
     /// bulk message out of its `RYNK_BUFFER_SIZE` buffer.
-    #[cfg(feature = "bulk")]
     #[test]
     fn bulk_counts_derive_from_buffer_and_fit() {
         use super::{bulk_keymap_size_for_buffer, bulk_size_for_buffer};

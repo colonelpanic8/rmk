@@ -16,14 +16,11 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::RynkError;
-use super::command::{Cmd, RYNK_MAX_PAYLOAD};
+use super::command::Cmd;
 use super::endpoint::Topic;
 
 /// Size in bytes of the fixed Rynk header.
 pub const RYNK_HEADER_SIZE: usize = 5;
-
-/// Minimum buffer size required to hold any single Rynk message (header + max-payload).
-pub const RYNK_MIN_BUFFER_SIZE: usize = RYNK_HEADER_SIZE + RYNK_MAX_PAYLOAD;
 
 /// The fixed header of a [`RynkMessage`].
 #[derive(Debug, Clone, Copy)]
@@ -100,7 +97,8 @@ impl<'a> RynkMessage<'a> {
         &self.buf[..self.frame_len()]
     }
 
-    fn payload(&self) -> &[u8] {
+    /// Returns the payload bytes specified by the header length.
+    pub fn payload(&self) -> &[u8] {
         let payload_len = self.header().payload_len as usize;
         &self.buf[RYNK_HEADER_SIZE..RYNK_HEADER_SIZE + payload_len]
     }
@@ -121,6 +119,29 @@ impl<'a> RynkMessage<'a> {
             .map(|s| s.len())
             .map_err(|_| RynkError::Internal)?;
         self.set_payload_len(n as u16);
+        Ok(())
+    }
+
+    /// Encodes a sequence directly into an `Ok` response without allocating a `Vec`.
+    /// The bytes match postcard's `Ok` tag, sequence length, and element encoding.
+    pub fn encode_bulk_ok<T, I>(&mut self, count: usize, items: I) -> Result<(), RynkError>
+    where
+        T: Serialize,
+        I: IntoIterator<Item = T>,
+    {
+        let body = &mut self.buf[RYNK_HEADER_SIZE..];
+        // postcard encodes `Result::Ok` with tag 0.
+        *body.first_mut().ok_or(RynkError::Internal)? = 0;
+        let mut used = 1;
+        used += postcard::to_slice(&count, &mut body[used..])
+            .map_err(|_| RynkError::Internal)?
+            .len();
+        for item in items {
+            used += postcard::to_slice(&item, &mut body[used..])
+                .map_err(|_| RynkError::Internal)?
+                .len();
+        }
+        self.set_payload_len(used as u16);
         Ok(())
     }
 
@@ -150,18 +171,7 @@ impl<'a> TryFrom<&'a mut [u8]> for RynkMessage<'a> {
 
 #[cfg(test)]
 mod tests {
-    use postcard::experimental::max_size::MaxSize;
-
-    use super::super::DeviceInfo;
     use super::*;
-
-    #[test]
-    fn rynk_min_buffer_size_covers_largest_known_response() {
-        // DeviceInfo is the largest non-bulk response.
-        let wrapped = <Result<DeviceInfo, RynkError> as MaxSize>::POSTCARD_MAX_SIZE;
-        assert!(RYNK_MAX_PAYLOAD >= wrapped);
-        assert!(RYNK_MIN_BUFFER_SIZE >= wrapped + RYNK_HEADER_SIZE);
-    }
 
     #[test]
     fn build_round_trip() {

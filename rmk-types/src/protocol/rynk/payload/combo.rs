@@ -14,8 +14,6 @@ pub struct SetComboRequest {
     pub config: Combo,
 }
 
-// Keep the bulk cfg on this module; public payloads are re-exported below.
-#[cfg(feature = "bulk")]
 mod bulk {
     use postcard::experimental::max_size::MaxSize;
     use serde::{Deserialize, Serialize};
@@ -51,9 +49,13 @@ mod bulk {
         pub configs: BulkCombos,
     }
 
-    // Bulk endpoints size from the buffer; this only satisfies `Endpoint: MaxSize`.
+    // Firmware sizes its fixed buffer from these exact bounds; host builds leave
+    // the fields unbounded and never need `MaxSize`.
+    #[cfg(not(feature = "host"))]
     impl MaxSize for SetComboBulkRequest {
-        const POSTCARD_MAX_SIZE: usize = crate::constants::RYNK_BUFFER_SIZE;
+        // start_index, then the bounded configs vector.
+        const POSTCARD_MAX_SIZE: usize =
+            <u8 as MaxSize>::POSTCARD_MAX_SIZE + crate::heapless_vec_max_size::<Combo, BULK_SIZE>();
     }
 
     /// Bulk response for getting multiple combos at once.
@@ -65,8 +67,9 @@ mod bulk {
         pub configs: BulkCombos,
     }
 
+    #[cfg(not(feature = "host"))]
     impl MaxSize for GetComboBulkResponse {
-        const POSTCARD_MAX_SIZE: usize = crate::constants::RYNK_BUFFER_SIZE;
+        const POSTCARD_MAX_SIZE: usize = crate::heapless_vec_max_size::<Combo, BULK_SIZE>();
     }
 
     impl GetComboBulkResponse {
@@ -81,7 +84,6 @@ mod bulk {
     }
 }
 
-#[cfg(feature = "bulk")]
 pub use bulk::*;
 
 #[cfg(test)]
@@ -126,7 +128,7 @@ mod tests {
     }
 
     // Firmware-only: exercises heapless bulk capacity.
-    #[cfg(all(feature = "bulk", not(feature = "host")))]
+    #[cfg(not(feature = "host"))]
     mod bulk {
         use heapless::Vec;
 
