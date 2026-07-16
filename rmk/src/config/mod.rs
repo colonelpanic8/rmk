@@ -14,9 +14,9 @@ pub use behavior::{
 };
 #[cfg(feature = "_ble")]
 pub use ble_battery::BleBatteryConfig;
-pub use device::DeviceConfig;
 #[cfg(feature = "rynk")]
 pub use lock::LockConfig;
+pub use device::{DeviceConfig, RMK_BUILD_INFO};
 pub use positional::{Hand, PositionalConfig};
 pub use storage::StorageConfig;
 pub use vial::VialConfig;

@@ -18,7 +18,10 @@ pub(crate) fn expand_keyboard_info(
     let vid = identity.vendor_id;
     let product_name = identity.product_name.clone();
     let manufacturer = identity.manufacturer.clone();
-    let serial_number = identity.serial_number.clone();
+    let serial_number_tokens = match &identity.serial_number {
+        Some(s) => quote! { #s },
+        None => quote! { ::rmk::config::RMK_BUILD_INFO },
+    };
 
     let num_col = keymap.cols as usize;
     let num_row = keymap.rows as usize;
@@ -34,7 +37,7 @@ pub(crate) fn expand_keyboard_info(
             pid: #pid,
             manufacturer: #manufacturer,
             product_name: #product_name,
-            serial_number: #serial_number,
+            serial_number: #serial_number_tokens,
         };
     }
 }
