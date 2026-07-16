@@ -11,9 +11,7 @@ pub mod uart;
 use embassy_futures::select::{Either, select};
 use embedded_io_async::{Read, Write};
 use rmk_types::constants::RYNK_BUFFER_SIZE;
-use rmk_types::protocol::rynk::{
-    Cmd, FirmwareVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage, command,
-};
+use rmk_types::protocol::rynk::{Cmd, FirmwareVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage, command};
 #[allow(unused_imports)] // re-exported at `crate::host` for downstream users
 pub use uart::run_rynk_uart;
 

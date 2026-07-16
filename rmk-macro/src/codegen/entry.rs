@@ -184,8 +184,9 @@ pub(crate) fn rmk_entry_select(
                                 #uart_instance,
                                 #policy
                             )
+                        });
                     });
-                
+
                     let joined = join_all_tasks(tasks);
                     quote! {
                         #transport_prelude

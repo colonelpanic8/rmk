@@ -149,7 +149,7 @@ fn get_device_info() {
         assert_eq!(info.product_id, 0x4643);
         assert_eq!(info.manufacturer.as_str(), "RMK");
         assert_eq!(info.product_name.as_str(), "RMK Keyboard");
-        assert_eq!(info.serial_number.as_str(), "vial:f64c2b3c:000001");
+        assert_eq!(info.serial_number.as_str(), rmk::config::RMK_BUILD_INFO);
         assert_eq!(info.rmk_version.major, env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap());
         assert_eq!(info.rmk_version.minor, env!("CARGO_PKG_VERSION_MINOR").parse().unwrap());
         assert_eq!(info.rmk_version.patch, env!("CARGO_PKG_VERSION_PATCH").parse().unwrap());
