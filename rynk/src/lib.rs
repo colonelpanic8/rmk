@@ -40,6 +40,7 @@ mod api;
 mod device;
 mod driver;
 pub mod layout;
+mod transport;
 
 pub use api::IncomingTopic;
 pub use device::RynkDevice;

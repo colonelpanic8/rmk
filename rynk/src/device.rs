@@ -21,9 +21,17 @@
 //! discovery to JS (web). That divergence is what lets the web transport, which
 //! cannot enumerate from wasm, still implement `RynkDevice`.
 
-use embedded_io_async::{Read, Write};
+use std::mem::transmute;
 
-use crate::driver::{Client, RynkHostError};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embedded_io_async::{Read, Write};
+use rmk::futures::StreamExt;
+use rmk_types::protocol::rynk::{RynkMessage, TopicEvent};
+
+use crate::{
+    driver::{Client, Driver, Reader, RynkHostError, Writer},
+    transport::Transport,
+};
 
 /// A keyboard recognized as Rynk's but not yet connected: an inert handle,
 /// produced by a transport's `discover()`, that [`connect`](Self::connect)s into
@@ -33,7 +41,7 @@ use crate::driver::{Client, RynkHostError};
 #[allow(async_fn_in_trait)] // concrete future `Send`-ness is fixed at each impl site
 pub trait RynkDevice: Sized {
     /// The byte link this device opens, driven by [`Client`].
-    type Transport: Read + Write;
+    type Transport: Transport;
 
     /// Display text for a device picker (serial path / BLE name).
     fn label(&self) -> String;
@@ -49,7 +57,24 @@ pub trait RynkDevice: Sized {
     /// Runtime-free, so it carries no handshake timeout: a silent peer would hang
     /// here. Callers that need a bound wrap this in their runtime's timeout (the
     /// BLE attach inside [`open`](Self::open) is already internally bounded).
-    async fn connect(self) -> Result<Client<Self::Transport>, RynkHostError> {
-        Client::connect(self.open().await?).await
+    async fn connect(
+        self,
+    ) -> Result<
+        (
+            Client<'_, '_, '_>,
+            Driver<<Self::Transport as Transport>::Read, <Self::Transport as Transport>::Write>,
+        ),
+        RynkHostError,
+    > {
+        let transport = self.open().await?;
+        let (writer, reader) = transport.split();
+        let driver = Driver { reader, writer };
+        let read_channel: Channel<CriticalSectionRawMutex, TopicEvent, 64> = Channel::new();
+        let write_channel: Channel<CriticalSectionRawMutex, RynkMessage, 64> = Channel::new();
+        let client = Client::new(read_channel.receiver(), write_channel.sender());
+        let reader = Reader::new(reader, read_channel.sender());
+        let writer = Writer::new(writer, write_channel.receiver());
+        let driver = Driver { reader, writer };
+        (client, driver)
     }
 }
