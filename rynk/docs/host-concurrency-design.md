@@ -50,27 +50,23 @@ connection unusable after a cancelled wire operation.
 
 ## Public model
 
-The public session consists of two objects:
+The architecture has only two concrete core types:
 
 - `Client` is a cloneable, transport-independent application handle. It owns
   request submission and the single logical topic consumer.
 - `Driver<R, W>` owns the read and write halves of the transport. It performs
   all wire I/O and must be run for the session to make progress.
 
-There is no separate public `Topics` or `TopicListener` object.
+There is no separate public `Topics`, `TopicListener`, request message, pending
+response, or session state. Queues and protocol state are private details of the
+two core types.
 
 ```rust
 #[derive(Clone)]
-pub struct Client {
-    inner: Arc<ClientInner>,
-}
+pub struct Client { /* private */ }
 
 #[must_use = "Driver must be run for the Rynk session to make progress"]
-pub struct Driver<R, W> {
-    reader: R,
-    writer: W,
-    inner: Arc<DriverInner>,
-}
+pub struct Driver<R, W> { /* private */ }
 
 pub async fn connect<R, W>(
     reader: R,
@@ -81,8 +77,8 @@ where
     W: Write;
 ```
 
-The exact private field layout may change during implementation. The ownership
-boundary and public behavior are the design contract.
+The ownership boundary and public behavior are the design contract. The plan
+does not prescribe additional internal structs.
 
 ### Client API
 
@@ -250,56 +246,36 @@ select! {
 
 ## Request path
 
-The client serializes the typed request before enqueueing a type-erased
-envelope:
+The client serializes a typed request before placing its command, payload,
+reply requirement, and completion sender on the private request queue. Queue
+items contain no borrowed data or endpoint-specific response type. These fields
+are an implementation detail, not another architectural type.
 
-```rust
-struct RequestEnvelope {
-    cmd: Cmd,
-    payload: Vec<u8>,
-    response_mode: ResponseMode,
-    completion: OneshotSender<Result<ResponseFrame, RynkHostError>>,
-}
+The client decodes the returned payload after the driver completes the
+transaction. The transmit loop processes queued requests in FIFO order:
 
-enum ResponseMode {
-    Required,
-    None,
-}
-```
-
-The envelope contains no borrowed data or endpoint-specific response type. The
-client decodes the returned payload after the driver completes the transaction.
-
-The transmit loop processes envelopes in FIFO order:
-
-1. Skip an envelope if its caller was cancelled before transmission.
+1. Skip a request if its caller was cancelled before transmission.
 2. Allocate the next nonzero sequence number.
 3. Register the expected sequence number and command in the pending slot.
 4. Write the complete request frame.
 5. Await the receive loop's matching response.
 6. Forward the response to the caller if the caller still exists.
-7. Clear the transaction before reading the next envelope.
+7. Clear the transaction before reading the next request.
 
 The driver supports concurrent callers by queueing them, but it deliberately
 keeps exactly one request in flight on the wire. Pipelining can be added later
 only if it provides a measured benefit and its ordering and cancellation
 semantics are specified separately.
 
-### Pending response routing
+### Response routing
 
-The driver has at most one pending response:
+The driver has one private pending-response slot containing the expected
+sequence number, command, and completion sender. This is state owned by the
+driver, not a separate public or architectural type.
 
-```rust
-struct PendingResponse {
-    seq: u8,
-    cmd: Cmd,
-    completion: OneshotSender<Vec<u8>>,
-}
-```
-
-The transmit loop installs this slot before starting the first write. A device
-may produce a response before an acknowledged write future returns, so
-installing it afterward would create a race.
+The transmit loop fills the slot before starting the first write. A device may
+produce a response before an acknowledged write future returns, so filling it
+afterward would create a race.
 
 When the receive loop gets a response:
 
@@ -408,9 +384,9 @@ These close the driver and fail every pending operation:
 - A response with an unexpected sequence number or command.
 - Explicit `Client::close()` or dropping the driver.
 
-The shared session stores a cloneable `CloseReason`. `Driver::run()` returns the
-detailed originating error, while client operations awakened by shutdown map
-the close reason to a stable `RynkHostError`.
+The driver records the first terminal error in its shared private state.
+`Driver::run()` returns the detailed originating error, while client operations
+awakened by shutdown map it to a stable `RynkHostError`.
 
 ## Shutdown guarantees
 
