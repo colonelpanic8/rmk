@@ -33,7 +33,7 @@ use rmk_types::combo::Combo;
 use rmk_types::constants::{MACRO_DATA_SIZE, RYNK_BUFFER_SIZE};
 use rmk_types::protocol::rynk::{MacroData, ProtocolVersion, RYNK_HEADER_SIZE, RynkError, StorageResetMode};
 use rynk::layout::{Key, Rect, Variant};
-use rynk::{Client, IncomingTopic, LayoutInfo, RynkHostError, TopicEvent};
+use rynk::{Client, IncomingTopic, LayoutInfo, RynkHostError, TopicEvent, Transport};
 
 /// One direction of the in-memory link. Sized to a full Rynk buffer so any
 /// single legal frame fits without the writer blocking on an un-polled reader.
@@ -67,6 +67,15 @@ impl Write for Duplex<'_> {
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
         Ok(())
+    }
+}
+
+impl<'p> Transport for Duplex<'p> {
+    type Write = &'p Link;
+    type Read = &'p Link;
+
+    fn split(self) -> (Self::Write, Self::Read) {
+        (self.tx, self.rx)
     }
 }
 
@@ -123,8 +132,9 @@ async fn client_against_run_session() {
     let transport = Duplex { rx: &d2h, tx: &h2d };
 
     // Host side.
+    let (mut client, mut driver) = Client::from_transport(transport);
     let script = async {
-        let mut client = Client::connect(transport).await.expect("handshake should succeed");
+        client.handshake().await.expect("handshake should succeed");
 
         // Version handshake crosses both real stacks.
         assert_eq!(client.get_version().await.unwrap(), ProtocolVersion::CURRENT);
@@ -205,9 +215,10 @@ async fn client_against_run_session() {
         service.run_session(&mut dev_rx, &mut dev_tx),
         rmk::channel::drain_flash_channel_for_test(),
     );
-    match select(device, script).await {
+    match select(device, select(driver.run(), script)).await {
         Either::First(_) => panic!("run_session ended before the client script finished"),
-        Either::Second(()) => {}
+        Either::Second(Either::First(result)) => panic!("driver ended before the client script finished: {result:?}"),
+        Either::Second(Either::Second(())) => {}
     }
 }
 
@@ -237,8 +248,9 @@ async fn lock_gate_rejects_and_reports() {
     let mut dev_tx: &Link = &d2h;
     let transport = Duplex { rx: &d2h, tx: &h2d };
 
+    let (mut client, mut driver) = Client::from_transport(transport);
     let script = async {
-        let mut client = Client::connect(transport).await.expect("handshake should succeed");
+        client.handshake().await.expect("handshake should succeed");
 
         // GetLockStatus is open and advertises the challenge across the wire
         // (the `heapless::Vec<(u8,u8)>` round-trips intact).
@@ -268,8 +280,9 @@ async fn lock_gate_rejects_and_reports() {
         service.run_session(&mut dev_rx, &mut dev_tx),
         rmk::channel::drain_flash_channel_for_test(),
     );
-    match select(device, script).await {
+    match select(device, select(driver.run(), script)).await {
         Either::First(_) => panic!("run_session ended before the client script finished"),
-        Either::Second(()) => {}
+        Either::Second(Either::First(result)) => panic!("driver ended before the client script finished: {result:?}"),
+        Either::Second(Either::Second(())) => {}
     }
 }

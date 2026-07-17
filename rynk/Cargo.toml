@@ -11,21 +11,26 @@ readme = "README.md"
 keywords = ["keyboard", "firmware", "rmk", "protocol", "host"]
 
 [dependencies]
-rmk-types.workspace = true
+rmk-types = { workspace = true, features = ["rynk", "_ble", "split", "steno"] }
 embedded-io-async.workspace = true
 embassy-sync.workspace = true
+embassy-futures = "0.1"
+critical-section = { version = "1.2", default-features = false }
 postcard.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 log.workspace = true
-miniz_oxide = "0.9"
+miniz_oxide = { version = "0.9", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
 tsify = { version = "0.5", optional = true, default-features = false, features = ["js"] }
 
 [features]
+default = ["std"]
+alloc = ["rmk-types/host", "postcard/alloc", "serde/alloc", "dep:miniz_oxide"]
+std = ["alloc", "critical-section/std", "thiserror/std"]
 # Enable rmk-types' wasm/TS type generation (tsify). Turned on by the rynk-wasm build.
-wasm = ["rmk-types/wasm", "dep:wasm-bindgen", "dep:js-sys", "dep:tsify"]
+wasm = ["std", "rmk-types/wasm", "dep:wasm-bindgen", "dep:js-sys", "dep:tsify"]
 
 [dev-dependencies]
 rmk = { path = "../rmk", default-features = false, features = [
@@ -42,7 +47,6 @@ rmk-config = { path = "../rmk-config" }
 ssmarshal = { version = "1.0", features = ["std"] }
 embassy-sync = "0.8"
 embassy-futures = "0.1"
-critical-section = { version = "1.2", features = ["std"] }
 tokio = { version = "1.47", features = ["test-util", "macros", "net", "rt", "rt-multi-thread", "time"] }
 
 rynk-ble = { path = "rynk-ble" }
@@ -75,13 +79,13 @@ version = "0.1.0"
 rust-version = "1.85"
 
 [workspace.dependencies]
-rmk-types = { path = "../rmk-types", features = ["host"] }
+rmk-types = { path = "../rmk-types" }
 embassy-sync = "0.8"
 embedded-io-async = "0.7"
 embedded-io-adapters = "0.7"
-postcard = { version = "1.1", default-features = false, features = ["experimental-derive", "alloc"] }
+postcard = { version = "1.1", default-features = false, features = ["experimental-derive"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
-thiserror = "2.0"
+thiserror = { version = "2.0", default-features = false }
 log = "0.4"
 tokio = "1.47"
 tokio-serial = "5.4"

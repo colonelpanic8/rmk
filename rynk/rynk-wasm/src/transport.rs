@@ -2,8 +2,10 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use js_sys::Uint8Array;
+use rynk::Transport;
 use rynk::io::{ErrorKind, ErrorType, Read, Write};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -28,17 +30,25 @@ type RecvFuture = Pin<Box<dyn Future<Output = Result<JsValue, JsValue>>>>;
 
 /// Buffered transport over a JS byte link.
 pub struct WasmTransport {
-    link: JsByteLink,
+    link: Arc<LinkOwner>,
     label: String,
     recv: Option<RecvFuture>,
     pending: Vec<u8>,
+}
+
+struct LinkOwner {
+    link: JsByteLink,
+}
+
+pub struct WasmWriter {
+    link: Arc<LinkOwner>,
 }
 
 impl WasmTransport {
     /// Wrap an already-open link labeled with the page's device name.
     pub fn new(link: JsByteLink, label: String) -> Self {
         Self {
-            link,
+            link: Arc::new(LinkOwner { link }),
             label,
             recv: None,
             pending: Vec::new(),
@@ -51,13 +61,27 @@ impl WasmTransport {
     }
 }
 
-impl Drop for WasmTransport {
+impl Drop for LinkOwner {
     /// Close the JS link.
     fn drop(&mut self) {
         let link: JsByteLink = self.link.clone().unchecked_into();
         spawn_local(async move {
             let _ = link.close().await;
         });
+    }
+}
+
+impl Transport for WasmTransport {
+    type Write = WasmWriter;
+    type Read = Self;
+
+    fn split(self) -> (Self::Write, Self::Read) {
+        (
+            WasmWriter {
+                link: self.link.clone(),
+            },
+            self,
+        )
     }
 }
 
@@ -71,7 +95,7 @@ impl Read for WasmTransport {
         while self.pending.is_empty() {
             if self.recv.is_none() {
                 // Clone the handle into the future so it owns all it borrows.
-                let link: JsByteLink = self.link.clone().unchecked_into();
+                let link: JsByteLink = self.link.link.clone().unchecked_into();
                 self.recv = Some(Box::pin(async move { link.recv().await }));
             }
             // Poll in place: a cancelled read() leaves the future parked in `self`.
@@ -92,9 +116,14 @@ impl Read for WasmTransport {
     }
 }
 
-impl Write for WasmTransport {
+impl ErrorType for WasmWriter {
+    type Error = ErrorKind;
+}
+
+impl Write for WasmWriter {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         self.link
+            .link
             .send(Uint8Array::from(buf))
             .await
             .map_err(|_| ErrorKind::Other)?;

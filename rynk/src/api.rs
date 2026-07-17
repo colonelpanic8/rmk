@@ -1,7 +1,9 @@
 //! Typed endpoint methods and topic decoding — the version-specific API
 //! surface over the driver core in `driver.rs`.
 
-use embedded_io_async::{Read, Write};
+#[cfg(feature = "alloc")]
+use alloc::{format, vec::Vec};
+
 use rmk_types::action::{EncoderAction, KeyAction};
 use rmk_types::battery::BatteryStatus;
 use rmk_types::ble::BleStatus;
@@ -19,6 +21,7 @@ use rmk_types::protocol::rynk::{
 };
 
 use crate::driver::{Client, RynkHostError, TopicFrame};
+#[cfg(feature = "alloc")]
 use crate::layout::LayoutInfo;
 
 /// A firmware topic push (server → host), delivered by [`Client::next_event`].
@@ -30,6 +33,7 @@ use crate::layout::LayoutInfo;
 /// — see [`Client::events_dropped`] — or, on BLE, an OS-level notification drop
 /// the client cannot observe).
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum IncomingTopic {
     /// A recognized topic, decoded by the shared topic table.
     Topic(TopicEvent),
@@ -37,13 +41,13 @@ pub enum IncomingTopic {
     Unknown(TopicFrame),
 }
 
-impl<T: Read + Write> Client<T> {
+impl<'a, const FRAME: usize, const EVENTS: usize> Client<'a, FRAME, EVENTS> {
     /// Read the next topic push, decoded into a typed [`IncomingTopic`].
-    /// Queued topics are returned first. Cancelling this poisons the client:
-    /// drop it and reconnect rather than calling again.
+    /// Queued topics are returned first. This operation is cancellation-safe;
+    /// the independently running reader retains frame boundaries.
     pub async fn next_event(&mut self) -> Result<IncomingTopic, RynkHostError> {
         let frame = self.next_topic_frame().await?;
-        Ok(match TopicEvent::decode(frame.cmd, &frame.payload) {
+        Ok(match TopicEvent::decode(frame.cmd, frame.payload()) {
             Some(event) => IncomingTopic::Topic(event),
             None => IncomingTopic::Unknown(frame),
         })
@@ -75,7 +79,7 @@ impl<T: Read + Write> Client<T> {
     }
 
     /// Re-read the firmware's capability set. Prefer the cached
-    /// [`Client::capabilities`] for the snapshot taken at connect time.
+    /// [`Client::cached_capabilities`] for the snapshot taken during handshake.
     pub async fn get_capabilities(&mut self) -> Result<DeviceCapabilities, RynkHostError> {
         self.request::<command::GetCapabilities>(&()).await
     }
@@ -205,6 +209,7 @@ impl<T: Read + Write> Client<T> {
     /// byte offset), inflates the blob, and decodes it into [`LayoutInfo`]. An
     /// empty blob (firmware built without a `[layout].map`) yields an empty
     /// [`LayoutInfo`], not an error.
+    #[cfg(feature = "alloc")]
     pub async fn get_layout(&mut self) -> Result<LayoutInfo, RynkHostError> {
         // 64KB is a reasonable upper bound for a compressed layout blob.
         const MAX_LAYOUT_BLOB_LEN: usize = 64 * 1024;
@@ -322,6 +327,7 @@ impl<T: Read + Write> Client<T> {
     // Pagers use low-level bulk calls for capability and range checks.
 
     /// Read the whole keymap (every layer, row-major) by paging `GetKeymapBulk`.
+    #[cfg(feature = "alloc")]
     pub async fn read_all_keymap(&mut self) -> Result<Vec<KeyAction>, RynkHostError> {
         let caps = self.capabilities();
         // The closure converts the flat cursor to a key position, so pull the
@@ -336,6 +342,7 @@ impl<T: Read + Write> Client<T> {
     }
 
     /// Read every combo slot by paging `GetComboBulk`.
+    #[cfg(feature = "alloc")]
     pub async fn read_all_combos(&mut self) -> Result<Vec<Combo>, RynkHostError> {
         let total = self.capabilities().max_combos as usize;
         self.read_all(total, async |c, start| {
@@ -345,6 +352,7 @@ impl<T: Read + Write> Client<T> {
     }
 
     /// Read every morse slot by paging `GetMorseBulk`.
+    #[cfg(feature = "alloc")]
     pub async fn read_all_morses(&mut self) -> Result<Vec<Morse>, RynkHostError> {
         let total = self.capabilities().max_morse as usize;
         self.read_all(total, async |c, start| {
@@ -354,6 +362,7 @@ impl<T: Read + Write> Client<T> {
     }
 
     /// Write the whole keymap by paging `SetKeymapBulk` in `max_bulk_keys` chunks.
+    #[cfg(feature = "alloc")]
     pub async fn write_all_keymap(&mut self, actions: &[KeyAction]) -> Result<(), RynkHostError> {
         let caps = self.capabilities();
         // Same as the read side: capture the geometry the closure needs before the
@@ -374,6 +383,7 @@ impl<T: Read + Write> Client<T> {
     }
 
     /// Write every combo by paging `SetComboBulk` in `max_bulk_configs` chunks.
+    #[cfg(feature = "alloc")]
     pub async fn write_all_combos(&mut self, configs: &[Combo]) -> Result<(), RynkHostError> {
         let page = self.capabilities().max_bulk_configs as usize;
         self.write_all(page, configs, async |c, start, configs| {
@@ -387,6 +397,7 @@ impl<T: Read + Write> Client<T> {
     }
 
     /// Write every morse by paging `SetMorseBulk` in `max_bulk_configs` chunks.
+    #[cfg(feature = "alloc")]
     pub async fn write_all_morses(&mut self, configs: &[Morse]) -> Result<(), RynkHostError> {
         let page = self.capabilities().max_bulk_configs as usize;
         self.write_all(page, configs, async |c, start, configs| {
@@ -401,6 +412,7 @@ impl<T: Read + Write> Client<T> {
 
     /// Page a whole resource in: fetch from cursor 0 until `total` items are read
     /// or a short/empty page marks the firmware's clamped end.
+    #[cfg(feature = "alloc")]
     async fn read_all<Item>(
         &mut self,
         total: usize,
@@ -421,6 +433,7 @@ impl<T: Read + Write> Client<T> {
 
     /// Page a whole resource out: send `items` in `page`-sized chunks, each a
     /// bounded `Set*Bulk` at its flat cursor.
+    #[cfg(feature = "alloc")]
     async fn write_all<Item: Clone>(
         &mut self,
         page: usize,
@@ -533,6 +546,7 @@ impl<T: Read + Write> Client<T> {
 /// Map a flat, row-major, layer-major key cursor to its `(layer, row, col)`
 /// address for the device's `rows`×`cols` geometry. `u16` arithmetic since the
 /// keymap can exceed 255 keys; the address components each fit in `u8`.
+#[cfg(feature = "alloc")]
 fn keymap_pos(cursor: u16, rows: u16, cols: u16) -> (u8, u8, u8) {
     let layer = cursor / (rows * cols);
     let row = (cursor / cols) % rows;

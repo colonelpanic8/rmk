@@ -3,7 +3,8 @@
 //! A Rynk keyboard is identified by its service UUID (`RYNK_SERVICE_UUID`), not its
 //! user-settable BLE name — the counterpart to the serial transport's serial marker.
 //! [`BleDevice::discover`] lists already-connected devices exposing that service (no
-//! scan, no attach); [`RynkDevice::connect`] then attaches and handshakes.
+//! scan, no attach); [`RynkDevice::connect`] then attaches and returns the
+//! client/driver pair used for the handshake.
 
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use rmk_types::protocol::rynk::RYNK_BLE_CHUNK_SIZE;
 use rynk::io::{Read, Write};
-use rynk::{RynkDevice, RynkHostError};
+use rynk::{RynkDevice, RynkHostError, Transport};
 
 const RYNK_SERVICE_UUID: Uuid = Uuid::from_u128(rmk_types::protocol::rynk::RYNK_SERVICE_UUID);
 const RYNK_INPUT_CHAR_UUID: Uuid = Uuid::from_u128(rmk_types::protocol::rynk::RYNK_INPUT_CHAR_UUID);
@@ -51,11 +52,45 @@ impl BleTransport {
     }
 }
 
-impl rynk::io::ErrorType for BleTransport {
+/// Notification-backed device-to-host half.
+pub struct BleReader {
+    input: BoxStream<'static, Vec<u8>>,
+    pending: Vec<u8>,
+    pos: usize,
+    _adapter: Adapter,
+}
+
+/// Acknowledged GATT host-to-device half.
+pub struct BleWriter {
+    output: Characteristic,
+    write_chunk: usize,
+}
+
+impl Transport for BleTransport {
+    type Write = BleWriter;
+    type Read = BleReader;
+
+    fn split(self) -> (Self::Write, Self::Read) {
+        (
+            BleWriter {
+                output: self.output,
+                write_chunk: self.write_chunk,
+            },
+            BleReader {
+                input: self.input,
+                pending: self.pending,
+                pos: self.pos,
+                _adapter: self._adapter,
+            },
+        )
+    }
+}
+
+impl rynk::io::ErrorType for BleReader {
     type Error = std::io::Error;
 }
 
-impl Read for BleTransport {
+impl Read for BleReader {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         while self.pos >= self.pending.len() {
             match self.input.next().await {
@@ -74,7 +109,11 @@ impl Read for BleTransport {
     }
 }
 
-impl Write for BleTransport {
+impl rynk::io::ErrorType for BleWriter {
+    type Error = std::io::Error;
+}
+
+impl Write for BleWriter {
     /// One GATT write per call, capped to the characteristic; `write_all` loops the
     /// rest. Acknowledged — a dropped chunk would desync the firmware's reassembler.
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {

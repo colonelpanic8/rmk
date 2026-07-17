@@ -13,24 +13,23 @@ via its `wasm` feature, on the web; the `rmkit layout` CLI in
 
 ## Concepts
 
-- **[`Client`]** drives the protocol over any byte link: handshake, typed
+- **[`Client`]** exposes handshake, typed
   methods for the command surface, and pull-based topic delivery via
   `next_event`, which decodes each push into a typed `IncomingTopic` (topics are
   best-effort — re-read a missed value with the matching `Get*` call).
-  Requests are serialized through `&mut self` — no background task, no shared
-  state.
-- **The byte link is embedded-io-async `Read + Write`** — the same traits the
+  Requests are serialized through `&mut self` and sent as owned channel messages.
+- **[`Driver`] owns [`Reader`] and [`Writer`]** and is run as one long-lived
+  executor task. It correlates responses without borrowing the client's buffers.
+- **[`Transport`] splits into embedded-io-async `Read` and `Write` halves** — the same traits the
   firmware's session loop reads, re-exported as `rynk::io` so the trait version
   always matches. A third-party transport is its own crate implementing them
-  (anything with an embedded-io adapter already qualifies); an app depends on
-  `rynk` plus that crate and calls [`Client::connect`].
+  and returns them from `Transport::split`.
 
 ## Example
 
 ```rust,no_run
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-// Discover marked Rynk keyboards, pick one, and open it (the handshake runs
-// inside `connect`). `rynk-ble` mirrors this flow.
+// Discover marked Rynk keyboards, pick one, and open it. `rynk-ble` mirrors this flow.
 use rynk::RynkDevice;
 use rynk_serial::SerialDevice;
 let device = SerialDevice::discover()
@@ -38,18 +37,51 @@ let device = SerialDevice::discover()
     .into_iter()
     .next()
     .ok_or("no Rynk keyboard found")?;
-let mut client = device.connect().await?;
+let (mut client, mut driver) = device.connect().await?;
+let driver_task = tokio::spawn(async move { driver.run().await });
+client.handshake().await?;
 
-let caps = *client.capabilities();
+let caps = client.get_capabilities().await?;
 println!("{}×{}×{} keymap", caps.num_layers, caps.num_rows, caps.num_cols);
 
 let key = client.get_key(0, 0, 0).await?;
 println!("L0(0,0) = {key:?}");
+drop(client);
+driver_task.await??;
 # Ok(()) }
 ```
 
 Each method returns the response value directly; a device rejection surfaces as
 `RynkHostError::Rejected`, so `?` propagates both transport and firmware errors.
+
+## `no_std` and `no_alloc`
+
+The default `std` feature provides discovery, owned desktop sessions, layout
+decompression, and collection helpers. The protocol core builds without either
+`std` or an allocator:
+
+```console
+cargo check -p rynk --no-default-features --target thumbv6m-none-eabi
+```
+
+In that mode, the application owns a fixed-capacity session and keeps it alive
+for the client and driver:
+
+```rust,ignore
+let session = rynk::Session::<512, 8>::new();
+let (writer, reader) = rynk::Transport::split(transport);
+let (mut client, mut driver) = rynk::Driver::new(&session, reader, writer);
+let client_task = async move { client.handshake().await };
+let (driver_result, handshake_result) =
+    embassy_futures::join::join(driver.run(), client_task).await;
+driver_result?;
+handshake_result?;
+```
+
+The first const parameter bounds a complete frame. The second is the queued
+topic count; each raw topic retains at most `TOPIC_PAYLOAD_SIZE` bytes. Oversized
+frames fail explicitly, while an oversized best-effort topic is counted as
+dropped.
 
 ## License
 

@@ -7,6 +7,7 @@
 
 use std::fmt::Debug;
 use std::io::ErrorKind;
+use std::sync::Arc;
 use std::time::Duration;
 
 use rynk::io::{Read, Write};
@@ -24,13 +25,25 @@ use rynk::rmk_types::protocol::rynk::{
     GetMorseBulkResponse, MacroData, ProtocolVersion, RynkError, SetComboBulkRequest, SetKeymapBulkRequest,
     SetMorseBulkRequest, StorageResetMode,
 };
-use rynk::{Client, RynkHostError};
+use rynk::{Client, RynkHostError, Transport};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_ADDR: &str = "127.0.0.1:9000";
 
 struct TcpTransport {
-    stream: tokio::net::TcpStream,
+    stream: Arc<tokio::net::TcpStream>,
+}
+
+impl Transport for TcpTransport {
+    type Write = Self;
+    type Read = Self;
+
+    fn split(self) -> (Self::Write, Self::Read) {
+        let reader = Self {
+            stream: self.stream.clone(),
+        };
+        (self, reader)
+    }
 }
 
 impl rynk::io::ErrorType for TcpTransport {
@@ -121,7 +134,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|_| format!("connect timed out to QEMU TCP serial at {addr}"))??;
     stream.set_nodelay(true)?;
-    let mut client = tokio::time::timeout(CONNECT_TIMEOUT, Client::connect(TcpTransport { stream }))
+    let (mut client, mut driver) = Client::from_transport(TcpTransport {
+        stream: Arc::new(stream),
+    });
+    let driver_task = tokio::spawn(async move { driver.run().await });
+    tokio::time::timeout(CONNECT_TIMEOUT, client.handshake())
         .await
         .map_err(|_| format!("Rynk handshake timed out over QEMU TCP serial at {addr}"))??;
 
@@ -347,5 +364,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     println!("QEMU Rynk behavior verification passed.");
+    drop(client);
+    driver_task.await??;
     Ok(())
 }

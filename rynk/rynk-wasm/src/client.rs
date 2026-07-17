@@ -1,9 +1,9 @@
 //! Wasm-facing Rynk client handle.
 //!
 //! JS owns the byte link and hands it to [`connect`], which runs the Rynk
-//! handshake and returns a [`RynkClient`] wrapping a `Client<WasmTransport>`.
+//! handshake and returns a [`RynkClient`] wrapping the channel-facing `Client`.
 //! Each method borrows the client for one await — the same way the native
-//! serial/BLE transports drive `Client<T>` directly, so JS must await one call
+//! serial/BLE transports use the same client/driver split, so JS must await one call
 //! before issuing the next. Topic pushes are pulled with
 //! [`RynkClient::next_event`], not delivered by callback.
 
@@ -22,18 +22,19 @@ use rynk::rmk_types::protocol::rynk::{
 };
 use rynk::{Client, IncomingTopic, LayoutInfo, RynkDevice, TopicEvent};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 
 use crate::device::WebDevice;
-use crate::transport::{JsByteLink, WasmTransport};
+use crate::transport::JsByteLink;
 
 /// Live Rynk client handle exposed to JavaScript.
 ///
-/// Wraps a `Client<WasmTransport>`; methods borrow it for one await, so JS must
+/// Wraps a `Client`; methods borrow it for one await, so JS must
 /// await each call before the next (the single-borrow rule the native
 /// transports get from the compiler). Dropping the handle, or closing the JS
 /// link, ends the session.
 #[wasm_bindgen]
-pub struct RynkClient(Client<WasmTransport>);
+pub struct RynkClient(Client<'static>, String);
 
 /// Handshake over an already-open JS link and return a client. Routes through
 /// [`WebDevice`] — the web transport's [`RynkDevice`] — so the browser path uses
@@ -42,8 +43,14 @@ pub struct RynkClient(Client<WasmTransport>);
 /// string); omit it or pass `null` for a default.
 #[wasm_bindgen]
 pub async fn connect(link: JsByteLink, label: Option<String>) -> Result<RynkClient, JsValue> {
-    let client = WebDevice::new(link, label).connect().await?;
-    Ok(RynkClient(client))
+    let device = WebDevice::new(link, label);
+    let label = device.label();
+    let (mut client, mut driver) = device.connect().await?;
+    spawn_local(async move {
+        let _ = driver.run().await;
+    });
+    client.handshake().await?;
+    Ok(RynkClient(client, label))
 }
 
 #[wasm_bindgen]
@@ -51,7 +58,7 @@ impl RynkClient {
     /// The display name the page supplied at connect time (WebHID `productName`,
     /// a page-derived string, or the default when none was given).
     pub fn label(&self) -> String {
-        self.0.transport().label().to_string()
+        self.1.clone()
     }
 
     /// Pull the next recognized topic push (server→host). Parks until one

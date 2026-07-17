@@ -19,7 +19,6 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use log::{error, info, warn};
-use rynk::io::{Read, Write};
 use rynk::rmk_types::action::EncoderAction;
 use rynk::rmk_types::combo::Combo;
 use rynk::rmk_types::morse::MorseProfile;
@@ -109,16 +108,26 @@ async fn run_first<D: RynkDevice>(
     if count > 1 {
         info!("{count} keyboards found; connecting to {}", device.label());
     }
-    // The lifecycle's `connect` is runtime-free and carries no handshake timeout;
-    // bound it here so a silent peer can't hang the tool.
-    let client = tokio::time::timeout(HANDSHAKE_TIMEOUT, device.connect())
+    let (mut client, mut driver) = tokio::time::timeout(HANDSHAKE_TIMEOUT, device.connect())
         .await
-        .map_err(|_| format!("handshake timed out over {what}"))??;
-    run_all(client, over_ble).await
+        .map_err(|_| format!("opening the device timed out over {what}"))??;
+    let client_session = async move {
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, client.handshake())
+            .await
+            .map_err(|_| format!("handshake timed out over {what}"))??;
+        run_all(client, over_ble).await
+    };
+    tokio::select! {
+        result = driver.run() => match result {
+            Ok(()) => Err("Rynk driver stopped unexpectedly".into()),
+            Err(error) => Err(error.into()),
+        },
+        result = client_session => result,
+    }
 }
 
 /// Exercise non-reboot Rynk commands.
-async fn run_all<T: Read + Write>(mut client: Client<T>, over_ble: bool) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_all(mut client: Client<'_>, over_ble: bool) -> Result<(), Box<dyn std::error::Error>> {
     let caps = client.get_capabilities().await?;
     let version = client.get_version().await?;
     let mut fails = 0u32;

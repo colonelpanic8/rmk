@@ -4,7 +4,7 @@
 //! WebSerial/WebHID chooser, opens the link, and hands the already-open
 //! [`JsByteLink`] to [`WebDevice::new`]. So `WebDevice` implements only the
 //! universal half of the lifecycle — [`open`](RynkDevice::open) wraps the link
-//! and [`connect`](RynkDevice::connect) (the trait default) handshakes it —
+//! and [`connect`](RynkDevice::connect) (the trait default) builds its driver —
 //! with no Rust-side `discover`.
 
 use rynk::{RynkDevice, RynkHostError};

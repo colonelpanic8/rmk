@@ -1,75 +1,126 @@
-//! Protocol driver for Rynk: framing, SEQ correlation, topic queueing, link lifecycle.
+//! Allocation-free protocol driver for Rynk.
 //!
-//! [`Client`] handles transport framing, correlation, and demux. The typed
-//! command surface lives in `api.rs`.
-//!
-//! ## Frame routing
-//!
-//! A frame is a 5-byte header (`CMD u16 | SEQ u8 | LEN u16`) plus a postcard
-//! payload. The inbound stream routes by CMD and SEQ:
-//!
-//! ```text
-//! SEND   request(&req) → encode + assign SEQ → write_all → transport
-//!
-//! RECV   transport → read (arbitrary chunks) → reassemble whole frames,
-//!        then route each frame by its 5-byte header:
-//!
-//!          topic   CMD high bit set          → event queue, drained by next_event()
-//!          reply   SEQ matches our request   → returned by request()
-//!          stale   SEQ from a past request   → dropped
-//! ```
-//!
-//! ## Link lifecycle
-//!
-//! - Cancelling a read makes the stream boundary unknowable; the next operation
-//!   latches the link dead and requires reconnecting.
-//! - Broken links latch dead so later calls fail fast.
+//! [`Client`] exchanges fixed-capacity owned frames with independently driven
+//! [`Reader`] and [`Writer`] halves. A [`Session`] owns their channels and
+//! lifecycle state.
 
-use std::collections::VecDeque;
+#[cfg(feature = "std")]
+use alloc::format;
+#[cfg(feature = "alloc")]
+use alloc::string::String;
+#[cfg(feature = "std")]
+use alloc::sync::Arc;
+use core::cell::Cell;
+#[cfg(feature = "std")]
+use core::marker::PhantomData;
 
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
-use embassy_sync::channel::{Channel, Receiver, Sender};
+use embassy_futures::select::{Either, Either3, select, select3};
+use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::{Channel, TrySendError};
+use embassy_sync::signal::Signal;
+#[cfg(not(feature = "std"))]
+use embedded_io_async::ErrorKind;
 use embedded_io_async::{Read, Write};
 use rmk_types::protocol::rynk::endpoint::Endpoint;
 use rmk_types::protocol::rynk::{
-    Cmd, DeviceCapabilities, ProtocolVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage, SetKeyRequest,
-    TopicEvent,
+    Cmd, DeviceCapabilities, ProtocolVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
+#[cfg(feature = "std")]
 use crate::transport::Transport;
 
-/// Topic frames buffered before the oldest is dropped.
-const EVENT_QUEUE_CAPACITY: usize = 64;
+/// Default maximum complete frame size, including the five-byte header.
+pub const DEFAULT_FRAME_SIZE: usize = 4096;
+/// Default number of queued topic frames.
+pub const DEFAULT_EVENT_CAPACITY: usize = 64;
+/// Maximum raw payload retained for one queued topic.
+pub const TOPIC_PAYLOAD_SIZE: usize = 256;
 
-/// RX scratch filled per `read`; larger frames accumulate across reads.
-const READ_SCRATCH_SIZE: usize = 4096;
-
-/// A raw topic frame (server → host push), delivered by
-/// [`Client::next_event`](crate::Client::next_event).
-#[derive(Debug, Clone)]
-pub struct TopicFrame {
-    pub cmd: Cmd,
-    pub payload: Vec<u8>,
+/// Fixed-capacity storage and lifecycle state for one client/driver session.
+///
+/// A no-alloc application owns this value and passes a reference to
+/// [`Driver::new`].
+/// `FRAME` bounds every complete wire frame; `EVENTS` controls the best-effort
+/// topic queue. A session is single-use; create a new one for each transport
+/// connection.
+pub struct Session<const FRAME: usize = DEFAULT_FRAME_SIZE, const EVENTS: usize = DEFAULT_EVENT_CAPACITY> {
+    requests: Channel<CriticalSectionRawMutex, ([u8; FRAME], bool), 1>,
+    responses: Channel<CriticalSectionRawMutex, Result<[u8; FRAME], RynkHostError>, 1>,
+    topics: Channel<CriticalSectionRawMutex, TopicFrame, EVENTS>,
+    events_dropped: Mutex<CriticalSectionRawMutex, Cell<u64>>,
+    dead: Mutex<CriticalSectionRawMutex, Cell<bool>>,
+    disconnected: Signal<CriticalSectionRawMutex, ()>,
+    shutdown: Signal<CriticalSectionRawMutex, ()>,
 }
 
-/// Errors from Rynk host.
+impl<const FRAME: usize, const EVENTS: usize> Session<FRAME, EVENTS> {
+    #[allow(clippy::new_without_default)]
+    pub const fn new() -> Self {
+        assert!(FRAME >= RYNK_HEADER_SIZE, "Rynk frame capacity must fit the header");
+        assert!(EVENTS > 0, "Rynk topic capacity must be non-zero");
+        Self {
+            requests: Channel::new(),
+            responses: Channel::new(),
+            topics: Channel::new(),
+            events_dropped: Mutex::new(Cell::new(0)),
+            dead: Mutex::new(Cell::new(false)),
+            disconnected: Signal::new(),
+            shutdown: Signal::new(),
+        }
+    }
+
+    fn is_alive(&self) -> bool {
+        self.dead.lock(|dead| !dead.get())
+    }
+
+    fn events_dropped(&self) -> u64 {
+        self.events_dropped.lock(Cell::get)
+    }
+
+    fn queue_topic(&self, topic: TopicFrame) {
+        if let Err(TrySendError::Full(topic)) = self.topics.try_send(topic) {
+            let _ = self.topics.try_receive();
+            let _ = self.topics.try_send(topic);
+            self.record_dropped_topic();
+        }
+    }
+
+    fn record_dropped_topic(&self) {
+        self.events_dropped.lock(|events_dropped| {
+            events_dropped.set(events_dropped.get().saturating_add(1));
+        });
+    }
+
+    fn disconnect(&self, error: Option<RynkHostError>) {
+        if let Some(error) = error {
+            let _ = self.responses.try_send(Err(error));
+        }
+        self.dead.lock(|dead| dead.set(true));
+        self.disconnected.signal(());
+    }
+}
+
+/// Errors from the Rynk core and optional host layer.
 #[derive(Debug, Error)]
 pub enum RynkHostError {
     #[error("transport disconnected")]
     Disconnected,
+    #[cfg(feature = "std")]
     #[error("io error: {0}")]
     Io(String),
+    #[cfg(not(feature = "std"))]
+    #[error("io error: {0:?}")]
+    Io(ErrorKind),
+    #[cfg(feature = "std")]
     #[error("device not found: {0}")]
     DeviceNotFound(String),
-
-    /// Protocol version mismatch.
     #[error(
         "protocol major version mismatch — firmware speaks v{firmware_major}.{firmware_minor}, this tool speaks \
-         v{host_major}.x (currently v{host_major}.{host_max_minor}). Use a tool matching major {firmware_major}, or \
-         flash firmware that matches this one."
+         v{host_major}.x (currently v{host_major}.{host_max_minor})"
     )]
     VersionMismatch {
         firmware_major: u8,
@@ -77,36 +128,44 @@ pub enum RynkHostError {
         host_major: u8,
         host_max_minor: u8,
     },
-
-    /// Firmware accepted the request but answered with an error.
     #[error("device rejected {0:?}")]
     Rejected(RynkError),
-    /// The request did not fit the device's advertised buffer, or failed to
-    /// encode. The send scratch is sized to the device's `max_payload_size`.
-    #[error("request {0:?} does not fit the device buffer (or failed to encode)")]
+    #[error("request {0:?} does not fit the configured frame buffer")]
     Encode(Cmd),
     #[error("response decode failed for {cmd:?}: {source}")]
     Deserialize { cmd: Cmd, source: postcard::Error },
-    /// `GetLayout` blob inflate or decode failed.
+    #[cfg(feature = "alloc")]
     #[error("layout blob decode failed: {0}")]
     Layout(String),
+    #[error("frame of {len} bytes exceeds configured capacity {max}")]
+    FrameTooLarge { len: usize, max: usize },
     #[error("response for {cmd:?} had trailing bytes")]
     TrailingBytes { cmd: Cmd },
     #[error("response cmd mismatch: sent {sent:?}, got {got:?}")]
     CmdMismatch { sent: Cmd, got: Cmd },
-    /// A topic-range `Cmd` was passed to a request method.
     #[error("{0:?} is a topic, not a request")]
     TopicCmd(Cmd),
-    /// Capabilities reject the command before touching the wire.
     #[error("device does not support {0:?}: {1}")]
     Unsupported(Cmd, &'static str),
 }
 
-/// Bridge host errors into JS errors with stable `name` values.
+impl RynkHostError {
+    fn io(error: &impl embedded_io_async::Error) -> Self {
+        #[cfg(feature = "std")]
+        {
+            Self::Io(format!("{error:?}"))
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            Self::Io(error.kind())
+        }
+    }
+}
+
 #[cfg(feature = "wasm")]
 impl From<RynkHostError> for wasm_bindgen::JsValue {
-    fn from(e: RynkHostError) -> Self {
-        let kind = match &e {
+    fn from(error: RynkHostError) -> Self {
+        let kind = match &error {
             RynkHostError::Disconnected => "Disconnected",
             RynkHostError::Io(_) => "TransportError",
             RynkHostError::DeviceNotFound(_) => "DeviceNotFound",
@@ -116,1053 +175,740 @@ impl From<RynkHostError> for wasm_bindgen::JsValue {
             RynkHostError::Encode(_) => "RequestEncodeError",
             RynkHostError::Deserialize { .. } => "ResponseDecodeError",
             RynkHostError::Layout(_) => "LayoutDecodeError",
+            RynkHostError::FrameTooLarge { .. } => "FrameTooLarge",
             RynkHostError::TrailingBytes { .. } => "ResponseTrailingBytes",
             RynkHostError::CmdMismatch { .. } => "ResponseCommandMismatch",
             RynkHostError::TopicCmd(_) => "InvalidRequestCommand",
         };
-        let err = js_sys::Error::new(&e.to_string());
-        err.set_name(kind);
-        err.into()
+        let js_error = js_sys::Error::new(&error.to_string());
+        js_error.set_name(kind);
+        js_error.into()
     }
 }
 
-// /// Rynk client over any byte link implementing the embedded-io-async
-// /// [`Read`] + [`Write`] traits. See the crate docs for the transport contract.
-// /// Cancelling an in-progress read invalidates the stream; reconnect before
-// /// issuing another operation.
-// pub struct Client {
-//     // transport: T,
-//     /// Per-read scratch; committed to `rx_buf` only after `read` returns.
-//     read_scratch: Box<[u8; READ_SCRATCH_SIZE]>,
-//     /// RX reassembly buffer.
-//     rx_buf: Vec<u8>,
-//     /// Request SEQ, cycling through `1..=255`.
-//     next_seq: u8,
-//     /// Set when the link is unrecoverable; every later call fails fast until the
-//     /// client is rebuilt.
-//     dead: bool,
-//     /// Set across the `write_all` in `send_request`, cleared once it completes.
-//     send_in_flight: bool,
-//     /// Set while assembling an inbound frame. If the future is cancelled, the
-//     /// flag remains set so the next operation rejects the desynchronized link.
-//     receive_in_flight: bool,
-//     /// Queued topic frames.
-//     events: VecDeque<TopicFrame>,
-//     /// Topics dropped from a full queue.
-//     events_dropped: u64,
-//     /// Reusable TX scratch.
-//     tx_buf: Vec<u8>,
-//     /// Device capabilities from the handshake. `Default` (all-zero) until
-//     /// `connect` fills it; only `max_payload_size` is read before then, and only
-//     /// to bound outbound frames — the host reads inbound frames unbounded.
-//     capabilities: DeviceCapabilities,
-// }
-
-pub struct Client<'a, 'b, 'c> {
-    topic_receiver: Receiver<'a, CriticalSectionRawMutex, TopicEvent, 64>,
-    message_sender: Sender<'b, CriticalSectionRawMutex, RynkMessage<'c>, 64>,
+/// Raw server-to-host topic frame with fixed payload capacity.
+#[derive(Debug, Clone)]
+pub struct TopicFrame {
+    pub cmd: Cmd,
+    payload: [u8; TOPIC_PAYLOAD_SIZE],
+    payload_len: usize,
 }
 
-impl<'a, 'b, 'c> Client<'a, 'b, 'c> {
-    pub fn new(
-        topic_receiver: Receiver<'a, CriticalSectionRawMutex, TopicEvent, 64>,
-        message_sender: Sender<'b, CriticalSectionRawMutex, RynkMessage<'c>, 64>,
-    ) -> Self {
-        Self {
-            topic_receiver,
-            message_sender,
+impl TopicFrame {
+    fn new(cmd: Cmd, payload: &[u8]) -> Result<Self, RynkHostError> {
+        if payload.len() > TOPIC_PAYLOAD_SIZE {
+            return Err(RynkHostError::FrameTooLarge {
+                len: payload.len(),
+                max: TOPIC_PAYLOAD_SIZE,
+            });
         }
+        let mut bytes = [0; TOPIC_PAYLOAD_SIZE];
+        bytes[..payload.len()].copy_from_slice(payload);
+        Ok(Self {
+            cmd,
+            payload: bytes,
+            payload_len: payload.len(),
+        })
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.payload[..self.payload_len]
     }
 }
 
-pub struct Driver<R: Read, W: Write> {
-    pub reader: R,
-    pub writer: W,
-}
-
-pub struct Reader<'a, R: Read> {
-    buf: Vec<u8>,
-    reader: R,
-    sender: Sender<'a, CriticalSectionRawMutex, TopicEvent, 64>,
-}
-
-impl<'a, R: Read> Reader<'a, R> {
-    pub fn new(reader: R, sender: Sender<'a, CriticalSectionRawMutex, TopicEvent, 64>) -> Self {
-        Self {
-            buf: Vec::new(),
-            reader,
-            sender,
-        }
-    }
-    pub async fn run(&mut self) {
-        self.reader.read(&mut self.buf).await;
-        let event = TopicEvent::WpmUpdate(0); // Mock Data
-        self.sender.send(event).await
-    }
-}
-
-pub struct Writer<'a, 'b, T: Write> {
-    buf: Vec<u8>,
-    receiver: Receiver<'b, CriticalSectionRawMutex, RynkMessage<'a>, 64>,
-    writer: T,
+/// Protocol-facing handle. It never owns transport halves or frame buffers.
+pub struct Client<'a, const FRAME: usize = DEFAULT_FRAME_SIZE, const EVENTS: usize = DEFAULT_EVENT_CAPACITY> {
+    #[cfg(feature = "std")]
+    session: Arc<Session<FRAME, EVENTS>>,
+    #[cfg(not(feature = "std"))]
+    session: &'a Session<FRAME, EVENTS>,
+    #[cfg(feature = "std")]
+    _lifetime: PhantomData<&'a ()>,
     next_seq: u8,
+    capabilities: Option<DeviceCapabilities>,
 }
 
-impl<'a, 'b, T: Write> Writer<'a, 'b, T> {
-    pub fn new(writer: T, receiver: Receiver<'b, CriticalSectionRawMutex, RynkMessage<'a>, 64>) -> Self {
-        Self {
-            buf: Vec::new(),
-            receiver,
-            writer,
-            next_seq: 0,
-        }
+impl<const FRAME: usize, const EVENTS: usize> Drop for Client<'_, FRAME, EVENTS> {
+    fn drop(&mut self) {
+        self.session.shutdown.signal(());
     }
-    pub async fn run(&mut self) {
+}
+
+impl<'a, const FRAME: usize, const EVENTS: usize> Client<'a, FRAME, EVENTS> {
+    pub async fn handshake(&mut self) -> Result<(), RynkHostError> {
+        let version: ProtocolVersion = self.request_raw(Cmd::GetVersion, &()).await?;
+        let supported = ProtocolVersion::CURRENT;
+        if version.major != supported.major {
+            return Err(RynkHostError::VersionMismatch {
+                firmware_major: version.major,
+                firmware_minor: version.minor,
+                host_major: supported.major,
+                host_max_minor: supported.minor,
+            });
+        }
+        if version.minor > supported.minor {
+            log::info!(
+                "rynk: firmware protocol v{}.{} is newer than this client's v{}.{}",
+                version.major,
+                version.minor,
+                supported.major,
+                supported.minor
+            );
+        }
+        let capabilities = self.request_raw(Cmd::GetCapabilities, &()).await?;
+        self.capabilities = Some(capabilities);
+        Ok(())
+    }
+
+    pub fn cached_capabilities(&self) -> Option<DeviceCapabilities> {
+        self.capabilities
+    }
+
+    pub(crate) fn capabilities(&self) -> DeviceCapabilities {
+        self.cached_capabilities().unwrap_or_default()
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.session.is_alive()
+    }
+
+    pub fn events_dropped(&self) -> u64 {
+        self.session.events_dropped()
+    }
+
+    pub async fn next_topic_frame(&mut self) -> Result<TopicFrame, RynkHostError> {
+        let session = &self.session;
         loop {
-            let msg = self.receiver.receive().await;
-            self.writer.write_all(msg.frame()).await.unwrap();
+            if !session.is_alive() {
+                return Err(RynkHostError::Disconnected);
+            }
+            match select3(
+                session.topics.receive(),
+                session.responses.receive(),
+                session.disconnected.wait(),
+            )
+            .await
+            {
+                Either3::First(topic) => return Ok(topic),
+                Either3::Second(Ok(_)) => {}
+                Either3::Second(Err(error)) => return Err(error),
+                Either3::Third(()) => return Err(RynkHostError::Disconnected),
+            }
+        }
+    }
+
+    pub async fn request<E: Endpoint>(&mut self, request: &E::Request) -> Result<E::Response, RynkHostError> {
+        self.request_raw(E::CMD, request).await
+    }
+
+    pub async fn request_raw<Req: Serialize, Resp: DeserializeOwned>(
+        &mut self,
+        cmd: Cmd,
+        request: &Req,
+    ) -> Result<Resp, RynkHostError> {
+        let frame = self.exchange(cmd, request, true).await?;
+        let header = RynkHeader::parse(frame.first_chunk().unwrap());
+        let (envelope, rest) =
+            postcard::take_from_bytes::<Result<Resp, RynkError>>(&frame[RYNK_HEADER_SIZE..header.frame_len()])
+                .map_err(|source| RynkHostError::Deserialize { cmd, source })?;
+        if !rest.is_empty() {
+            return Err(RynkHostError::TrailingBytes { cmd });
+        }
+        envelope.map_err(RynkHostError::Rejected)
+    }
+
+    pub async fn send_no_reply<E: Endpoint>(&mut self, request: &E::Request) -> Result<(), RynkHostError> {
+        self.exchange(E::CMD, request, false).await?;
+        Ok(())
+    }
+
+    async fn exchange<Req: Serialize>(
+        &mut self,
+        cmd: Cmd,
+        request: &Req,
+        expects_response: bool,
+    ) -> Result<[u8; FRAME], RynkHostError> {
+        if cmd.is_topic() {
+            return Err(RynkHostError::TopicCmd(cmd));
+        }
+
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.checked_add(1).unwrap_or(1);
+        let mut frame = [0; FRAME];
+        let capacity = FRAME.min(RYNK_HEADER_SIZE + u16::MAX as usize);
+        let header = RynkMessage::build(&mut frame[..capacity], cmd, seq, request)
+            .map_err(|_| RynkHostError::Encode(cmd))?
+            .header();
+        if self
+            .capabilities
+            .is_some_and(|capabilities| header.payload_len > capabilities.max_payload_size)
+        {
+            return Err(RynkHostError::Encode(cmd));
+        }
+
+        let session = &self.session;
+        if !session.is_alive() {
+            return Err(RynkHostError::Disconnected);
+        }
+        match select(
+            session.requests.send((frame, expects_response)),
+            session.disconnected.wait(),
+        )
+        .await
+        {
+            Either::First(()) => {}
+            Either::Second(()) => return Err(RynkHostError::Disconnected),
+        }
+
+        loop {
+            match select(session.responses.receive(), session.disconnected.wait()).await {
+                Either::First(Ok(frame)) => {
+                    let header = RynkHeader::parse(frame.first_chunk().unwrap());
+                    if header.seq != seq {
+                        continue;
+                    }
+                    if header.cmd != cmd {
+                        return Err(RynkHostError::CmdMismatch {
+                            sent: cmd,
+                            got: header.cmd,
+                        });
+                    }
+                    return Ok(frame);
+                }
+                Either::First(Err(error)) => return Err(error),
+                Either::Second(()) => return Err(RynkHostError::Disconnected),
+            }
         }
     }
 }
 
-// impl<T: Transport> Client<T> {
-//     /// Build an unhandshaked client.
-//     pub(crate) fn new(transport: T) -> Self {
-//         Self {
-//             transport,
-//             read_scratch: Box::new([0u8; READ_SCRATCH_SIZE]),
-//             rx_buf: Vec::with_capacity(READ_SCRATCH_SIZE),
-//             next_seq: 1,
-//             dead: false,
-//             send_in_flight: false,
-//             receive_in_flight: false,
-//             events: VecDeque::new(),
-//             events_dropped: 0,
-//             // Handshake requests carry no payload; grow after `GetCapabilities`.
-//             tx_buf: vec![0u8; RYNK_HEADER_SIZE],
-//             capabilities: DeviceCapabilities::default(),
-//         }
-//     }
+#[cfg(feature = "std")]
+impl Client<'static, DEFAULT_FRAME_SIZE, DEFAULT_EVENT_CAPACITY> {
+    /// Construct a desktop-host pair with an owned default-capacity session.
+    pub fn from_transport<T: Transport>(
+        transport: T,
+    ) -> (
+        Self,
+        Driver<'static, T::Read, T::Write, DEFAULT_FRAME_SIZE, DEFAULT_EVENT_CAPACITY>,
+    ) {
+        let (writer, reader) = transport.split();
+        Driver::new(Session::new(), reader, writer)
+    }
+}
 
-//     /// Largest frame the host may send: header + the device's advertised
-//     /// `max_payload_size`. Zero until the handshake fills it, which still admits
-//     /// the empty-payload handshake requests.
-//     fn max_frame_size(&self) -> usize {
-//         RYNK_HEADER_SIZE + self.capabilities.max_payload_size as usize
-//     }
+/// Owns and concurrently drives a [`Reader`] and [`Writer`].
+pub struct Driver<
+    'a,
+    R: Read,
+    W: Write,
+    const FRAME: usize = DEFAULT_FRAME_SIZE,
+    const EVENTS: usize = DEFAULT_EVENT_CAPACITY,
+> {
+    pub reader: Reader<'a, R, FRAME, EVENTS>,
+    pub writer: Writer<'a, W, FRAME, EVENTS>,
+    #[cfg(feature = "std")]
+    session: Arc<Session<FRAME, EVENTS>>,
+    #[cfg(not(feature = "std"))]
+    session: &'a Session<FRAME, EVENTS>,
+}
 
-//     /// Handshake: negotiate the version, then read and cache device capabilities.
-//     ///
-//     /// Rejects only major-version mismatches; same-major minors connect.
-//     pub async fn connect(transport: T) -> Result<Self, RynkHostError> {
-//         let mut client = Self::new(transport);
-//         let version: ProtocolVersion = client.request_raw(Cmd::GetVersion, &()).await?;
+#[cfg(feature = "std")]
+impl<R: Read, W: Write, const FRAME: usize, const EVENTS: usize> Driver<'static, R, W, FRAME, EVENTS> {
+    pub fn new(session: Session<FRAME, EVENTS>, reader: R, writer: W) -> (Client<'static, FRAME, EVENTS>, Self) {
+        let session = Arc::new(session);
+        let client = Client {
+            session: session.clone(),
+            _lifetime: PhantomData,
+            next_seq: 1,
+            capabilities: None,
+        };
+        let reader = Reader {
+            buf: [0; FRAME],
+            used: 0,
+            reader,
+            session: session.clone(),
+            _lifetime: PhantomData,
+        };
+        let writer = Writer {
+            writer,
+            session: session.clone(),
+            _lifetime: PhantomData,
+        };
+        (
+            client,
+            Self {
+                reader,
+                writer,
+                session,
+            },
+        )
+    }
+}
 
-//         let supported = ProtocolVersion::CURRENT;
-//         if version.major != supported.major {
-//             return Err(RynkHostError::VersionMismatch {
-//                 firmware_major: version.major,
-//                 firmware_minor: version.minor,
-//                 host_major: supported.major,
-//                 host_max_minor: supported.minor,
-//             });
-//         }
-//         if version.minor > supported.minor {
-//             log::info!(
-//                 "rynk: firmware protocol v{}.{} is newer than this client's v{}.{}; new commands/topics may be \
-//                  unavailable",
-//                 version.major,
-//                 version.minor,
-//                 supported.major,
-//                 supported.minor
-//             );
-//         }
-//         client.capabilities = client.request_raw(Cmd::GetCapabilities, &()).await?;
-//         // Grow TX scratch to the negotiated frame limit.
-//         let max_frame = client.max_frame_size();
-//         if max_frame > client.tx_buf.len() {
-//             client.tx_buf.resize(max_frame, 0);
-//         }
-//         Ok(client)
-//     }
+#[cfg(not(feature = "std"))]
+impl<'a, R: Read, W: Write, const FRAME: usize, const EVENTS: usize> Driver<'a, R, W, FRAME, EVENTS> {
+    pub fn new(session: &'a Session<FRAME, EVENTS>, reader: R, writer: W) -> (Client<'a, FRAME, EVENTS>, Self) {
+        let client = Client {
+            session,
+            next_seq: 1,
+            capabilities: None,
+        };
+        let reader = Reader {
+            buf: [0; FRAME],
+            used: 0,
+            reader,
+            session,
+        };
+        let writer = Writer { writer, session };
+        (
+            client,
+            Self {
+                reader,
+                writer,
+                session,
+            },
+        )
+    }
+}
 
-//     /// Cached capability snapshot from connect. Crate-internal: capability gating
-//     /// reads it; consumers read capabilities via the `get_capabilities` command.
-//     pub(crate) fn capabilities(&self) -> &DeviceCapabilities {
-//         &self.capabilities
-//     }
+impl<R: Read, W: Write, const FRAME: usize, const EVENTS: usize> Driver<'_, R, W, FRAME, EVENTS> {
+    pub async fn run(&mut self) -> Result<(), RynkHostError> {
+        let result = match select3(self.reader.run(), self.writer.run(), self.session.shutdown.wait()).await {
+            Either3::First(result) | Either3::Second(result) => result,
+            Either3::Third(()) => Ok(()),
+        };
+        self.session.disconnect(None);
+        result
+    }
+}
 
-//     /// The owned transport, e.g. to read connection identity.
-//     pub fn transport(&self) -> &T {
-//         &self.transport
-//     }
+impl<R: Read, W: Write, const FRAME: usize, const EVENTS: usize> Drop for Driver<'_, R, W, FRAME, EVENTS> {
+    fn drop(&mut self) {
+        self.session.disconnect(None);
+    }
+}
 
-//     /// `false` once the link is unusable. A cancelled read or write poisons the
-//     /// client — this reads `false` immediately, before the next call latches `dead`.
-//     pub fn is_alive(&self) -> bool {
-//         !self.dead && !self.send_in_flight && !self.receive_in_flight
-//     }
+/// Device-to-host frame reader and response/topic dispatcher.
+pub struct Reader<'a, R: Read, const FRAME: usize = DEFAULT_FRAME_SIZE, const EVENTS: usize = DEFAULT_EVENT_CAPACITY> {
+    buf: [u8; FRAME],
+    used: usize,
+    reader: R,
+    #[cfg(feature = "std")]
+    session: Arc<Session<FRAME, EVENTS>>,
+    #[cfg(not(feature = "std"))]
+    session: &'a Session<FRAME, EVENTS>,
+    #[cfg(feature = "std")]
+    _lifetime: PhantomData<&'a ()>,
+}
 
-//     /// Topics evicted while [`next_event`](crate::Client::next_event) lagged.
-//     ///
-//     /// Counts only overflow the client can observe; re-read critical state.
-//     pub fn events_dropped(&self) -> u64 {
-//         self.events_dropped
-//     }
+impl<'a, R: Read, const FRAME: usize, const EVENTS: usize> Reader<'a, R, FRAME, EVENTS> {
+    pub async fn run(&mut self) -> Result<(), RynkHostError> {
+        loop {
+            while let Some(header) = self.buf[..self.used]
+                .first_chunk::<RYNK_HEADER_SIZE>()
+                .map(RynkHeader::parse)
+            {
+                let frame_len = header.frame_len();
+                if frame_len > FRAME {
+                    let error = RynkHostError::FrameTooLarge {
+                        len: frame_len,
+                        max: FRAME,
+                    };
+                    self.session.disconnect(Some(error));
+                    return Err(RynkHostError::FrameTooLarge {
+                        len: frame_len,
+                        max: FRAME,
+                    });
+                }
+                if self.used < frame_len {
+                    break;
+                }
 
-//     /// Read the next topic push as a raw [`TopicFrame`]. Queued topics come first.
-//     pub async fn next_topic_frame(&mut self) -> Result<TopicFrame, RynkHostError> {
-//         if let Some(frame) = self.events.pop_front() {
-//             return Ok(frame);
-//         }
-//         if self.dead {
-//             return Err(RynkHostError::Disconnected);
-//         }
-//         loop {
-//             let (header, payload) = self.next_frame().await?;
-//             if header.cmd.is_topic() {
-//                 return Ok(TopicFrame {
-//                     cmd: header.cmd,
-//                     payload,
-//                 });
-//             }
-//             // Drop stale responses.
-//         }
-//     }
+                let payload = &self.buf[RYNK_HEADER_SIZE..frame_len];
+                if header.cmd.is_topic() {
+                    match TopicFrame::new(header.cmd, payload) {
+                        Ok(topic) => self.session.queue_topic(topic),
+                        Err(_) => self.session.record_dropped_topic(),
+                    }
+                } else {
+                    let mut frame = [0; FRAME];
+                    frame[..frame_len].copy_from_slice(&self.buf[..frame_len]);
+                    self.session.responses.send(Ok(frame)).await;
+                }
 
-//     /// One typed request/response round trip from the shared command table.
-//     pub async fn request<E: Endpoint>(&mut self, req: &E::Request) -> Result<E::Response, RynkHostError> {
-//         self.request_raw(E::CMD, req).await
-//     }
+                self.buf.copy_within(frame_len..self.used, 0);
+                self.used -= frame_len;
+            }
 
-//     /// Untyped request/response for commands not in the typed table yet.
-//     pub async fn request_raw<Req: Serialize, Resp: DeserializeOwned>(
-//         &mut self,
-//         cmd: Cmd,
-//         req: &Req,
-//     ) -> Result<Resp, RynkHostError> {
-//         if cmd.is_topic() {
-//             return Err(RynkHostError::TopicCmd(cmd));
-//         }
-//         let seq = self.send_request(cmd, req).await?;
+            if self.used == FRAME {
+                let error = RynkHostError::FrameTooLarge {
+                    len: self.used + 1,
+                    max: FRAME,
+                };
+                self.session.disconnect(Some(error));
+                return Err(RynkHostError::FrameTooLarge {
+                    len: self.used + 1,
+                    max: FRAME,
+                });
+            }
 
-//         loop {
-//             let (header, payload) = self.next_frame().await?;
-//             if header.cmd.is_topic() {
-//                 if self.events.len() == EVENT_QUEUE_CAPACITY {
-//                     self.events.pop_front();
-//                     self.events_dropped += 1;
-//                     log::debug!(
-//                         "rynk: event queue full, dropped oldest topic ({} total)",
-//                         self.events_dropped
-//                     );
-//                 }
-//                 self.events.push_back(TopicFrame {
-//                     cmd: header.cmd,
-//                     payload,
-//                 });
-//             } else if header.seq == seq {
-//                 if header.cmd != cmd {
-//                     return Err(RynkHostError::CmdMismatch {
-//                         sent: cmd,
-//                         got: header.cmd,
-//                     });
-//                 }
-//                 // Trailing bytes signal a wire/type mismatch.
-//                 let (env, rest) = postcard::take_from_bytes::<Result<Resp, RynkError>>(&payload)
-//                     .map_err(|source| RynkHostError::Deserialize { cmd, source })?;
-//                 if !rest.is_empty() {
-//                     return Err(RynkHostError::TrailingBytes { cmd });
-//                 }
-//                 return env.map_err(RynkHostError::Rejected);
-//             }
-//             // Drop stale responses.
-//         }
-//     }
+            let read = match self.reader.read(&mut self.buf[self.used..]).await {
+                Ok(0) => {
+                    self.session.disconnect(Some(RynkHostError::Disconnected));
+                    return Err(RynkHostError::Disconnected);
+                }
+                Ok(read) => read,
+                Err(error) => {
+                    let client_error = RynkHostError::io(&error);
+                    self.session.disconnect(Some(client_error));
+                    return Err(RynkHostError::io(&error));
+                }
+            };
+            self.used += read;
+        }
+    }
+}
 
-//     /// Send one request frame without waiting for a reply — for commands whose
-//     /// effect prevents one (reboot, bootloader jump).
-//     pub async fn send_no_reply<E: Endpoint>(&mut self, req: &E::Request) -> Result<(), RynkHostError> {
-//         self.send_request(E::CMD, req).await.map(|_| ())
-//     }
+/// Host-to-device request framer and writer.
+pub struct Writer<'a, W: Write, const FRAME: usize = DEFAULT_FRAME_SIZE, const EVENTS: usize = DEFAULT_EVENT_CAPACITY> {
+    writer: W,
+    #[cfg(feature = "std")]
+    session: Arc<Session<FRAME, EVENTS>>,
+    #[cfg(not(feature = "std"))]
+    session: &'a Session<FRAME, EVENTS>,
+    #[cfg(feature = "std")]
+    _lifetime: PhantomData<&'a ()>,
+}
 
-//     /// Encode one request into the TX scratch, write it, and return its SEQ
-//     /// (cycling `1..=255`).
-//     async fn send_request<Req: Serialize>(&mut self, cmd: Cmd, req: &Req) -> Result<u8, RynkHostError> {
-//         if self.dead || self.send_in_flight || self.receive_in_flight {
-//             // A cancelled wire operation leaves the stream desynced.
-//             self.dead = true;
-//             return Err(RynkHostError::Disconnected);
-//         }
-//         let seq = self.next_seq;
-//         self.next_seq = self.next_seq.checked_add(1).unwrap_or(1);
-//         // The scratch is sized to the device's advertised buffer, so a request
-//         // too large for the device fails to encode here — a local reject that
-//         // leaves the link intact.
-//         let msg = RynkMessage::build(&mut self.tx_buf, cmd, seq, req).map_err(|_| RynkHostError::Encode(cmd))?;
-//         // If dropped mid-write, the next wire op marks the link dead.
-//         self.send_in_flight = true;
-//         let result = self.transport.write_all(msg.frame()).await;
-//         self.send_in_flight = false;
-//         if let Err(e) = result {
-//             self.dead = true;
-//             return Err(RynkHostError::Io(format!("{e:?}")));
-//         }
-//         Ok(seq)
-//     }
+impl<'a, W: Write, const FRAME: usize, const EVENTS: usize> Writer<'a, W, FRAME, EVENTS> {
+    pub async fn run(&mut self) -> Result<(), RynkHostError> {
+        loop {
+            let (frame, expects_response) = self.session.requests.receive().await;
+            if !self.session.is_alive() {
+                return Err(RynkHostError::Disconnected);
+            }
 
-//     /// Read the next complete frame; read failures mark the link dead.
-//     async fn next_frame(&mut self) -> Result<(RynkHeader, Vec<u8>), RynkHostError> {
-//         if self.send_in_flight || self.receive_in_flight {
-//             // A prior wire operation was cancelled.
-//             self.dead = true;
-//             return Err(RynkHostError::Disconnected);
-//         }
-//         self.receive_in_flight = true;
-//         let result = self.next_frame_inner().await;
-//         self.receive_in_flight = false;
-//         result
-//     }
+            let frame_len = RynkHeader::parse(frame.first_chunk().unwrap()).frame_len();
+            if let Err(error) = self.writer.write_all(&frame[..frame_len]).await {
+                let client_error = RynkHostError::io(&error);
+                self.session.disconnect(Some(client_error));
+                return Err(RynkHostError::io(&error));
+            }
 
-//     async fn next_frame_inner(&mut self) -> Result<(RynkHeader, Vec<u8>), RynkHostError> {
-//         loop {
-//             let header = self.rx_buf.first_chunk::<RYNK_HEADER_SIZE>().map(RynkHeader::parse);
-//             if let Some(header) = header {
-//                 // Frames are read by their declared length and routed; the host
-//                 // never rejects one by size. Replies are correlated by SEQ and
-//                 // decoded; topics are best-effort (decode-or-Unknown). The u16
-//                 // LEN already caps a single frame at ~64 KB.
-//                 let frame_len = header.frame_len();
-//                 if self.rx_buf.len() >= frame_len {
-//                     let payload = self.rx_buf[RYNK_HEADER_SIZE..frame_len].to_vec();
-//                     self.rx_buf.drain(..frame_len);
-//                     return Ok((header, payload));
-//                 }
-//             }
+            if !expects_response {
+                self.session.responses.send(Ok(frame)).await;
+            }
+        }
+    }
+}
 
-//             let n = match self.transport.read(&mut self.read_scratch[..]).await {
-//                 Ok(0) => {
-//                     self.dead = true;
-//                     return Err(RynkHostError::Disconnected);
-//                 }
-//                 Ok(n) => n,
-//                 Err(e) => {
-//                     self.dead = true;
-//                     return Err(RynkHostError::Io(format!("{e:?}")));
-//                 }
-//             };
-//             self.rx_buf.extend_from_slice(&self.read_scratch[..n]);
-//         }
-//     }
-// }
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "std", not(target_arch = "wasm32")))]
 mod tests {
-    use std::collections::VecDeque;
+    use std::future::pending;
     use std::time::Duration;
+    use std::vec::Vec;
 
-    use embedded_io_async::ErrorKind;
-    use rmk_types::action::KeyAction;
-    use rmk_types::battery::BatteryStatus;
-    use rmk_types::connection::{ConnectionStatus, ConnectionType};
-    use rmk_types::protocol::rynk::{
-        GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, PeripheralStatus, SetComboBulkRequest,
-        SetKeymapBulkRequest, SetMorseBulkRequest, TopicEvent,
-    };
-    use tokio::time::timeout;
+    use embassy_futures::join::join;
+    use embassy_futures::select::{Either, select};
+    use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+    use embassy_sync::pipe::Pipe;
+    use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
+    use rmk_types::protocol::rynk::{RynkMessage, TopicEvent};
+    use tokio::time::{sleep, timeout};
 
     use super::*;
     use crate::IncomingTopic;
 
-    enum Step {
-        Chunk(Vec<u8>),
-        Hang,
-    }
+    type TestPipe = Pipe<NoopRawMutex, 2048>;
 
-    /// Scripted byte link: each `Chunk` is delivered across one or more reads
-    /// (partial reads handled by `pos`), `Hang` parks the reader, exhaustion
-    /// reads EOF. Writes succeed unless `fail_send` is set.
-    struct MockTransport {
-        steps: VecDeque<Step>,
-        pending: Vec<u8>,
-        pos: usize,
-        fail_send: bool,
-        /// When set, `write` parks forever — lets a test cancel a send mid-write.
-        hang_send: bool,
-    }
-    impl MockTransport {
-        fn new(steps: Vec<Step>) -> Self {
-            Self {
-                steps: steps.into(),
-                pending: Vec::new(),
-                pos: 0,
-                fail_send: false,
-                hang_send: false,
-            }
-        }
-    }
-    impl embedded_io_async::ErrorType for MockTransport {
-        type Error = ErrorKind;
-    }
-    impl embedded_io_async::Read for MockTransport {
-        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ErrorKind> {
-            while self.pos >= self.pending.len() {
-                match self.steps.pop_front() {
-                    Some(Step::Chunk(c)) => {
-                        self.pending = c;
-                        self.pos = 0;
-                    }
-                    Some(Step::Hang) => std::future::pending().await,
-                    None => return Ok(0),
-                }
-            }
-            let n = buf.len().min(self.pending.len() - self.pos);
-            buf[..n].copy_from_slice(&self.pending[self.pos..self.pos + n]);
-            self.pos += n;
-            Ok(n)
-        }
-    }
-    impl embedded_io_async::Write for MockTransport {
-        async fn write(&mut self, buf: &[u8]) -> Result<usize, ErrorKind> {
-            if self.hang_send {
-                std::future::pending::<()>().await;
-            }
-            if self.fail_send {
-                return Err(ErrorKind::Other);
-            }
-            Ok(buf.len())
-        }
-
-        async fn flush(&mut self) -> Result<(), ErrorKind> {
-            Ok(())
-        }
-    }
-
-    fn raw_client(steps: Vec<Step>) -> Client<MockTransport> {
-        // Skip the handshake but give the client a generous send budget and a
-        // scratch sized to it, so request-sending tests work without a `connect`.
-        // Other capabilities stay at their defaults, as before.
-        let mut c = Client::new(MockTransport::new(steps));
-        c.capabilities.max_payload_size = 4096;
-        c.tx_buf.resize(c.max_frame_size(), 0);
-        c
-    }
-
-    /// A bare frame: header + postcard(value). Used for raw headers and topics.
     fn frame<T: Serialize>(cmd: Cmd, seq: u8, value: &T) -> Vec<u8> {
-        let mut buf = vec![0u8; READ_SCRATCH_SIZE];
-        let msg = RynkMessage::build(&mut buf, cmd, seq, value).unwrap();
-        msg.frame().to_vec()
+        let mut bytes = vec![0; 512];
+        RynkMessage::build(&mut bytes, cmd, seq, value)
+            .unwrap()
+            .frame()
+            .to_vec()
     }
 
-    /// An `Ok` response frame, enveloped as the firmware sends it.
     fn reply<T: Serialize>(cmd: Cmd, seq: u8, value: T) -> Vec<u8> {
         frame(cmd, seq, &Ok::<T, RynkError>(value))
     }
 
-    /// A topic push frame (bare payload, SEQ 0).
-    fn topic<T: Serialize>(cmd: Cmd, value: T) -> Vec<u8> {
-        frame(cmd, 0, &value)
-    }
-
-    fn header(cmd_raw: u16, seq: u8, len: u16) -> Vec<u8> {
-        let c = cmd_raw.to_le_bytes();
-        let l = len.to_le_bytes();
-        vec![c[0], c[1], seq, l[0], l[1]]
-    }
-
-    // Tests clone this and flip only the capability under test.
-    fn caps() -> DeviceCapabilities {
+    fn capabilities() -> DeviceCapabilities {
         DeviceCapabilities {
             num_layers: 4,
             num_rows: 6,
             num_cols: 14,
-            max_combos: 8,
-            max_combo_keys: 4,
-            macro_space_size: 1024,
-            max_morse: 4,
-            max_patterns_per_key: 4,
-            max_forks: 4,
-            storage_enabled: true,
-            max_payload_size: 256,
-            macro_chunk_size: 64,
+            max_payload_size: 123,
             ..Default::default()
         }
     }
 
-    #[tokio::test]
-    async fn reply_round_trip() {
-        let mut c = raw_client(vec![Step::Chunk(reply(Cmd::GetWpm, 1, 42u16))]);
-        let got = c.get_wpm().await.unwrap();
-        assert_eq!(got, 42);
+    async fn read_request(pipe: &TestPipe) -> RynkHeader {
+        let mut reader = pipe;
+        let mut bytes = [0; RYNK_HEADER_SIZE];
+        reader.read_exact(&mut bytes).await.unwrap();
+        let header = RynkHeader::parse(&bytes);
+        let mut payload = vec![0; header.payload_len as usize];
+        reader.read_exact(&mut payload).await.unwrap();
+        header
     }
 
-    #[tokio::test]
-    async fn rejected_response_flattens() {
-        let mut c = raw_client(vec![Step::Chunk(frame(
-            Cmd::SetDefaultLayer,
-            1,
-            &Err::<(), RynkError>(RynkError::Invalid),
-        ))]);
-        let r = c.set_default_layer(9).await;
-        assert!(matches!(r, Err(RynkHostError::Rejected(RynkError::Invalid))));
+    async fn write_bytes(pipe: &TestPipe, bytes: &[u8]) {
+        let mut writer = pipe;
+        Write::write_all(&mut writer, bytes).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn trailing_bytes_rejected() {
-        // Reply declares extra bytes beyond the decoded u16.
-        let mut chunk = reply(Cmd::GetWpm, 1, 42u16);
-        chunk[3] += 2; // bump the declared LEN
-        chunk.extend_from_slice(&[0xAA, 0xBB]);
-        let mut c = raw_client(vec![Step::Chunk(chunk)]);
-        let r = c.get_wpm().await;
-        assert!(matches!(r, Err(RynkHostError::TrailingBytes { cmd: Cmd::GetWpm })));
+    async fn handshake_peer(requests: &TestPipe, responses: &TestPipe) {
+        let version = read_request(requests).await;
+        assert_eq!(version.cmd, Cmd::GetVersion);
+        write_bytes(responses, &reply(version.cmd, version.seq, ProtocolVersion::CURRENT)).await;
+
+        let capabilities_request = read_request(requests).await;
+        assert_eq!(capabilities_request.cmd, Cmd::GetCapabilities);
+        write_bytes(
+            responses,
+            &reply(capabilities_request.cmd, capabilities_request.seq, capabilities()),
+        )
+        .await;
     }
 
-    #[tokio::test]
-    async fn topic_cmd_to_request_rejected() {
-        let mut c = raw_client(vec![]);
-        let r = c.request_raw::<(), u8>(Cmd::LayerChange, &()).await;
-        assert!(matches!(r, Err(RynkHostError::TopicCmd(Cmd::LayerChange))));
-    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_reassembles_and_routes() {
+        let requests = TestPipe::new();
+        let responses = TestPipe::new();
+        let (mut client, mut driver) = Driver::new(Session::<128, 4>::new(), &responses, &requests);
 
-    #[tokio::test]
-    async fn unknown_cmd_drained_by_len() {
-        let mut chunk = header(0x7fff, 0xEE, 5);
-        chunk.extend_from_slice(&[1, 2, 3, 4, 5]);
-        chunk.extend_from_slice(&reply(Cmd::GetWpm, 1, 42u16));
-        let mut c = raw_client(vec![Step::Chunk(chunk)]);
-        let got = c.get_wpm().await.unwrap();
-        assert_eq!(got, 42);
-    }
+        let peer = async {
+            let version = read_request(&requests).await;
+            let mut bytes = frame(Cmd::LayerChange, 0, &3u8);
+            bytes.extend_from_slice(&reply(version.cmd, version.seq, ProtocolVersion::CURRENT));
+            write_bytes(&responses, &bytes[..2]).await;
+            write_bytes(&responses, &bytes[2..]).await;
 
-    #[tokio::test]
-    async fn unknown_topic_cmd_queued_by_len() {
-        let mut chunk = header(0x80ff, 0, 3);
-        chunk.extend_from_slice(&[1, 2, 3]);
-        chunk.extend_from_slice(&reply(Cmd::GetWpm, 1, 42u16));
-        let mut c = raw_client(vec![Step::Chunk(chunk)]);
-        let got = c.get_wpm().await.unwrap();
-        assert_eq!(got, 42);
-        let ev = c.next_event().await.unwrap();
-        assert!(
-            matches!(ev, IncomingTopic::Unknown(ref f) if f.cmd == Cmd::from_raw(0x80ff) && f.payload == [1, 2, 3])
-        );
-    }
+            let capabilities_request = read_request(&requests).await;
+            write_bytes(
+                &responses,
+                &reply(capabilities_request.cmd, capabilities_request.seq, capabilities()),
+            )
+            .await;
 
-    #[tokio::test]
-    async fn unknown_response_cmd_mismatch_detected() {
-        let mut c = raw_client(vec![Step::Chunk(reply(Cmd::from_raw(0x7fff), 1, 42u16))]);
-        let r = c.get_wpm().await;
-        assert!(matches!(
-            r,
-            Err(RynkHostError::CmdMismatch {
-                sent: Cmd::GetWpm,
-                got,
-            }) if got == Cmd::from_raw(0x7fff)
-        ));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn cancelled_mid_read_latches_link_dead() {
-        let mut c = raw_client(vec![Step::Chunk(header(Cmd::GetWpm.raw(), 0xEE, 100)), Step::Hang]);
-        let r1 = timeout(Duration::from_millis(10), c.get_wpm()).await;
-        assert!(r1.is_err());
-        assert!(!c.is_alive(), "a cancelled read poisons the link");
-        let r2 = c.get_wpm().await;
-        assert!(matches!(r2, Err(RynkHostError::Disconnected)));
-        assert!(!c.is_alive());
-    }
-
-    #[tokio::test]
-    async fn oversized_inbound_topic_is_read_not_fatal() {
-        // A topic larger than the negotiated max_payload_size (256) is no longer
-        // rejected by size: the host reads it by length and surfaces it, link intact.
-        let mut big = header(0x80ff, 0, 300);
-        big.extend_from_slice(&vec![0xAB; 300]);
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, caps())),
-            Step::Chunk(big),
-            Step::Chunk(reply(Cmd::GetWpm, 3, 7u16)),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
-        let ev = client.next_event().await.unwrap();
-        assert!(
-            matches!(ev, IncomingTopic::Unknown(ref f) if f.cmd == Cmd::from_raw(0x80ff) && f.payload.len() == 300)
-        );
-        assert!(client.is_alive());
-        assert_eq!(client.get_wpm().await.unwrap(), 7);
-    }
-
-    #[tokio::test]
-    async fn link_death_fails_fast() {
-        let mut c = raw_client(vec![]);
-        let r1 = c.get_wpm().await;
-        assert!(matches!(r1, Err(RynkHostError::Disconnected)));
-        assert!(!c.is_alive());
-        let r2 = c.get_wpm().await;
-        assert!(matches!(r2, Err(RynkHostError::Disconnected)));
-        let ev = c.next_event().await;
-        assert!(matches!(ev, Err(RynkHostError::Disconnected)));
-    }
-
-    #[tokio::test]
-    async fn send_failure_marks_link_dead() {
-        let mut c = raw_client(vec![Step::Chunk(reply(Cmd::GetWpm, 1, 42u16))]);
-        c.transport.fail_send = true;
-        let r = c.get_wpm().await;
-        assert!(matches!(r, Err(RynkHostError::Io(_))));
-        assert!(!c.is_alive(), "a failed send is unrecoverable");
-        // Queued bytes do not revive a dead link.
-        let r2 = c.get_wpm().await;
-        assert!(matches!(r2, Err(RynkHostError::Disconnected)));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn cancelled_mid_send_latches_dead() {
-        // A cancelled mid-write desyncs the peer; the next request must fail fast.
-        let mut c = raw_client(vec![Step::Chunk(reply(Cmd::GetWpm, 1, 42u16))]);
-        c.transport.hang_send = true;
-        let cancelled = timeout(Duration::from_millis(10), c.get_wpm()).await;
-        assert!(cancelled.is_err(), "the hung send must be cancelled by the timeout");
-        assert!(!c.is_alive(), "a cancelled send poisons the link");
-
-        c.transport.hang_send = false;
-        let r = c.get_wpm().await;
-        assert!(matches!(r, Err(RynkHostError::Disconnected)));
-        assert!(!c.is_alive(), "a cancelled mid-send must latch the link dead");
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn cancelled_mid_send_then_next_event_fails_fast() {
-        // Read-only APIs must also fail after a cancelled send.
-        let mut c = raw_client(vec![Step::Chunk(topic(Cmd::LayerChange, 3u8))]);
-        c.transport.hang_send = true;
-        let cancelled = timeout(Duration::from_millis(10), c.get_wpm()).await;
-        assert!(cancelled.is_err());
-
-        c.transport.hang_send = false;
-        let ev = c.next_event().await;
-        assert!(matches!(ev, Err(RynkHostError::Disconnected)));
-        assert!(!c.is_alive());
-    }
-
-    #[tokio::test]
-    async fn topic_during_request_is_queued() {
-        let mut chunk = topic(Cmd::LayerChange, 3u8);
-        chunk.extend_from_slice(&reply(Cmd::GetWpm, 1, 42u16));
-        let mut c = raw_client(vec![Step::Chunk(chunk)]);
-        let got = c.get_wpm().await.unwrap();
-        assert_eq!(got, 42);
-        let ev = c.next_event().await.unwrap();
-        assert!(matches!(ev, IncomingTopic::Topic(TopicEvent::LayerChange(3))));
-    }
-
-    #[tokio::test]
-    async fn next_event_reads_from_link() {
-        let mut c = raw_client(vec![Step::Chunk(topic(Cmd::LayerChange, 7u8))]);
-        let ev = c.next_event().await.unwrap();
-        assert!(matches!(ev, IncomingTopic::Topic(TopicEvent::LayerChange(7))));
-    }
-
-    #[tokio::test]
-    async fn stale_seq_reply_dropped() {
-        let mut chunk = reply(Cmd::GetWpm, 0xEE, 99u16);
-        chunk.extend_from_slice(&reply(Cmd::GetWpm, 1, 42u16));
-        let mut c = raw_client(vec![Step::Chunk(chunk)]);
-        let got = c.get_wpm().await.unwrap();
-        assert_eq!(got, 42);
-    }
-
-    #[tokio::test]
-    async fn cmd_mismatch_detected() {
-        let mut c = raw_client(vec![Step::Chunk(reply(Cmd::GetSleepState, 1, true))]);
-        let r = c.get_wpm().await;
-        assert!(matches!(
-            r,
-            Err(RynkHostError::CmdMismatch {
-                sent: Cmd::GetWpm,
-                got: Cmd::GetSleepState,
-            })
-        ));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn caller_cancel_mid_reply_wait_latches_link_dead() {
-        let mut c = raw_client(vec![Step::Hang]);
-        let cancelled = timeout(Duration::from_millis(10), c.get_wpm()).await;
-        assert!(cancelled.is_err(), "outer timeout cancels request 1 mid-wait");
-        assert!(!c.is_alive(), "the cancelled read poisons the link immediately");
-        assert!(matches!(c.get_wpm().await, Err(RynkHostError::Disconnected)));
-        assert!(!c.is_alive());
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn caller_cancel_next_event_mid_reassembly_latches_link_dead() {
-        let mut c = raw_client(vec![
-            Step::Chunk(header(Cmd::LayerChange.raw(), 0, 1)), // topic header, payload pending
-            Step::Hang,
-        ]);
-        let cancelled = timeout(Duration::from_millis(10), c.next_event()).await;
-        assert!(cancelled.is_err());
-        assert!(!c.is_alive(), "a cancelled next_event poisons the link");
-        assert!(matches!(c.get_wpm().await, Err(RynkHostError::Disconnected)));
-        assert!(!c.is_alive());
-    }
-
-    #[tokio::test]
-    async fn connect_handshake_loopback() {
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, caps())),
-            Step::Chunk(reply(Cmd::GetWpm, 3, 37u16)),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
-        assert_eq!(client.capabilities().num_cols, 14);
-        assert_eq!(client.get_wpm().await.unwrap(), 37);
-    }
-
-    #[tokio::test]
-    async fn capability_gate_rejects_without_wire_send() {
-        // The mock has no BLE reply; any wire send would disconnect.
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, caps())),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
-        assert!(!client.capabilities().ble_enabled);
-        let r = client.get_battery_status().await;
-        assert!(matches!(r, Err(RynkHostError::Unsupported(Cmd::GetBatteryStatus, _))));
-        assert!(client.is_alive(), "a locally-gated reject must not kill the link");
-    }
-
-    #[tokio::test]
-    async fn wired_split_peripheral_status_is_supported() {
-        let status = PeripheralStatus {
-            connected: true,
-            battery: BatteryStatus::Unavailable,
+            let wpm = read_request(&requests).await;
+            write_bytes(&responses, &reply(wpm.cmd, 0xee, 99u16)).await;
+            write_bytes(&responses, &reply(wpm.cmd, wpm.seq, 42u16)).await;
         };
-        let mut capabilities = caps();
-        capabilities.is_split = true;
-        capabilities.ble_enabled = false;
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, capabilities)),
-            Step::Chunk(reply(Cmd::GetPeripheralStatus, 3, status)),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
-        assert_eq!(client.get_peripheral_status(0).await.unwrap(), status);
-    }
-
-    #[tokio::test]
-    async fn oversized_request_rejected_locally() {
-        // Too-large requests are rejected locally without killing the link.
-        let mut tiny = caps();
-        tiny.max_payload_size = 4;
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, tiny)),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
-        let r = client.set_key(0, 0, 0, KeyAction::Morse(3)).await;
-        assert!(matches!(r, Err(RynkHostError::Encode(Cmd::SetKeyAction))));
-        assert!(
-            client.is_alive(),
-            "a locally-rejected oversized request must not kill the link"
-        );
-    }
-
-    #[tokio::test]
-    async fn bulk_methods_gate_without_wire_send() {
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, caps())),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
-        assert!(!client.capabilities().bulk_transfer_supported);
-
-        let keymap_req = SetKeymapBulkRequest {
-            layer: 0,
-            start_row: 0,
-            start_col: 0,
-            actions: Default::default(),
-        };
-        let combo_req = SetComboBulkRequest {
-            start_index: 0,
-            configs: Default::default(),
-        };
-        let morse_req = SetMorseBulkRequest {
-            start_index: 0,
-            configs: Default::default(),
+        let client_task = async {
+            client.handshake().await.unwrap();
+            assert_eq!(client.cached_capabilities().unwrap().num_cols, 14);
+            assert!(matches!(
+                client.next_event().await.unwrap(),
+                IncomingTopic::Topic(TopicEvent::LayerChange(3))
+            ));
+            assert_eq!(client.get_wpm().await.unwrap(), 42);
         };
 
-        assert!(matches!(
-            client.get_keymap_bulk(0, 0, 0).await,
-            Err(RynkHostError::Unsupported(Cmd::GetKeymapBulk, _))
-        ));
-        assert!(matches!(
-            client.set_keymap_bulk(keymap_req).await,
-            Err(RynkHostError::Unsupported(Cmd::SetKeymapBulk, _))
-        ));
-        assert!(matches!(
-            client.get_combo_bulk(0).await,
-            Err(RynkHostError::Unsupported(Cmd::GetComboBulk, _))
-        ));
-        assert!(matches!(
-            client.set_combo_bulk(combo_req).await,
-            Err(RynkHostError::Unsupported(Cmd::SetComboBulk, _))
-        ));
-        assert!(matches!(
-            client.get_morse_bulk(0).await,
-            Err(RynkHostError::Unsupported(Cmd::GetMorseBulk, _))
-        ));
-        assert!(matches!(
-            client.set_morse_bulk(morse_req).await,
-            Err(RynkHostError::Unsupported(Cmd::SetMorseBulk, _))
-        ));
-        assert!(client.is_alive(), "locally-gated bulk rejects must not kill the link");
+        match select(driver.run(), join(peer, client_task)).await {
+            Either::First(result) => panic!("driver stopped early: {result:?}"),
+            Either::Second(((), ())) => {}
+        }
     }
 
-    #[tokio::test]
-    async fn bulk_methods_round_trip_when_supported() {
-        let mut supported = caps();
-        supported.bulk_transfer_supported = true;
-        supported.max_bulk_keys = 8;
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelled_request_does_not_cancel_reader() {
+        let requests = TestPipe::new();
+        let responses = TestPipe::new();
+        let (mut client, mut driver) = Driver::new(Session::<128, 4>::new(), &responses, &requests);
 
-        let keymap_resp = GetKeymapBulkResponse {
-            actions: Default::default(),
+        let peer = async {
+            handshake_peer(&requests, &responses).await;
+            let first = read_request(&requests).await;
+            assert_eq!(first.cmd, Cmd::GetWpm);
+            sleep(Duration::from_millis(20)).await;
+            write_bytes(&responses, &reply(first.cmd, first.seq, 12u16)).await;
+
+            let second = read_request(&requests).await;
+            assert_eq!(second.cmd, Cmd::GetSleepState);
+            write_bytes(&responses, &reply(second.cmd, second.seq, true)).await;
         };
-        let combo_resp = GetComboBulkResponse {
-            configs: Default::default(),
+        let client_task = async {
+            client.handshake().await.unwrap();
+            assert!(timeout(Duration::from_millis(5), client.get_wpm()).await.is_err());
+            assert!(client.get_sleep_state().await.unwrap());
+            assert!(client.is_alive());
         };
-        let morse_resp = GetMorseBulkResponse {
-            configs: Default::default(),
-        };
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, supported)),
-            Step::Chunk(reply(Cmd::SetKeymapBulk, 3, ())),
-            Step::Chunk(reply(Cmd::GetKeymapBulk, 4, keymap_resp.clone())),
-            Step::Chunk(reply(Cmd::SetComboBulk, 5, ())),
-            Step::Chunk(reply(Cmd::GetComboBulk, 6, combo_resp.clone())),
-            Step::Chunk(reply(Cmd::SetMorseBulk, 7, ())),
-            Step::Chunk(reply(Cmd::GetMorseBulk, 8, morse_resp.clone())),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
 
-        client
-            .set_keymap_bulk(SetKeymapBulkRequest {
-                layer: 0,
-                start_row: 0,
-                start_col: 0,
-                actions: Default::default(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(client.get_keymap_bulk(0, 0, 0).await.unwrap(), keymap_resp);
-
-        client
-            .set_combo_bulk(SetComboBulkRequest {
-                start_index: 0,
-                configs: Default::default(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(client.get_combo_bulk(0).await.unwrap(), combo_resp);
-
-        client
-            .set_morse_bulk(SetMorseBulkRequest {
-                start_index: 0,
-                configs: Default::default(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(client.get_morse_bulk(0).await.unwrap(), morse_resp);
+        match select(driver.run(), join(peer, client_task)).await {
+            Either::First(result) => panic!("driver stopped early: {result:?}"),
+            Either::Second(((), ())) => {}
+        }
     }
 
-    #[tokio::test]
-    async fn read_all_keymap_concatenates_pages() {
-        // Ten keys at four per page yields 4, 4, then 2.
-        let mut supported = caps();
-        supported.bulk_transfer_supported = true;
-        supported.max_bulk_keys = 4;
-        supported.num_layers = 1;
-        supported.num_rows = 1;
-        supported.num_cols = 10;
+    #[tokio::test(flavor = "current_thread")]
+    async fn full_topic_queue_drops_oldest_without_blocking_reply() {
+        let requests = TestPipe::new();
+        let responses = TestPipe::new();
+        let (mut client, mut driver) = Driver::new(Session::<128, 2>::new(), &responses, &requests);
 
-        let page = |base: u8, n: u8| GetKeymapBulkResponse {
-            actions: (0..n).map(|i| KeyAction::Morse(base + i)).collect(),
+        let peer = async {
+            handshake_peer(&requests, &responses).await;
+            let request = read_request(&requests).await;
+            let mut bytes = Vec::new();
+            for layer in 0..3u8 {
+                bytes.extend_from_slice(&frame(Cmd::LayerChange, 0, &layer));
+            }
+            bytes.extend_from_slice(&reply(request.cmd, request.seq, 7u16));
+            write_bytes(&responses, &bytes).await;
         };
-        let expected: Vec<KeyAction> = (0u8..10).map(KeyAction::Morse).collect();
-
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, supported)),
-            Step::Chunk(reply(Cmd::GetKeymapBulk, 3, page(0, 4))),
-            Step::Chunk(reply(Cmd::GetKeymapBulk, 4, page(4, 4))),
-            Step::Chunk(reply(Cmd::GetKeymapBulk, 5, page(8, 2))),
-            Step::Chunk(reply(Cmd::GetWpm, 6, 42u16)),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
-        assert_eq!(client.read_all_keymap().await.unwrap(), expected);
-        // Trailing reply proves the pager stopped after three fetches.
-        assert_eq!(client.get_wpm().await.unwrap(), 42);
-    }
-
-    #[tokio::test]
-    async fn read_all_stops_on_clamped_empty_page() {
-        // An empty clamped page stops the read before `total`.
-        let mut supported = caps();
-        supported.bulk_transfer_supported = true;
-        supported.max_bulk_keys = 4;
-        supported.num_layers = 1;
-        supported.num_rows = 1;
-        supported.num_cols = 10;
-
-        let full = GetKeymapBulkResponse {
-            actions: (0u8..4).map(KeyAction::Morse).collect(),
+        let client_task = async {
+            client.handshake().await.unwrap();
+            assert_eq!(client.get_wpm().await.unwrap(), 7);
+            assert_eq!(client.events_dropped(), 1);
+            assert!(matches!(
+                client.next_event().await.unwrap(),
+                IncomingTopic::Topic(TopicEvent::LayerChange(1))
+            ));
         };
-        let empty = GetKeymapBulkResponse { actions: vec![] };
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, supported)),
-            Step::Chunk(reply(Cmd::GetKeymapBulk, 3, full)),
-            Step::Chunk(reply(Cmd::GetKeymapBulk, 4, empty)),
-            Step::Chunk(reply(Cmd::GetWpm, 5, 7u16)),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
-        assert_eq!(client.read_all_keymap().await.unwrap().len(), 4);
-        // Trailing reply proves the empty page halted the loop.
-        assert_eq!(client.get_wpm().await.unwrap(), 7);
+
+        match select(driver.run(), join(peer, client_task)).await {
+            Either::First(result) => panic!("driver stopped early: {result:?}"),
+            Either::Second(((), ())) => {}
+        }
     }
 
-    #[tokio::test]
-    async fn write_all_keymap_chunks_by_page_size() {
-        // Five actions at two per page should send 2, 2, then 1.
-        let mut supported = caps();
-        supported.bulk_transfer_supported = true;
-        supported.max_bulk_keys = 2;
+    struct HangingReader;
 
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, supported)),
-            Step::Chunk(reply(Cmd::SetKeymapBulk, 3, ())),
-            Step::Chunk(reply(Cmd::SetKeymapBulk, 4, ())),
-            Step::Chunk(reply(Cmd::SetKeymapBulk, 5, ())),
-            Step::Chunk(reply(Cmd::GetWpm, 6, 99u16)),
-        ]);
-        let mut client = Client::connect(t).await.unwrap();
-        let actions: Vec<KeyAction> = (0u8..5).map(KeyAction::Morse).collect();
-        client.write_all_keymap(&actions).await.unwrap();
-        assert_eq!(client.get_wpm().await.unwrap(), 99);
+    impl ErrorType for HangingReader {
+        type Error = ErrorKind;
     }
 
-    #[tokio::test]
-    async fn next_event_decodes_typed_payload() {
-        // Known topic payloads decode into typed events.
-        let status = ConnectionStatus {
-            preferred: ConnectionType::Ble,
+    impl Read for HangingReader {
+        async fn read(&mut self, _buf: &mut [u8]) -> Result<usize, Self::Error> {
+            pending().await
+        }
+    }
+
+    struct FailingWriter;
+
+    impl ErrorType for FailingWriter {
+        type Error = ErrorKind;
+    }
+
+    impl Write for FailingWriter {
+        async fn write(&mut self, _buf: &[u8]) -> Result<usize, Self::Error> {
+            Err(ErrorKind::Other)
+        }
+
+        async fn flush(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn writer_failure_reaches_client() {
+        let (mut client, mut driver) = Driver::new(Session::<64, 2>::new(), HangingReader, FailingWriter);
+        client.capabilities = Some(DeviceCapabilities {
+            max_payload_size: 59,
             ..Default::default()
+        });
+
+        let (driver_result, ()) = join(driver.run(), async {
+            assert!(matches!(client.get_wpm().await, Err(RynkHostError::Io(_))));
+            assert!(!client.is_alive());
+        })
+        .await;
+        assert!(matches!(driver_result, Err(RynkHostError::Io(_))));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn protocol_response_errors_do_not_desynchronize_driver() {
+        let requests = TestPipe::new();
+        let responses = TestPipe::new();
+        let (mut client, mut driver) = Driver::new(Session::<128, 2>::new(), &responses, &requests);
+
+        let peer = async {
+            handshake_peer(&requests, &responses).await;
+
+            let rejected = read_request(&requests).await;
+            write_bytes(
+                &responses,
+                &frame(rejected.cmd, rejected.seq, &Err::<(), RynkError>(RynkError::Invalid)),
+            )
+            .await;
+
+            let mismatch = read_request(&requests).await;
+            write_bytes(&responses, &reply(Cmd::GetSleepState, mismatch.seq, true)).await;
+
+            let trailing = read_request(&requests).await;
+            let mut bytes = reply(trailing.cmd, trailing.seq, 9u16);
+            let payload_len = u16::from_le_bytes([bytes[3], bytes[4]]) + 1;
+            bytes[3..5].copy_from_slice(&payload_len.to_le_bytes());
+            bytes.push(0xaa);
+            write_bytes(&responses, &bytes).await;
         };
-        let mut c = raw_client(vec![Step::Chunk(topic(Cmd::ConnectionChange, status))]);
-        let ev = c.next_event().await.unwrap();
-        match ev {
-            IncomingTopic::Topic(TopicEvent::ConnectionChange(s)) => assert_eq!(s.preferred, ConnectionType::Ble),
-            other => panic!("expected ConnectionChange, got {other:?}"),
+        let client_task = async {
+            client.handshake().await.unwrap();
+            assert!(matches!(
+                client.set_default_layer(9).await,
+                Err(RynkHostError::Rejected(RynkError::Invalid))
+            ));
+            assert!(matches!(
+                client.get_wpm().await,
+                Err(RynkHostError::CmdMismatch {
+                    sent: Cmd::GetWpm,
+                    got: Cmd::GetSleepState,
+                })
+            ));
+            assert!(matches!(
+                client.get_wpm().await,
+                Err(RynkHostError::TrailingBytes { cmd: Cmd::GetWpm })
+            ));
+            assert!(client.is_alive());
+        };
+
+        match select(driver.run(), join(peer, client_task)).await {
+            Either::First(result) => panic!("driver stopped early: {result:?}"),
+            Either::Second(((), ())) => {}
         }
     }
 
-    #[tokio::test]
-    async fn next_event_undecodable_payload_is_unknown() {
-        // Undecodable known topics stay visible as Unknown.
-        let mut c = raw_client(vec![Step::Chunk(header(Cmd::LayerChange.raw(), 0, 0))]);
-        let ev = c.next_event().await.unwrap();
-        assert!(matches!(ev, IncomingTopic::Unknown(ref f) if f.cmd == Cmd::LayerChange && f.payload.is_empty()));
-    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_reply_completes_after_writer_accepts_frame() {
+        let requests = TestPipe::new();
+        let responses = TestPipe::new();
+        let (mut client, mut driver) = Driver::new(Session::<64, 2>::new(), &responses, &requests);
+        client.capabilities = Some(DeviceCapabilities {
+            max_payload_size: 59,
+            ..Default::default()
+        });
 
-    #[tokio::test]
-    async fn connect_rejects_newer_major() {
-        let newer = ProtocolVersion {
-            major: ProtocolVersion::CURRENT.major + 1,
-            minor: 0,
+        let peer = async {
+            let request = read_request(&requests).await;
+            assert_eq!(request.cmd, Cmd::Reboot);
         };
-        let t = MockTransport::new(vec![Step::Chunk(reply(Cmd::GetVersion, 1, newer))]);
-        let err = Client::connect(t).await.err().expect("connect must fail");
-        assert!(matches!(err, RynkHostError::VersionMismatch { .. }));
-    }
-
-    #[tokio::test]
-    async fn connect_accepts_newer_minor() {
-        // Minor version is informational within the same major.
-        let newer = ProtocolVersion {
-            major: ProtocolVersion::CURRENT.major,
-            minor: ProtocolVersion::CURRENT.minor + 1,
+        let client_task = async {
+            client.reboot().await.unwrap();
         };
-        let t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, newer)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, caps())),
-        ]);
-        Client::connect(t).await.expect("same-major newer-minor must connect");
+
+        match select(driver.run(), join(peer, client_task)).await {
+            Either::First(result) => panic!("driver stopped early: {result:?}"),
+            Either::Second(((), ())) => {}
+        }
     }
 
-    #[tokio::test]
-    async fn connect_retries_same_transport_after_version_mismatch() {
-        // The failed version probe consumes a clean round trip, so retry can reuse `&mut T`.
-        let newer_major = ProtocolVersion {
-            major: ProtocolVersion::CURRENT.major + 1,
-            minor: 0,
-        };
-        let mut t = MockTransport::new(vec![
-            Step::Chunk(reply(Cmd::GetVersion, 1, newer_major)),
-            Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-            Step::Chunk(reply(Cmd::GetCapabilities, 2, caps())),
-        ]);
-        let err = Client::connect(&mut t).await.err().expect("newer major must mismatch");
-        assert!(matches!(err, RynkHostError::VersionMismatch { .. }));
-        Client::connect(&mut t).await.expect("retry over the same transport");
-    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancellation_while_enqueueing_leaves_channel_unchanged() {
+        let (mut client, _driver) = Driver::new(Session::<64, 2>::new(), HangingReader, FailingWriter);
+        client.capabilities = Some(DeviceCapabilities {
+            max_payload_size: 59,
+            ..Default::default()
+        });
+        let mut occupied = [0; 64];
+        RynkMessage::build(&mut occupied, Cmd::GetVersion, 1, &()).unwrap();
+        assert!(client.session.requests.try_send((occupied, true)).is_ok());
 
-    #[tokio::test(start_paused = true)]
-    async fn caller_can_timeout_silent_connect() {
-        let t = MockTransport::new(vec![Step::Hang]);
-        let err = timeout(Duration::from_millis(10), Client::connect(t)).await;
-        assert!(err.is_err());
-    }
-
-    #[tokio::test]
-    async fn rynk_device_trait_drives_lifecycle() {
-        use crate::RynkDevice;
-
-        // Generic `RynkDevice` consumers should not name the transport type.
-        struct MockDevice;
-        impl MockDevice {
-            async fn discover() -> Result<Vec<Self>, RynkHostError> {
-                Ok(vec![MockDevice])
-            }
-        }
-        impl RynkDevice for MockDevice {
-            type Transport = MockTransport;
-            fn label(&self) -> String {
-                "mock".into()
-            }
-            async fn open(self) -> Result<MockTransport, RynkHostError> {
-                Ok(MockTransport::new(vec![
-                    Step::Chunk(reply(Cmd::GetVersion, 1, ProtocolVersion::CURRENT)),
-                    Step::Chunk(reply(Cmd::GetCapabilities, 2, caps())),
-                    Step::Chunk(reply(Cmd::GetWpm, 3, 7u16)),
-                ]))
-            }
-        }
-
-        async fn drive<D: RynkDevice>(d: D) -> u16 {
-            assert_eq!(d.label(), "mock");
-            let mut client = d.connect().await.unwrap();
-            client.get_wpm().await.unwrap()
-        }
-
-        let devices = MockDevice::discover().await.unwrap();
-        let device = devices.into_iter().next().unwrap();
-        assert_eq!(drive(device).await, 7);
+        assert!(timeout(Duration::from_millis(1), client.get_wpm()).await.is_err());
+        let (queued, expects_response) = client.session.requests.try_receive().unwrap();
+        assert_eq!(RynkHeader::parse(queued.first_chunk().unwrap()).cmd, Cmd::GetVersion);
+        assert!(expects_response);
+        assert!(client.session.requests.try_receive().is_err());
     }
 }

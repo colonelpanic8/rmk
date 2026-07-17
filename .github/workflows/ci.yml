@@ -86,7 +86,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-          targets: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown,thumbv6m-none-eabi
       - name: Install host system dependencies
         run: |
           sudo apt-get update

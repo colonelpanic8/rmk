@@ -5,8 +5,8 @@
 //! immutable tag the `rynk` firmware prepends regardless of the user-configured
 //! VID/serial. The OS caches the serial string at enumeration, so discovery reads
 //! it on Windows/macOS/Linux *without opening the port*; the app then picks a
-//! device and calls [`RynkDevice::connect`], which opens it and completes the Rynk
-//! handshake — the authoritative confirmation.
+//! device and calls [`RynkDevice::connect`], then runs the returned driver and
+//! completes the Rynk handshake — the authoritative confirmation.
 //!
 //! Discovery deliberately never opens a port: opening a CDC port toggles DTR
 //! (resetting some MCUs), so only the chosen device is opened, exactly once. The
@@ -15,7 +15,7 @@
 use embedded_io_adapters::tokio_1::FromTokio;
 use rmk_types::protocol::rynk::RYNK_SERIAL_MAGIC;
 use rynk::io::{Read, Write};
-use rynk::{RynkDevice, RynkHostError};
+use rynk::{RynkDevice, RynkHostError, Transport};
 use tokio_serial::{ClearBuffer, SerialPort as _, SerialPortBuilderExt, SerialPortInfo, SerialPortType, SerialStream};
 
 /// Required by serial APIs; ignored by USB CDC-ACM devices.
@@ -27,6 +27,16 @@ const CDC_BAUD_RATE: u32 = 115_200;
 /// the keyboard stays connected and usable.
 pub struct SerialTransport {
     io: FromTokio<SerialStream>,
+}
+
+impl Transport for SerialTransport {
+    type Write = FromTokio<tokio::io::WriteHalf<SerialStream>>;
+    type Read = FromTokio<tokio::io::ReadHalf<SerialStream>>;
+
+    fn split(self) -> (Self::Write, Self::Read) {
+        let (reader, writer) = tokio::io::split(self.io.into_inner());
+        (FromTokio::new(writer), FromTokio::new(reader))
+    }
 }
 
 impl rynk::io::ErrorType for SerialTransport {
@@ -52,7 +62,7 @@ impl Write for SerialTransport {
 /// A Rynk keyboard found by [`SerialDevice::discover`], for building a device
 /// picker. Carries the port path and the USB product name (the display
 /// [`label`](RynkDevice::label)); version and capabilities are read by
-/// [`connect`](RynkDevice::connect), the first time the port is opened.
+/// [`Client::handshake`](rynk::Client::handshake), after the port is opened.
 pub struct SerialDevice {
     pub path: String,
     /// USB product string from the device descriptor, if it carried one.
@@ -255,15 +265,26 @@ mod tests {
         let device = scripted_firmware(peer, ProtocolVersion::CURRENT);
 
         // Success proves the serial handshake round trip.
-        Client::connect(transport(ours)).await.unwrap();
+        let (mut client, mut driver) = Client::from_transport(transport(ours));
+        tokio::select! {
+            result = driver.run() => panic!("driver stopped during handshake: {result:?}"),
+            result = client.handshake() => result.unwrap(),
+        }
         device.await.unwrap();
     }
 
     #[tokio::test]
     async fn connect_times_out_on_silent_peer() {
-        // Client::connect is timeout-free; callers bound silent peers.
+        // Client::handshake is timeout-free; callers bound silent peers.
         let (_peer, ours) = pty_pair();
-        let timed_out = tokio::time::timeout(Duration::from_secs(1), Client::connect(transport(ours))).await;
+        let (mut client, mut driver) = Client::from_transport(transport(ours));
+        let timed_out = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::select! {
+                result = driver.run() => result,
+                result = client.handshake() => result,
+            }
+        })
+        .await;
         assert!(timed_out.is_err(), "connect must not resolve against a silent peer");
     }
 }
