@@ -51,6 +51,11 @@ println!("L0(0,0) = {key:?}");
 Each method returns the response value directly; a device rejection surfaces as
 `RynkHostError::Rejected`, so `?` propagates both transport and firmware errors.
 
+## Design documents
+
+- [Concurrent host architecture](docs/host-concurrency-design.md) describes the
+  proposed `Client` + `Driver` design for concurrent requests and topic delivery.
+
 ## License
 
 MIT OR Apache-2.0
