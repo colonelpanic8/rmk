@@ -29,7 +29,6 @@ use rynk::rmk_types::protocol::rynk::{
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
 
-use crate::device::WebDevice;
 use crate::transport::{JsByteLink, WasmReader, WasmWriter};
 
 /// Live Rynk client handle exposed to JavaScript.
@@ -37,28 +36,23 @@ use crate::transport::{JsByteLink, WasmReader, WasmWriter};
 /// Wraps the session's `Client` + `Driver`. All methods are `&self`: a parked
 /// `next_topic()` pull and one request may run concurrently (full-duplex), but
 /// keep requests serialized — the protocol allows a single request in flight.
-/// Dropping the handle, or closing the JS link, ends the session.
+/// Dropping the handle, or closing the JS link, ends the session; the link
+/// itself stays open until the page closes it.
 #[wasm_bindgen]
 pub struct RynkClient {
     client: Client,
     driver: Mutex<CriticalSectionRawMutex, Driver<WasmReader, WasmWriter>>,
-    label: String,
 }
 
-/// Handshake over an already-open JS link and return a client. Routes through
-/// [`WebDevice`] — the web transport's [`RynkDevice`] — so the browser path uses
-/// the same connect lifecycle as the native serial/BLE transports. `label` is the
-/// display name the page showed in its picker (WebHID `productName`, or a derived
-/// string); omit it or pass `null` for a default.
+/// Handshake over an already-open JS link and return a client. The link is the
+/// web transport's [`RynkDevice`], so the browser path uses the same connect
+/// lifecycle as the native serial/BLE transports.
 #[wasm_bindgen]
-pub async fn connect(link: JsByteLink, label: Option<String>) -> Result<RynkClient, JsValue> {
-    let device = WebDevice::new(link, label);
-    let label = device.label();
-    let (client, driver) = device.connect().await?;
+pub async fn connect(link: JsByteLink) -> Result<RynkClient, JsValue> {
+    let (client, driver) = link.connect().await?;
     Ok(RynkClient {
         client,
         driver: Mutex::new(driver),
-        label,
     })
 }
 
@@ -82,12 +76,6 @@ impl RynkClient {
 
 #[wasm_bindgen]
 impl RynkClient {
-    /// The display name the page supplied at connect time (WebHID `productName`,
-    /// a page-derived string, or the default when none was given).
-    pub fn label(&self) -> String {
-        self.label.clone()
-    }
-
     /// Pull the next recognized topic push (server→host). Parks until one
     /// arrives; rejects when the link dies. Unrecognized topics are skipped.
     /// JS drives this in a loop, like the native `next_topic()` pull, and it

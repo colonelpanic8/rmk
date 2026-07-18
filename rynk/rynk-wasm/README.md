@@ -80,9 +80,6 @@ The object passed to `connect(link)` only needs this shape:
     // Browser transport -> Uint8Array for wasm.
     // Return an empty Uint8Array only when the link is closed.
   },
-  async close() {
-    // Release browser resources. Safe to call more than once.
-  },
 }
 ```
 
@@ -101,8 +98,9 @@ major-specific wasm package.
   frame.
 - `recv()` returns `new Uint8Array(0)` only for EOF. That becomes
   `Disconnected` in the wasm API.
-- `close()` should release locks, close devices, and wake any pending `recv()`.
-  It should be idempotent.
+- Closing the link is the page's job; `rynk-wasm` never closes it. Close on
+  every exit path — including a rejected `connect()` — releasing locks and
+  waking any pending `recv()`, which then returns the EOF empty array.
 - Only `rynk-wasm` should call `recv()` after `connect()`. If your page needs to
   probe the protocol version first, do it before calling `connect()`.
 - Transport-specific framing must be hidden below this boundary. For example,
@@ -156,11 +154,11 @@ Call `requestPort()` inside a user gesture such as a button click.
 
 ## RynkClient API
 
-`connect(link, label?)` performs the Rynk handshake and returns a live
-`RynkClient` that owns the `rynk::Client` protocol state machine directly. The
-optional `label` is the display name the page showed in its picker (WebHID
-`productName`, or a string the page derived for WebSerial); read it back with
-`client.label()`. The session is full duplex: a parked `next_topic()` loop and
+`connect(link)` performs the Rynk handshake and returns a live `RynkClient`
+that owns the `rynk::Client` protocol state machine directly. The page keeps
+its own display name for the device (WebHID `productName`, or whatever it
+showed in its picker) — the client does not carry one.
+The session is full duplex: a parked `next_topic()` loop and
 request calls run concurrently. Keep requests themselves serialized — await each
 request before issuing the next; the protocol allows a single request in flight.
 
