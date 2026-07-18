@@ -234,7 +234,7 @@ mod tests {
 
     #[tokio::test]
     async fn connect_times_out_on_silent_peer() {
-        // RynkDevice::connect is timeout-free; callers bound silent peers.
+        // A silent peer must remain pending; callers own the timeout.
         let (_peer, ours) = pty_pair();
         let timed_out = tokio::time::timeout(Duration::from_secs(1), PtyDevice(ours).connect()).await;
         assert!(timed_out.is_err(), "connect must not resolve against a silent peer");

@@ -201,14 +201,14 @@ impl Client {
     ) -> Result<Resp, RynkHostError> {
         let seq = self.send_request(cmd, req).await?;
         loop {
-            // Parks forever if the link dies; the session topology cancels it.
+            // This wait has no disconnect signal; session supervision must cancel it when the driver exits.
             let mut bytes = self.resp.wait().await;
             let Ok(msg) = RynkMessage::try_from(&mut bytes[..]) else {
                 continue;
             };
             let header = msg.header();
             if header.seq != seq {
-                // A stale reply to a cancelled request.
+                // Skip a stale reply from a cancelled request.
                 continue;
             }
             if header.cmd != cmd {
@@ -217,7 +217,7 @@ impl Client {
                     got: header.cmd,
                 });
             }
-            // Trailing bytes signal a wire/type mismatch.
+            // Reject postcard prefixes so host/firmware type drift is not silently accepted.
             let (env, rest) = postcard::take_from_bytes::<Result<Resp, RynkError>>(msg.payload())
                 .map_err(|source| RynkHostError::Deserialize { cmd, source })?;
             if !rest.is_empty() {
@@ -240,12 +240,11 @@ impl Client {
         if cmd.is_topic() {
             return Err(RynkHostError::TopicCmd(cmd));
         }
-        // The closure is total, so both arms carry the previous value.
+        // `fetch_update` cannot fail because the closure always returns `Some`.
         let (Ok(seq) | Err(seq)) = self.next_seq.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| {
             Some(if s == u8::MAX { 1 } else { s + 1 })
         });
-        // Sizing the buffer to the device's advertised limit turns an
-        // oversized request into a local reject that leaves the link intact.
+        // Encode against the device's limit so oversized requests fail before touching the link.
         let limit = RYNK_HEADER_SIZE + self.capabilities.max_payload_size as usize;
         #[cfg(feature = "alloc")]
         let mut buf: FrameBytes = vec![0; limit];
@@ -319,8 +318,7 @@ impl<R: Read, W: Write> Driver<R, W> {
 
         let rx_loop = async {
             loop {
-                // Read into the buffer tail; the cursor commits in the same
-                // poll the read returns, so cancellation never loses bytes.
+                // Commit in the same poll so cancelling `run` cannot lose received bytes.
                 let n = match reader.read(rx.unfilled()).await {
                     Ok(0) => break RynkHostError::Disconnected,
                     Ok(n) => n,
@@ -329,9 +327,7 @@ impl<R: Read, W: Write> Driver<R, W> {
                 rx.commit(n);
                 while let Some(header) = rx.filled().first_chunk().map(RynkHeader::parse) {
                     let frame_len = header.frame_len();
-                    // A frame the fixed buffer can never hold: discard it by its
-                    // declared length to resync (mirrors the firmware). Alloc
-                    // builds grow the buffer instead, so the branch is theirs only.
+                    // Fixed buffers cannot grow; discard the declared frame length to resynchronize.
                     #[cfg(not(feature = "alloc"))]
                     if frame_len > rx.buf.len() {
                         log::debug!("rynk: dropping {frame_len}-byte frame exceeding the RX buffer");
@@ -355,8 +351,7 @@ impl<R: Read, W: Write> Driver<R, W> {
                         match TopicBytes::try_from(frame) {
                             Ok(bytes) => {
                                 if let Err(TrySendError::Full(bytes)) = client.topics.try_send(bytes) {
-                                    // Full: drop the oldest so the pump never
-                                    // blocks on a slow topic consumer.
+                                    // Keep RX non-blocking by evicting the oldest best-effort topic.
                                     let _ = client.topics.try_receive();
                                     log::debug!("rynk: topic queue full, dropped oldest");
                                     let _ = client.topics.try_send(bytes);
@@ -366,8 +361,7 @@ impl<R: Read, W: Write> Driver<R, W> {
                         }
                     } else {
                         match FrameBytes::try_from(frame) {
-                            // A latest-wins overwrite: a previous reply can only
-                            // still sit here when its request was cancelled.
+                            // A pending reply is stale after request cancellation; keep the latest.
                             Ok(bytes) => client.resp.signal(bytes),
                             Err(_) => log::debug!("rynk: reply exceeds the frame buffer, dropped"),
                         }

@@ -114,8 +114,6 @@ async fn run_first<D: RynkDevice>(
     let (client, mut driver) = tokio::time::timeout(HANDSHAKE_TIMEOUT, device.connect())
         .await
         .map_err(|_| format!("handshake timed out over {what}"))??;
-    // The session lives exactly as long as this select: if the link dies the
-    // sweep is cancelled; when the sweep finishes the session drops.
     match select(driver.run(&client), run_all(&client, over_ble)).await {
         Either::First(err) => Err(format!("link died during the sweep: {err}").into()),
         Either::Second(res) => res,
@@ -124,7 +122,6 @@ async fn run_first<D: RynkDevice>(
 
 /// Exercise non-reboot Rynk commands.
 async fn run_all(client: &Client, over_ble: bool) -> Result<(), Box<dyn std::error::Error>> {
-    // The handshake already cached the capability snapshot.
     let caps = client.capabilities();
     let version = client.get_version().await?;
     let mut fails = 0u32;
@@ -143,7 +140,6 @@ async fn run_all(client: &Client, over_ble: bool) -> Result<(), Box<dyn std::err
     );
 
     info!("── system ──");
-    // `get_version` was already exercised for the banner above.
     report(&mut fails, "get_capabilities", client.get_capabilities().await);
 
     info!("── keymap ──");

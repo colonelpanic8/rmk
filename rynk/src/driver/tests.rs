@@ -72,8 +72,7 @@ impl embedded_io_async::ErrorType for MockRead {
 impl Read for MockRead {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ErrorKind> {
         while self.pos >= self.pending.len() {
-            // Pop only once a step completes: reads are cancelled at select
-            // exit, and a blocking step must survive into the next `run`.
+            // Consume a step only after it completes so a cancelled read resumes the same step.
             match self.steps.front_mut() {
                 Some(Step::Chunk(c)) => {
                     self.pending = std::mem::take(c);
@@ -152,7 +151,6 @@ fn topic<T: Serialize>(cmd: Cmd, value: T) -> Vec<u8> {
     frame(cmd, 0, &value)
 }
 
-// Tests clone this and flip only the capability under test.
 fn caps() -> DeviceCapabilities {
     DeviceCapabilities {
         num_layers: 4,
@@ -209,9 +207,8 @@ async fn rejected_response_flattens() {
 
 #[tokio::test]
 async fn trailing_bytes_rejected() {
-    // Reply declares extra bytes beyond the decoded u16.
     let mut chunk = reply(Cmd::GetWpm, 1, 42u16);
-    chunk[3] += 2; // bump the declared LEN
+    chunk[3] += 2; // LEN low byte
     chunk.extend_from_slice(&[0xAA, 0xBB]);
     let (client, mut driver) = raw_session(vec![Step::AwaitWrites(1), Step::Chunk(chunk), Step::Hang]);
     let r = drive(&mut driver, &client, client.get_wpm()).await;
@@ -220,7 +217,7 @@ async fn trailing_bytes_rejected() {
 
 #[tokio::test]
 async fn topic_cmd_to_request_rejected() {
-    // The reject happens before any wire traffic, so no driver is needed.
+    // Topic commands are rejected before enqueueing, so the driver need not run.
     let (client, _driver) = raw_session(vec![]);
     let r = client.request_raw::<(), u8>(Cmd::LayerChange, &()).await;
     assert!(matches!(r, Err(RynkHostError::TopicCmd(Cmd::LayerChange))));
@@ -286,8 +283,6 @@ async fn topic_during_request_is_queued() {
 
 #[tokio::test]
 async fn request_and_next_topic_run_full_duplex() {
-    // One branch waits for a reply while the other receives a topic — the
-    // two consume different channels and never block each other.
     let mut chunk = topic(Cmd::LayerChange, 7u8);
     chunk.extend_from_slice(&reply(Cmd::GetWpm, 1, 42u16));
     let (client, mut driver) = raw_session(vec![Step::AwaitWrites(1), Step::Chunk(chunk), Step::Hang]);
@@ -324,8 +319,6 @@ async fn cmd_mismatch_detected() {
 
 #[tokio::test(start_paused = true)]
 async fn cancelled_request_does_not_poison_the_link() {
-    // Request 1 (seq 1) gets no reply and is cancelled by its timeout;
-    // request 2 (seq 2) succeeds over the same session.
     let (client, mut driver) = raw_session(vec![
         Step::AwaitWrites(2),
         Step::Chunk(reply(Cmd::GetWpm, 2, 42u16)),
@@ -343,8 +336,6 @@ async fn cancelled_request_does_not_poison_the_link() {
 
 #[tokio::test(start_paused = true)]
 async fn stale_reply_of_cancelled_request_is_dropped() {
-    // Request 1's reply arrives only after its caller gave up; request 2
-    // must skip it by SEQ and still get its own answer.
     let (client, mut driver) = raw_session(vec![
         Step::AwaitWrites(2),
         Step::Chunk(reply(Cmd::GetWpm, 1, 99u16)),
@@ -363,7 +354,6 @@ async fn stale_reply_of_cancelled_request_is_dropped() {
 
 #[tokio::test]
 async fn topic_queue_overflow_drops_oldest() {
-    // One more topic than the queue holds: the first is evicted, the rest arrive.
     let mut chunk = Vec::new();
     for i in 0..=TOPIC_QUEUE_CAPACITY as u8 {
         chunk.extend_from_slice(&topic(Cmd::LayerChange, i));
@@ -396,7 +386,6 @@ async fn connect_session(mut steps: Vec<Step>, trailing: Vec<Step>) -> (Client, 
 async fn capability_gate_rejects_without_wire_send() {
     let (client, _driver) = connect_session(handshake_steps(caps()), vec![Step::Hang]).await;
     assert!(!client.capabilities().ble_enabled);
-    // The gate rejects locally; no driver polling is needed.
     let r = client.get_battery_status().await;
     assert!(matches!(r, Err(RynkHostError::Unsupported(Cmd::GetBatteryStatus, _))));
 }
@@ -552,7 +541,6 @@ async fn bulk_methods_round_trip_when_supported() {
 
 #[tokio::test]
 async fn read_all_keymap_concatenates_pages() {
-    // Ten keys at four per page yields 4, 4, then 2.
     let mut supported = caps();
     supported.bulk_transfer_supported = true;
     supported.max_bulk_keys = 4;
@@ -582,7 +570,7 @@ async fn read_all_keymap_concatenates_pages() {
     .await;
     drive(&mut driver, &client, async {
         assert_eq!(client.read_all_keymap().await.unwrap(), expected);
-        // Trailing reply proves the pager stopped after three fetches.
+        // The distinct trailing command detects an unexpected fourth fetch.
         assert_eq!(client.get_wpm().await.unwrap(), 42);
     })
     .await;
@@ -616,7 +604,7 @@ async fn read_all_stops_on_clamped_empty_page() {
     .await;
     drive(&mut driver, &client, async {
         assert_eq!(client.read_all_keymap().await.unwrap().len(), 4);
-        // Trailing reply proves the empty page halted the loop.
+        // The distinct trailing command detects a fetch after the empty page.
         assert_eq!(client.get_wpm().await.unwrap(), 7);
     })
     .await;
@@ -624,7 +612,6 @@ async fn read_all_stops_on_clamped_empty_page() {
 
 #[tokio::test]
 async fn write_all_keymap_chunks_by_page_size() {
-    // Five actions at two per page should send 2, 2, then 1.
     let mut supported = caps();
     supported.bulk_transfer_supported = true;
     supported.max_bulk_keys = 2;
@@ -672,7 +659,6 @@ async fn connect_rejects_newer_major() {
 
 #[tokio::test]
 async fn connect_accepts_newer_minor() {
-    // Minor version is informational within the same major.
     let newer = ProtocolVersion {
         major: ProtocolVersion::CURRENT.major,
         minor: ProtocolVersion::CURRENT.minor + 1,
@@ -701,7 +687,6 @@ async fn rynk_device_trait_drives_lifecycle() {
     async fn run_first<D: RynkDevice>(d: D) -> u16 {
         assert_eq!(d.label(), "mock");
         let (client, mut driver) = d.connect().await.unwrap();
-        // The handshake filled the capability snapshot before returning.
         assert_eq!(client.capabilities().num_cols, 14);
         match select(driver.run(&client), client.get_wpm()).await {
             Either::First(err) => panic!("driver died: {err}"),

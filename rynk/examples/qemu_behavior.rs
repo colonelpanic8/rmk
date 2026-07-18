@@ -100,8 +100,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|_| format!("Rynk handshake timed out over QEMU TCP serial at {addr}"))??;
 
-    // The session lives exactly as long as this select: a dead link cancels
-    // the script; the finished script drops the session.
     match select(driver.run(&client), script(&client)).await {
         Either::First(err) => Err(format!("link died during the script: {err}").into()),
         Either::Second(res) => res,

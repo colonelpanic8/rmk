@@ -80,7 +80,7 @@ impl Write for BleWriter {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         let n = buf.len().min(self.write_chunk);
         self.output.write(&buf[..n]).await.map_err(|e| {
-            // The driver reports only the ErrorKind; the detail lives here.
+            // Preserve the GATT error detail before the driver reduces it to `ErrorKind`.
             log::warn!("rynk-ble: gatt write: {e}");
             std::io::Error::other("gatt write")
         })?;

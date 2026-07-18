@@ -63,12 +63,10 @@ impl Read for WasmReader {
                 let link: JsByteLink = self.link.0.clone().unchecked_into();
                 self.recv = Some(Box::pin(async move { link.recv().await }));
             }
-            // Poll in place: a cancelled read() leaves the future parked in
-            // `self`, so the per-call session select can cancel freely.
+            // Retain the future so a cancelled read resumes the same JS receive.
             let value = self.recv.as_mut().unwrap().await.map_err(|_| ErrorKind::Other)?;
             self.recv = None;
-            // A non-bytes result is a broken link implementation, not the
-            // documented empty-array EOF — surface it as an error.
+            // Only an empty byte array is EOF; any other JS value is invalid data.
             let chunk = value.dyn_into::<Uint8Array>().map_err(|_| ErrorKind::InvalidData)?;
             if chunk.length() == 0 {
                 return Ok(0); // EOF

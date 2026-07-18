@@ -82,9 +82,7 @@
         }
       }
 
-      // Pull topic pushes until the link closes; runs concurrently with the
-      // request calls — the wasm client is full duplex. On an unexpected link
-      // death this loop is the first to notice and owns the teardown.
+      // The topic pump owns teardown when it first observes link failure.
       async function pumpTopics(c) {
         try {
           for (;;) {
@@ -120,10 +118,7 @@
         return out;
       }
 
-      // Shared buffered byte link: a transport supplies its byte source (via
-      // `start(push, end)`), `send`, and `close`; this owns the rx buffer, the
-      // frame parsing, and the pre-wasm version probe — the page's only copy
-      // of that knowledge.
+      // Share framing and the pre-wasm version probe across Serial and HID.
       function framedLink({ start, send, close }) {
         let rx = new Uint8Array(0);
         let closed = false;
@@ -154,7 +149,6 @@
         }
 
         return {
-          // Probe GetVersion before loading version-specific wasm.
           async probeVersion() {
             await send(frame(CMD_GET_VERSION, 1, new Uint8Array(0)));
             // Ignore topic pushes that arrive before the reply.
@@ -177,7 +171,6 @@
         };
       }
 
-      // WebSerial byte link: one reader task feeds the shared buffer.
       function link(port) {
         const reader = port.readable.getReader();
         let writer;
@@ -213,8 +206,7 @@
       }
 
       // WebHID reaches the vendor HID report on an OS-bonded keyboard.
-      // Each 32-byte report carries a fragment of the same Rynk byte stream as
-      // serial; only the padding trim and report-sized writes are HID-specific.
+      // Serial and HID carry the same Rynk byte stream; only report padding differs.
       function hidLink(device) {
         const N = RYNK_HID_REPORT_SIZE;     // 32
         let remaining = 0;   // bytes left in the in-flight rynk frame; 0 at a boundary
@@ -233,7 +225,6 @@
             };
             device.addEventListener("inputreport", onReport);
           },
-          // Write one Rynk frame as fixed-size HID reports.
           async send(bytes) {
             for (let off = 0; off < bytes.length; off += N) {
               const chunk = bytes.subarray(off, off + N);
@@ -262,11 +253,10 @@
 
       // One live session across both transports.
       let port = null, device = null, l = null, core = null, client = null, connected = false;
-      let busy = false;   // a request batch (status read / unlock poll) is running
+      let busy = false;
 
       async function teardown() {
-        // Clear the session refs first: the topic pump's rejection checks
-        // `client` to decide whether teardown already ran.
+        // Clear refs before closing: link shutdown rejects pumpTopics, which otherwise re-enters teardown.
         const link = l, p = port;
         port = null; device = null; l = null; core = null; client = null; connected = false;
         busy = false;
@@ -275,7 +265,6 @@
         serialBtn.disabled = false; bleBtn.disabled = false;
         statusBtn.hidden = true; statusBtn.disabled = false;
         unlockBtn.hidden = true; unlockBtn.disabled = false;
-        // Closing the link EOFs the transport, rejecting the parked next_topic() pump.
         if (link) await link.close();
         else if (p) { try { await p.close(); } catch {} }
       }
@@ -305,7 +294,6 @@
             + `${caps.max_combos} combos, ${caps.max_forks} forks, ${caps.max_morse} morse, `
             + `${caps.macro_space_size} bytes macro storage, ble=${caps.ble_enabled}\n`);
 
-          // Full duplex: topics stream concurrently with everything below.
           pumpTopics(client);
           logTopic("— listening; type on the keyboard —");
 
@@ -358,8 +346,6 @@
         return hidLink(device);
       }));
 
-      // Run one on-demand request batch against the pinned session: bounce if
-      // one is already running, disable the batch buttons, restore on exit.
       async function withBusy(fn) {
         if (!client || busy) return;
         const c = client;
@@ -379,8 +365,7 @@
         }
       }
 
-      // Poll while the user holds the physical unlock keys. The held keys also
-      // emit topic pushes — watch the Topics pane while polling.
+      // Unlock polling intentionally overlaps topic pushes from the held keys.
       unlockBtn.addEventListener("click", () => withBusy(async (c) => {
           const start = await c.get_lock_status();
           if (!start.locked) {
@@ -409,7 +394,6 @@
           }
       }));
 
-      // Re-read live status on demand; topics keep streaming while this runs.
       statusBtn.addEventListener("click", () => withBusy(async (c) => {
           log("\n— status —");
           await show("current layer", () => c.get_current_layer());

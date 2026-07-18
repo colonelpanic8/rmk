@@ -179,7 +179,6 @@ impl Client {
     /// [`LayoutInfo`], not an error.
     #[cfg(feature = "alloc")]
     pub async fn get_layout(&self) -> Result<LayoutInfo, RynkHostError> {
-        // Caps how much a device's advertised `total_len` can make us allocate.
         const MAX_LAYOUT_BLOB_LEN: usize = 64 * 1024;
         let first = self.request::<command::GetLayout>(&0u32).await?;
         let total_len = first.total_len as usize;
@@ -189,9 +188,7 @@ impl Client {
             )));
         }
         let mut collected: Vec<u8> = first.bytes.to_vec();
-        // Page forward by byte offset until the advertised length (a device
-        // ignoring `offset` and looping the same page also terminates here).
-        // An empty page can't make progress — stop (also the empty-blob case).
+        // The advertised length bounds repeated or over-long pages; an empty page ends a stalled transfer.
         while !collected.is_empty() && collected.len() < total_len {
             let chunk = self.request::<command::GetLayout>(&(collected.len() as u32)).await?;
             if chunk.bytes.is_empty() {
@@ -199,7 +196,6 @@ impl Client {
             }
             collected.extend_from_slice(&chunk.bytes);
         }
-        // Truncate to the advertised total so an over-long page can't grow the blob.
         collected.truncate(total_len);
         LayoutInfo::from_compressed_blob(&collected).map_err(RynkHostError::Layout)
     }
@@ -375,8 +371,6 @@ impl Client {
     }
 }
 
-// Whole-resource pagers, built on the low-level bulk calls for capability and
-// range checks. Alloc-only: they collect into growable Vecs.
 #[cfg(feature = "alloc")]
 impl Client {
     /// Read the whole keymap (every layer, row-major) by paging `GetKeymapBulk`.
@@ -481,8 +475,7 @@ impl Client {
         items: &[Item],
         mut store: impl AsyncFnMut(&Self, u16, Vec<Item>) -> Result<(), RynkHostError>,
     ) -> Result<(), RynkHostError> {
-        // `page` is 0 only when bulk is unsupported; chunk by 1 so the first
-        // `store` hits the low-level gate instead of panicking in `chunks(0)`.
+        // Preserve the capability error path instead of panicking in `chunks(0)`.
         let mut start: u16 = 0;
         for chunk in items.chunks(page.max(1)) {
             store(self, start, chunk.to_vec()).await?;

@@ -178,7 +178,6 @@ async fn client_against_run_session() {
         assert_eq!(layout.variants.len(), 2, "two render variants");
         assert_eq!(layout.variants[1].keys.len(), 2, "variant b hides one key");
 
-        // Server topic push decodes into a typed TopicEvent.
         publish_event(LayerChangeEvent::new(3));
         let ev = client.next_topic().await;
         assert!(
@@ -238,7 +237,7 @@ async fn lock_gate_rejects_and_reports() {
             "expected Rejected(Locked), got {gated:?}"
         );
 
-        // UnlockPoll arms the attempt; with no key held it stays locked.
+        // Polling arms the attempt but cannot unlock without the configured key.
         let polled = client.unlock_poll().await.unwrap();
         assert!(polled.locked);
         assert!(polled.unlocking);
