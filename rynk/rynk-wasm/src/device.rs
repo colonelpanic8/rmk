@@ -7,9 +7,11 @@
 //! and [`connect`](RynkDevice::connect) (the trait default) handshakes it —
 //! with no Rust-side `discover`.
 
+use std::rc::Rc;
+
 use rynk::{RynkDevice, RynkHostError};
 
-use crate::transport::{JsByteLink, WasmTransport};
+use crate::transport::{JsByteLink, LinkShared, WasmReader, WasmWriter};
 
 /// A web Rynk keyboard: an already-open JS byte link, discovered and opened by
 /// the browser page, plus the name the page showed in its picker.
@@ -27,7 +29,8 @@ impl WebDevice {
 }
 
 impl RynkDevice for WebDevice {
-    type Transport = WasmTransport;
+    type Read = WasmReader;
+    type Write = WasmWriter;
 
     /// The name the page showed in its chooser (WebHID `productName`, or whatever
     /// it derived for WebSerial), or a default when the page supplied none. The
@@ -36,10 +39,17 @@ impl RynkDevice for WebDevice {
         self.label.clone().unwrap_or_else(|| "Rynk keyboard".into())
     }
 
-    /// Wrap the JS link as a byte transport, carrying the page's label so the
-    /// connected client can read it back. Infallible: JS already opened it.
-    async fn open(self) -> Result<WasmTransport, RynkHostError> {
-        let label = self.label();
-        Ok(WasmTransport::new(self.link, label))
+    /// Hand out the link's halves. Infallible: JS already opened it.
+    async fn open(self) -> Result<(WasmWriter, WasmReader), RynkHostError> {
+        let link = Rc::new(LinkShared(self.link));
+        Ok((
+            WasmWriter { link: link.clone() },
+            WasmReader {
+                link,
+                recv: None,
+                pending: Vec::new(),
+                pos: 0,
+            },
+        ))
     }
 }

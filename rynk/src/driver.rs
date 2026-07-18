@@ -12,7 +12,7 @@
 //! ```text
 //! request()    encode → message ─→ Driver: write_all
 //! Driver: read → reassemble → route by the CMD topic bit:
-//!          topic frame → topics ─→ next_event(): decode
+//!          topic frame → topics ─→ next_topic(): decode
 //!          reply frame → resp   ─→ request(): SEQ match + decode
 //! ```
 //!
@@ -29,6 +29,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, TrySendError};
+use embassy_sync::signal::Signal;
 use embedded_io_async::{Error as _, ErrorKind, Read, Write};
 use rmk_types::protocol::rynk::endpoint::Endpoint;
 use rmk_types::protocol::rynk::{
@@ -47,15 +48,15 @@ type FrameBytes = Vec<u8>;
 #[cfg(not(feature = "alloc"))]
 type FrameBytes = heapless::Vec<u8, { rmk_types::constants::RYNK_BUFFER_SIZE }>;
 
-/// A topic frame. Topic payloads are small; the no-alloc bound is rounded
-/// headroom over the largest topic in the table.
+/// A topic frame. The no-alloc bound tracks the topic table exactly, so a
+/// newer-minor firmware's extended topic (trailing bytes) is dropped there.
 #[cfg(feature = "alloc")]
 type TopicBytes = Vec<u8>;
 #[cfg(not(feature = "alloc"))]
-type TopicBytes = heapless::Vec<u8, { RYNK_HEADER_SIZE + 64 }>;
+type TopicBytes = heapless::Vec<u8, { RYNK_HEADER_SIZE + rmk_types::protocol::rynk::MAX_TOPIC_PAYLOAD }>;
 
 /// Queued topic frames before the oldest is dropped.
-const TOPIC_QUEUE_CAPACITY: usize = 64;
+const TOPIC_QUEUE_CAPACITY: usize = 8;
 
 /// Errors from Rynk host.
 #[derive(Debug, Error)]
@@ -64,6 +65,11 @@ pub enum RynkHostError {
     Disconnected,
     #[error("io error: {0:?}")]
     Io(ErrorKind),
+    /// A transport step (GATT attach, port open, …) failed, with its detail —
+    /// what a picker/GUI shows when a chosen device can't be reached.
+    #[cfg(feature = "alloc")]
+    #[error("transport {0} failed: {1}")]
+    Transport(&'static str, String),
     #[cfg(feature = "alloc")]
     #[error("device not found: {0}")]
     DeviceNotFound(String),
@@ -111,7 +117,7 @@ impl From<RynkHostError> for wasm_bindgen::JsValue {
     fn from(e: RynkHostError) -> Self {
         let kind = match &e {
             RynkHostError::Disconnected => "Disconnected",
-            RynkHostError::Io(_) => "TransportError",
+            RynkHostError::Io(_) | RynkHostError::Transport(..) => "TransportError",
             RynkHostError::DeviceNotFound(_) => "DeviceNotFound",
             RynkHostError::Rejected(_) => "Rejected",
             RynkHostError::Unsupported(..) => "Unsupported",
@@ -135,9 +141,9 @@ impl From<RynkHostError> for wasm_bindgen::JsValue {
 pub struct Client {
     /// Client → Driver: request frames awaiting the writer.
     message: Channel<CS, FrameBytes, 1>,
-    /// Driver → requester: reply frames. Capacity 1, latest-wins — one
-    /// request in flight means a queue would only hold stale replies.
-    resp: Channel<CS, FrameBytes, 1>,
+    /// Driver → requester: reply frames. A latest-wins slot — one request
+    /// in flight means anything older is a stale reply.
+    resp: Signal<CS, FrameBytes>,
     /// Driver → topic consumer. Drop-oldest on overflow; topics are
     /// best-effort by contract (a missed push is recovered via `get_*`).
     topics: Channel<CS, TopicBytes, TOPIC_QUEUE_CAPACITY>,
@@ -152,7 +158,7 @@ impl Client {
     pub(crate) fn new() -> Self {
         Self {
             message: Channel::new(),
-            resp: Channel::new(),
+            resp: Signal::new(),
             topics: Channel::new(),
             next_seq: AtomicU8::new(1),
             capabilities: DeviceCapabilities::default(),
@@ -169,7 +175,7 @@ impl Client {
     ///
     /// Parks until a topic arrives; if the link dies it never resolves — the
     /// surrounding `select` (or driver-task watch) cancels it.
-    pub async fn next_event(&self) -> TopicEvent {
+    pub async fn next_topic(&self) -> TopicEvent {
         loop {
             let mut bytes = self.topics.receive().await;
             let Ok(msg) = RynkMessage::try_from(&mut bytes[..]) else {
@@ -196,7 +202,7 @@ impl Client {
         let seq = self.send_request(cmd, req).await?;
         loop {
             // Parks forever if the link dies; the session topology cancels it.
-            let mut bytes = self.resp.receive().await;
+            let mut bytes = self.resp.wait().await;
             let Ok(msg) = RynkMessage::try_from(&mut bytes[..]) else {
                 continue;
             };
@@ -234,12 +240,10 @@ impl Client {
         if cmd.is_topic() {
             return Err(RynkHostError::TopicCmd(cmd));
         }
-        // Err is unreachable (the closure is total) and carries the same value.
-        let seq = match self.next_seq.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| {
+        // The closure is total, so both arms carry the previous value.
+        let (Ok(seq) | Err(seq)) = self.next_seq.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| {
             Some(if s == u8::MAX { 1 } else { s + 1 })
-        }) {
-            Ok(prev) | Err(prev) => prev,
-        };
+        });
         // Sizing the buffer to the device's advertised limit turns an
         // oversized request into a local reject that leaves the link intact.
         let limit = RYNK_HEADER_SIZE + self.capabilities.max_payload_size as usize;
@@ -325,9 +329,11 @@ impl<R: Read, W: Write> Driver<R, W> {
                 rx.commit(n);
                 while let Some(header) = rx.filled().first_chunk().map(RynkHeader::parse) {
                     let frame_len = header.frame_len();
-                    if frame_len > rx.capacity() {
-                        // A frame the buffer can never hold: discard it by its
-                        // declared length to resync (mirrors the firmware).
+                    // A frame the fixed buffer can never hold: discard it by its
+                    // declared length to resync (mirrors the firmware). Alloc
+                    // builds grow the buffer instead, so the branch is theirs only.
+                    #[cfg(not(feature = "alloc"))]
+                    if frame_len > rx.buf.len() {
                         log::debug!("rynk: dropping {frame_len}-byte frame exceeding the RX buffer");
                         let mut remaining = frame_len - rx.filled().len();
                         rx.clear();
@@ -360,12 +366,9 @@ impl<R: Read, W: Write> Driver<R, W> {
                         }
                     } else {
                         match FrameBytes::try_from(frame) {
-                            Ok(bytes) => {
-                                // Latest-wins: a stale reply only exists when
-                                // its request was cancelled.
-                                let _ = client.resp.try_receive();
-                                let _ = client.resp.try_send(bytes);
-                            }
+                            // A latest-wins overwrite: a previous reply can only
+                            // still sit here when its request was cancelled.
+                            Ok(bytes) => client.resp.signal(bytes),
                             Err(_) => log::debug!("rynk: reply exceeds the frame buffer, dropped"),
                         }
                     }
@@ -390,13 +393,17 @@ impl<R: Read, W: Write> Driver<R, W> {
 }
 
 /// RX reassembly buffer: bytes land in the tail, whole frames are consumed
-/// from the front. Alloc builds grow it on demand; no-alloc builds fix it at
-/// the firmware's full-frame size and drain larger frames by length.
+/// from the front by advancing a head cursor — compaction happens once per
+/// `read` (in [`unfilled`](Self::unfilled)), not once per frame, so a batch
+/// of frames in one read costs one memmove. Alloc builds grow the buffer on
+/// demand; no-alloc builds fix it at the firmware's full-frame size and drain
+/// larger frames by length.
 struct RxBuf {
     #[cfg(feature = "alloc")]
     buf: Vec<u8>,
     #[cfg(not(feature = "alloc"))]
     buf: [u8; rmk_types::constants::RYNK_BUFFER_SIZE],
+    head: usize,
     filled: usize,
 }
 
@@ -411,15 +418,21 @@ impl RxBuf {
             buf: vec![0; READ_CHUNK],
             #[cfg(not(feature = "alloc"))]
             buf: [0; rmk_types::constants::RYNK_BUFFER_SIZE],
+            head: 0,
             filled: 0,
         }
     }
 
     fn filled(&self) -> &[u8] {
-        &self.buf[..self.filled]
+        &self.buf[self.head..self.filled]
     }
 
     fn unfilled(&mut self) -> &mut [u8] {
+        if self.head > 0 {
+            self.buf.copy_within(self.head..self.filled, 0);
+            self.filled -= self.head;
+            self.head = 0;
+        }
         #[cfg(feature = "alloc")]
         if self.buf.len() - self.filled < READ_CHUNK {
             self.buf.resize(self.filled + READ_CHUNK, 0);
@@ -432,25 +445,13 @@ impl RxBuf {
     }
 
     fn consume(&mut self, n: usize) {
-        self.buf.copy_within(n..self.filled, 0);
-        self.filled -= n;
+        self.head += n;
     }
 
+    #[cfg(not(feature = "alloc"))]
     fn clear(&mut self) {
+        self.head = 0;
         self.filled = 0;
-    }
-
-    /// Largest frame the buffer can ever hold; effectively unbounded when it
-    /// can grow.
-    fn capacity(&self) -> usize {
-        #[cfg(feature = "alloc")]
-        {
-            usize::MAX
-        }
-        #[cfg(not(feature = "alloc"))]
-        {
-            self.buf.len()
-        }
     }
 }
 

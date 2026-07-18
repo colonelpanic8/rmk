@@ -38,7 +38,7 @@ pub trait RynkDevice: Sized {
     /// Connect this recognized device into a live session: open the link and
     /// complete the Rynk handshake (version check and capability snapshot)
     /// over the normal pumps — topics arriving meanwhile queue up for
-    /// `next_event` as usual.
+    /// `next_topic` as usual.
     ///
     /// Runtime-free, so no handshake timeout: a silent peer hangs here. Callers
     /// that need a bound wrap this in their runtime's timeout.

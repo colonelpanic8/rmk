@@ -14,7 +14,7 @@
 //! Run [`Driver::run`] in the same `select` as everything that awaits on the
 //! [`Client`]. There is no in-band death signal: when the driver returns, the
 //! `select` exits and drops the session, cancelling any parked
-//! [`request`](Client::request)/[`next_event`](Client::next_event).
+//! [`request`](Client::request)/[`next_topic`](Client::next_topic).
 //!
 //! ```no_run
 //! # async fn run<D: rynk::RynkDevice>(device: D) -> Result<(), Box<dyn std::error::Error>> {
@@ -25,7 +25,7 @@
 //!     driver.run(&client),                     // returns when the link dies
 //!     async {
 //!         loop {
-//!             let event = client.next_event().await;
+//!             let event = client.next_topic().await;
 //!             println!("topic: {event:?}");
 //!         }
 //!     },
@@ -45,9 +45,10 @@
 //!   `&'static`, spawn `driver.run(client)` as its own task, and have the main
 //!   loop watch that task's completion alongside its own awaits — without the
 //!   watch, a parked call would outlive the link silently.
-//! - **Per-call select** (wasm): with no resident task, wrap every call as
-//!   `select(driver.run(&client), client.method(..))`. The driver's reassembly
-//!   state lives in the struct, so cancelling between calls loses nothing.
+//! - **Driver-lock select** (wasm): with no resident task, each in-flight call
+//!   races its client future against locking the driver, and the lock winner
+//!   pumps for every parked call — see `rynk-wasm`'s `RynkClient` for the
+//!   mechanism.
 //!
 //! At most one task should issue requests, and one consume topics, at a time —
 //! the protocol allows a single request in flight, and the channels behind the
@@ -95,5 +96,5 @@ pub use embedded_io_async as io;
 #[cfg(feature = "alloc")]
 pub use layout::LayoutInfo;
 pub use rmk_types;
-/// The decoded topic union returned by [`Client::next_event`]
+/// The decoded topic union returned by [`Client::next_topic`]
 pub use rmk_types::protocol::rynk::TopicEvent;

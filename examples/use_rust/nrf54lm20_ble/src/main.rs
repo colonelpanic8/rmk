@@ -193,7 +193,7 @@ async fn main(spawner: Spawner) {
         lock_config: LockConfig {
             unlock_keys: RYNK_UNLOCK_KEYS,
             insecure: false,
-            write_requires_unlock: true,
+            write_requires_unlock: false,
         },
         storage_config,
         ..Default::default()

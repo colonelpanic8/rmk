@@ -1,12 +1,18 @@
 //! Wasm-facing Rynk client handle.
 //!
 //! JS owns the byte link and hands it to [`connect`], which runs the Rynk
-//! handshake and returns a [`RynkClient`] wrapping a `Client<WasmTransport>`.
-//! Each method borrows the client for one await — the same way the native
-//! serial/BLE transports drive `Client<T>` directly, so JS must await one call
-//! before issuing the next. Topic pushes are pulled with
-//! [`RynkClient::next_event`], not delivered by callback.
+//! handshake and returns a [`RynkClient`] wrapping the session's `Client` and
+//! `Driver`. Every method is `&self`, so JS holds a parked
+//! [`RynkClient::next_topic`] loop while issuing requests — the same
+//! full-duplex contract the native transports get from one session `select`.
+//! With no resident task to pump the driver, the in-flight calls elect one:
+//! see `RynkClient::drive` for the mechanism.
 
+use core::pin::pin;
+
+use embassy_futures::select::{Either, select};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
 use rynk::rmk_types::action::{EncoderAction, KeyAction};
 use rynk::rmk_types::battery::BatteryStatus;
 use rynk::rmk_types::ble::BleStatus;
@@ -20,20 +26,24 @@ use rynk::rmk_types::protocol::rynk::{
     MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetKeymapBulkRequest,
     SetMorseBulkRequest, StorageResetMode,
 };
-use rynk::{Client, IncomingTopic, LayoutInfo, RynkDevice, TopicEvent};
+use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
 
 use crate::device::WebDevice;
-use crate::transport::{JsByteLink, WasmTransport};
+use crate::transport::{JsByteLink, WasmReader, WasmWriter};
 
 /// Live Rynk client handle exposed to JavaScript.
 ///
-/// Wraps a `Client<WasmTransport>`; methods borrow it for one await, so JS must
-/// await each call before the next (the single-borrow rule the native
-/// transports get from the compiler). Dropping the handle, or closing the JS
-/// link, ends the session.
+/// Wraps the session's `Client` + `Driver`. All methods are `&self`: a parked
+/// `next_topic()` pull and one request may run concurrently (full-duplex), but
+/// keep requests serialized — the protocol allows a single request in flight.
+/// Dropping the handle, or closing the JS link, ends the session.
 #[wasm_bindgen]
-pub struct RynkClient(Client<WasmTransport>);
+pub struct RynkClient {
+    client: Client,
+    driver: Mutex<CriticalSectionRawMutex, Driver<WasmReader, WasmWriter>>,
+    label: String,
+}
 
 /// Handshake over an already-open JS link and return a client. Routes through
 /// [`WebDevice`] — the web transport's [`RynkDevice`] — so the browser path uses
@@ -42,8 +52,32 @@ pub struct RynkClient(Client<WasmTransport>);
 /// string); omit it or pass `null` for a default.
 #[wasm_bindgen]
 pub async fn connect(link: JsByteLink, label: Option<String>) -> Result<RynkClient, JsValue> {
-    let client = WebDevice::new(link, label).connect().await?;
-    Ok(RynkClient(client))
+    let device = WebDevice::new(link, label);
+    let label = device.label();
+    let (client, driver) = device.connect().await?;
+    Ok(RynkClient {
+        client,
+        driver: Mutex::new(driver),
+        label,
+    })
+}
+
+impl RynkClient {
+    /// Run one client future full-duplex: race it against locking the driver.
+    /// The lock winner pumps both directions for every parked call, and
+    /// releasing the lock when its own future resolves hands the pump to a
+    /// parked call. A dead link surfaces from the pump arm and reproduces for
+    /// every later call — the closed transport keeps reporting EOF.
+    async fn drive<T>(&self, fut: impl Future<Output = Result<T, RynkHostError>>) -> Result<T, JsValue> {
+        let mut fut = pin!(fut);
+        match select(self.driver.lock(), &mut fut).await {
+            Either::Second(r) => r.map_err(Into::into),
+            Either::First(mut driver) => match select(driver.run(&self.client), &mut fut).await {
+                Either::First(err) => Err(err.into()),
+                Either::Second(r) => r.map_err(Into::into),
+            },
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -51,40 +85,30 @@ impl RynkClient {
     /// The display name the page supplied at connect time (WebHID `productName`,
     /// a page-derived string, or the default when none was given).
     pub fn label(&self) -> String {
-        self.0.transport().label().to_string()
+        self.label.clone()
     }
 
     /// Pull the next recognized topic push (server→host). Parks until one
-    /// arrives; rejects with `Disconnected` at EOF. Unrecognized topics are
-    /// skipped. JS drives this in a loop, like the native `next_event()` pull.
-    pub async fn next_event(&mut self) -> Result<TopicEvent, JsValue> {
-        loop {
-            match self.0.next_event().await {
-                Ok(IncomingTopic::Topic(t)) => return Ok(t),
-                // No JS shape for an unrecognized topic; wait for the next one.
-                Ok(IncomingTopic::Unknown(_)) => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-    }
-
-    /// Topic pushes the driver dropped (queue full). `f64` so JS gets a `number`.
-    pub fn events_dropped(&self) -> f64 {
-        self.0.events_dropped() as f64
+    /// arrives; rejects when the link dies. Unrecognized topics are skipped.
+    /// JS drives this in a loop, like the native `next_topic()` pull, and it
+    /// runs concurrently with the request methods.
+    pub async fn next_topic(&self) -> Result<TopicEvent, JsValue> {
+        self.drive(async { Ok(self.client.next_topic().await) }).await
     }
 }
 
 /// Generate the typed wasm request methods from the native client shape. Each row
 /// is `name(scalar args ; body: BodyTy) -> RespTy`; bodies and responses are tsify
 /// wire types, so wasm-bindgen marshals them across the ABI and emits a precise
-/// `.d.ts` (no `JsValue`/`any`). Errors convert to a JS `Error` via `RynkHostError: Into<JsValue>`.
+/// `.d.ts` (no `JsValue`/`any`). Errors convert to a JS `Error` via `RynkHostError: Into<JsValue>`;
+/// a dead link surfaces from the pump arm the same way.
 macro_rules! endpoints {
     ($( $name:ident ( $($s:ident : $sty:ty),* $(; $j:ident : $jty:ty)? ) -> $rty:ty ),* $(,)?) => {
         #[wasm_bindgen]
         impl RynkClient {
             $(
-                pub async fn $name(&mut self, $($s: $sty,)* $($j: $jty)?) -> Result<$rty, JsValue> {
-                    self.0.$name($($s,)* $($j)?).await.map_err(Into::into)
+                pub async fn $name(&self, $($s: $sty,)* $($j: $jty)?) -> Result<$rty, JsValue> {
+                    self.drive(self.client.$name($($s,)* $($j)?)).await
                 }
             )*
         }

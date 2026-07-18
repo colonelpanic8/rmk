@@ -5,9 +5,9 @@
 //! Build with `wasm-pack build --target web`.
 #![cfg(target_arch = "wasm32")]
 
-pub mod client;
-pub mod device;
-pub mod transport;
+mod client;
+mod device;
+mod transport;
 
 use wasm_bindgen::prelude::*;
 

@@ -15,7 +15,7 @@ via its `wasm` feature, on the web; the `rmkit layout` CLI in
 
 - **[`Client`]** drives the protocol over any byte link: handshake, typed
   methods for the command surface, and pull-based topic delivery via
-  `next_event`, which decodes each push into a typed `IncomingTopic` (topics are
+  `next_topic`, which decodes each push into a typed `IncomingTopic` (topics are
   best-effort — re-read a missed value with the matching `Get*` call).
   Requests are serialized through `&mut self` — no background task, no shared
   state.

@@ -10,7 +10,7 @@ package owns the Rynk protocol state machine.
 ```text
 Web Serial / WebHID / another browser transport
         -> JsByteLink { send, recv, close }
-        -> transport::WasmTransport
+        -> transport read/write halves
         -> rynk::Client
         -> RynkClient methods exposed to JavaScript
 ```
@@ -54,15 +54,16 @@ await init();
 const link = await openSerialByteLink();
 const client = await connect(link);
 
+// Pull topic pushes (layer changes, WPM, …) until the link closes. Runs
+// concurrently with the requests below — the session is full duplex.
+(async () => {
+  try { for (;;) console.log("topic", await client.next_topic()); }
+  catch (e) { console.log("disconnected:", e.message); }
+})();
+
 console.log("protocol", await client.get_version());
 console.log("capabilities", await client.get_capabilities());
 console.log("current layer", await client.get_current_layer());
-
-// Pull topic pushes (layer changes, WPM, …) until the link closes.
-(async () => {
-  try { for (;;) console.log("topic", await client.next_event()); }
-  catch (e) { console.log("disconnected:", e.message); }
-})();
 
 // Disconnect by closing the byte link; the topic loop above then ends.
 await link.close();
@@ -159,39 +160,27 @@ Call `requestPort()` inside a user gesture such as a button click.
 `RynkClient` that owns the `rynk::Client` protocol state machine directly. The
 optional `label` is the display name the page showed in its picker (WebHID
 `productName`, or a string the page derived for WebSerial); read it back with
-`client.label()`. Each method borrows the client for one await, so await one call
-before issuing the next — the same single-borrow rule the native serial/BLE
-consumers get from the compiler.
+`client.label()`. The session is full duplex: a parked `next_topic()` loop and
+request calls run concurrently. Keep requests themselves serialized — await each
+request before issuing the next; the protocol allows a single request in flight.
 
-Topic pushes are pulled, not delivered by callback: drive `next_event()` in a
+Topic pushes are pulled, not delivered by callback: drive `next_topic()` in a
 loop. It parks until the next recognized topic and rejects with `Disconnected`
-at EOF, mirroring the native `Client::next_event()` used by `rynk-serial` /
-`rynk-ble`. `events_dropped()` reports topic queue overflow. If an operation is
-cancelled while reading, close the link and reconnect before issuing another.
+at EOF, mirroring the native `Client::next_topic()` used by `rynk-serial` /
+`rynk-ble`.
 
-Available method groups mirror the native `rynk::Client` API:
+The typed request surface is the `endpoints!` table in `src/client.rs`,
+mirroring the native `rynk::Client` methods (minus the Rust-only conveniences
+such as the `read_all_*`/`write_all_*` pagers); browse it via the generated
+`pkg/rynk_wasm.d.ts` or the `rynk::Client` docs.
 
-- System: `get_version`, `get_capabilities`, `reboot`, `bootloader_jump`,
-  `storage_reset`
-- Keymap: `get_key`, `set_key`, `get_default_layer`, `set_default_layer`,
-  `get_encoder`, `set_encoder`, `get_keymap_bulk`, `set_keymap_bulk`,
-  `get_layout`
-- Combos/forks/morse/macros: `get_combo`, `set_combo`, `get_combo_bulk`,
-  `set_combo_bulk`, `get_fork`, `set_fork`, `get_morse`, `set_morse`,
-  `get_morse_bulk`, `set_morse_bulk`, `get_macro`, `set_macro`
-- Behavior/status/connection: `get_behavior`, `set_behavior`,
-  `get_current_layer`, `get_matrix_state`, `get_battery_status`,
-  `get_peripheral_status`, `get_wpm`, `get_sleep_state`,
-  `get_led_indicator`, `get_connection_type`, `get_connection_status`,
-  `get_ble_status`, `switch_ble_profile`, `clear_ble_profile`
-
-Getter results and topic values are plain JS values produced through
-`serde-wasm-bindgen`. Setter payloads are plain JS objects matching the Rust
-serde shape for the corresponding `rmk-types` type.
+Getter results and topic values are plain JS values produced through the
+tsify-generated wire types. Setter payloads are plain JS objects matching the
+Rust serde shape for the corresponding `rmk-types` type.
 
 Errors are thrown as JS `Error` objects with stable `name` values such as
-`Disconnected`, `Transport`, `Rejected`, `Unsupported`, `Protocol`, and
-`VersionMismatch`.
+`Disconnected`, `TransportError`, `Rejected`, `Unsupported`,
+`ResponseDecodeError`, and `VersionMismatch`.
 
 ## Browser Transports
 

@@ -6,10 +6,10 @@
 //! paths, and firmware-side rejection behavior.
 
 use std::fmt::Debug;
-use std::io::ErrorKind;
 use std::time::Duration;
 
-use rynk::io::{Read, Write};
+use embassy_futures::select::{Either, select};
+use embedded_io_adapters::tokio_1::FromTokio;
 use rynk::rmk_types::action::{Action, EncoderAction, KeyAction};
 use rynk::rmk_types::ble::{BleState, BleStatus};
 use rynk::rmk_types::combo::Combo;
@@ -24,52 +24,27 @@ use rynk::rmk_types::protocol::rynk::{
     GetMorseBulkResponse, MacroData, ProtocolVersion, RynkError, SetComboBulkRequest, SetKeymapBulkRequest,
     SetMorseBulkRequest, StorageResetMode,
 };
-use rynk::{Client, RynkHostError};
+use rynk::{Client, RynkDevice, RynkHostError};
+use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_ADDR: &str = "127.0.0.1:9000";
 
-struct TcpTransport {
-    stream: tokio::net::TcpStream,
-}
+/// The QEMU TCP serial as a device, connecting through [`RynkDevice::connect`].
+struct TcpDevice(TcpStream);
 
-impl rynk::io::ErrorType for TcpTransport {
-    type Error = std::io::Error;
-}
+impl RynkDevice for TcpDevice {
+    type Read = FromTokio<OwnedReadHalf>;
+    type Write = FromTokio<OwnedWriteHalf>;
 
-impl Read for TcpTransport {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-        loop {
-            self.stream.readable().await?;
-            match self.stream.try_read(buf) {
-                Ok(n) => return Ok(n),
-                Err(e) if e.kind() == ErrorKind::WouldBlock => {}
-                Err(e) => return Err(e),
-            }
-        }
-    }
-}
-
-impl Write for TcpTransport {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-        loop {
-            self.stream.writable().await?;
-            match self.stream.try_write(buf) {
-                Ok(n) => return Ok(n),
-                Err(e) if e.kind() == ErrorKind::WouldBlock => {}
-                Err(e) => return Err(e),
-            }
-        }
+    fn label(&self) -> String {
+        "qemu".into()
     }
 
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        Ok(())
+    async fn open(self) -> Result<(Self::Write, Self::Read), RynkHostError> {
+        let (reader, writer) = self.0.into_split();
+        Ok((FromTokio::new(writer), FromTokio::new(reader)))
     }
 }
 
@@ -117,14 +92,23 @@ fn expect_unsupported<T: Debug>(label: &str, res: Result<T, RynkHostError>) {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = std::env::args().nth(1).unwrap_or_else(|| DEFAULT_ADDR.into());
-    let stream = tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(&addr))
+    let stream = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&addr))
         .await
         .map_err(|_| format!("connect timed out to QEMU TCP serial at {addr}"))??;
     stream.set_nodelay(true)?;
-    let mut client = tokio::time::timeout(CONNECT_TIMEOUT, Client::connect(TcpTransport { stream }))
+    let (client, mut driver) = tokio::time::timeout(CONNECT_TIMEOUT, TcpDevice(stream).connect())
         .await
         .map_err(|_| format!("Rynk handshake timed out over QEMU TCP serial at {addr}"))??;
 
+    // The session lives exactly as long as this select: a dead link cancels
+    // the script; the finished script drops the session.
+    match select(driver.run(&client), script(&client)).await {
+        Either::First(err) => Err(format!("link died during the script: {err}").into()),
+        Either::Second(res) => res,
+    }
+}
+
+async fn script(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(client.get_version().await?, ProtocolVersion::CURRENT);
     let caps = client.get_capabilities().await?;
     assert_eq!((caps.num_layers, caps.num_rows, caps.num_cols), (2, 3, 3));

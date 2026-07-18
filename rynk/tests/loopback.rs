@@ -13,7 +13,6 @@
 use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::pipe::Pipe;
-use embedded_io_async::{ErrorType, Read, Write};
 use rmk::config::{BehaviorConfig, PositionalConfig, RmkConfig};
 use rmk::event::{LayerChangeEvent, publish_event};
 use rmk::host::HostService as RynkService;
@@ -29,55 +28,24 @@ use rynk::{Client, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 /// single legal frame fits without the writer blocking on an un-polled reader.
 type Link = Pipe<NoopRawMutex, RYNK_BUFFER_SIZE>;
 
-struct HostRx<'p>(&'p Link);
-
-impl ErrorType for HostRx<'_> {
-    type Error = core::convert::Infallible;
-}
-
-impl Read for HostRx<'_> {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        // Qualified: `Pipe`'s inherent infallible `read` would shadow the trait.
-        let mut rx: &Link = self.0;
-        Read::read(&mut rx, buf).await
-    }
-}
-
-struct HostTx<'p>(&'p Link);
-
-impl ErrorType for HostTx<'_> {
-    type Error = core::convert::Infallible;
-}
-
-impl Write for HostTx<'_> {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        let mut tx: &Link = self.0;
-        Write::write(&mut tx, buf).await
-    }
-
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
 /// The host side of the two pipes as a device — reads device→host, writes
-/// host→device — so the test connects through [`RynkDevice::connect`]. The
-/// `HostRx`/`HostTx` halves just pin the directions of `&Pipe`.
+/// host→device — so the test connects through [`RynkDevice::connect`]. `&Pipe`
+/// implements the embedded-io traits itself; both sides use it directly.
 struct DuplexDevice<'p> {
     rx: &'p Link,
     tx: &'p Link,
 }
 
 impl<'p> RynkDevice for DuplexDevice<'p> {
-    type Read = HostRx<'p>;
-    type Write = HostTx<'p>;
+    type Read = &'p Link;
+    type Write = &'p Link;
 
     fn label(&self) -> String {
         "loopback".into()
     }
 
-    async fn open(self) -> Result<(HostTx<'p>, HostRx<'p>), RynkHostError> {
-        Ok((HostTx(self.tx), HostRx(self.rx)))
+    async fn open(self) -> Result<(&'p Link, &'p Link), RynkHostError> {
+        Ok((self.tx, self.rx))
     }
 }
 
@@ -212,7 +180,7 @@ async fn client_against_run_session() {
 
         // Server topic push decodes into a typed TopicEvent.
         publish_event(LayerChangeEvent::new(3));
-        let ev = client.next_event().await;
+        let ev = client.next_topic().await;
         assert!(
             matches!(ev, TopicEvent::LayerChange(3)),
             "expected LayerChange(3), got {ev:?}"

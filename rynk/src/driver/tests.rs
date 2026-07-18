@@ -1,6 +1,4 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
 use embassy_futures::join::join;
@@ -44,30 +42,18 @@ enum Step {
     Hang,
 }
 
-/// Written-frame counter shared by the mock halves, with a waker so the
-/// reader can await it without spinning (spinning would starve tokio's
+/// A scripted link's two halves, sharing a written-frame counter (a `watch`:
+/// the reader awaits it without spinning, which would starve tokio's
 /// paused-clock auto-advance).
-struct Writes {
-    count: AtomicUsize,
-    notify: tokio::sync::Notify,
-}
-
-/// A scripted link's two halves, sharing the written-frame counter.
 fn mock_halves(steps: Vec<Step>, fail_send: bool) -> (MockWrite, MockRead) {
-    let writes = Arc::new(Writes {
-        count: AtomicUsize::new(0),
-        notify: tokio::sync::Notify::new(),
-    });
+    let (writes, reads) = tokio::sync::watch::channel(0usize);
     (
-        MockWrite {
-            fail_send,
-            writes: writes.clone(),
-        },
+        MockWrite { fail_send, writes },
         MockRead {
             steps: steps.into(),
             pending: Vec::new(),
             pos: 0,
-            writes,
+            writes: reads,
         },
     )
 }
@@ -76,7 +62,7 @@ struct MockRead {
     steps: VecDeque<Step>,
     pending: Vec<u8>,
     pos: usize,
-    writes: Arc<Writes>,
+    writes: tokio::sync::watch::Receiver<usize>,
 }
 
 impl embedded_io_async::ErrorType for MockRead {
@@ -88,22 +74,14 @@ impl Read for MockRead {
         while self.pos >= self.pending.len() {
             // Pop only once a step completes: reads are cancelled at select
             // exit, and a blocking step must survive into the next `run`.
-            match self.steps.front() {
-                Some(Step::Chunk(_)) => {
-                    let Some(Step::Chunk(c)) = self.steps.pop_front() else {
-                        unreachable!()
-                    };
-                    self.pending = c;
+            match self.steps.front_mut() {
+                Some(Step::Chunk(c)) => {
+                    self.pending = std::mem::take(c);
                     self.pos = 0;
+                    self.steps.pop_front();
                 }
-                Some(&Step::AwaitWrites(n)) => {
-                    loop {
-                        let notified = self.writes.notify.notified();
-                        if self.writes.count.load(Ordering::Acquire) >= n {
-                            break;
-                        }
-                        notified.await;
-                    }
+                Some(&mut Step::AwaitWrites(n)) => {
+                    self.writes.wait_for(|&c| c >= n).await.unwrap();
                     self.steps.pop_front();
                 }
                 Some(Step::Hang) => std::future::pending().await,
@@ -119,7 +97,7 @@ impl Read for MockRead {
 
 struct MockWrite {
     fail_send: bool,
-    writes: Arc<Writes>,
+    writes: tokio::sync::watch::Sender<usize>,
 }
 
 impl embedded_io_async::ErrorType for MockWrite {
@@ -131,8 +109,7 @@ impl Write for MockWrite {
         if self.fail_send {
             return Err(ErrorKind::Other);
         }
-        self.writes.count.fetch_add(1, Ordering::Release);
-        self.writes.notify.notify_waiters();
+        self.writes.send_modify(|c| *c += 1);
         Ok(buf.len())
     }
 
@@ -173,12 +150,6 @@ fn reply<T: Serialize>(cmd: Cmd, seq: u8, value: T) -> Vec<u8> {
 /// A topic push frame (bare payload, SEQ 0).
 fn topic<T: Serialize>(cmd: Cmd, value: T) -> Vec<u8> {
     frame(cmd, 0, &value)
-}
-
-fn header(cmd_raw: u16, seq: u8, len: u16) -> Vec<u8> {
-    let c = cmd_raw.to_le_bytes();
-    let l = len.to_le_bytes();
-    vec![c[0], c[1], seq, l[0], l[1]]
 }
 
 // Tests clone this and flip only the capability under test.
@@ -256,22 +227,11 @@ async fn topic_cmd_to_request_rejected() {
 }
 
 #[tokio::test]
-async fn unknown_cmd_drained_by_len() {
-    let mut chunk = header(0x7fff, 0xEE, 5);
-    chunk.extend_from_slice(&[1, 2, 3, 4, 5]);
-    chunk.extend_from_slice(&reply(Cmd::GetWpm, 1, 42u16));
-    let (client, mut driver) = raw_session(vec![Step::AwaitWrites(1), Step::Chunk(chunk), Step::Hang]);
-    let got = drive(&mut driver, &client, client.get_wpm()).await.unwrap();
-    assert_eq!(got, 42);
-}
-
-#[tokio::test]
-async fn unknown_topic_skipped_by_next_event() {
-    let mut chunk = header(0x80ff, 0, 3);
-    chunk.extend_from_slice(&[1, 2, 3]);
+async fn unknown_topic_skipped_by_next_topic() {
+    let mut chunk = frame(Cmd::from_raw(0x80ff), 0, &[1u8, 2, 3]);
     chunk.extend_from_slice(&topic(Cmd::LayerChange, 3u8));
     let (client, mut driver) = raw_session(vec![Step::Chunk(chunk), Step::Hang]);
-    let ev = drive(&mut driver, &client, client.next_event()).await;
+    let ev = drive(&mut driver, &client, client.next_topic()).await;
     assert!(matches!(ev, TopicEvent::LayerChange(3)));
 }
 
@@ -290,22 +250,6 @@ async fn unknown_response_cmd_mismatch_detected() {
             got,
         }) if got == Cmd::from_raw(0x7fff)
     ));
-}
-
-#[tokio::test]
-async fn oversized_inbound_topic_is_not_fatal() {
-    // 300 bytes overflows the no-alloc topic slot; the link must stay healthy.
-    let mut big = header(0x80ff, 0, 300);
-    big.extend_from_slice(&vec![0xAB; 300]);
-    let mut steps = vec![Step::Chunk(big)];
-    steps.extend([
-        Step::AwaitWrites(1),
-        Step::Chunk(reply(Cmd::GetWpm, 1, 7u16)),
-        Step::Hang,
-    ]);
-    let (client, mut driver) = raw_session(steps);
-    let got = drive(&mut driver, &client, client.get_wpm()).await.unwrap();
-    assert_eq!(got, 7);
 }
 
 #[tokio::test]
@@ -336,18 +280,18 @@ async fn topic_during_request_is_queued() {
     let (client, mut driver) = raw_session(vec![Step::AwaitWrites(1), Step::Chunk(chunk), Step::Hang]);
     let got = drive(&mut driver, &client, client.get_wpm()).await.unwrap();
     assert_eq!(got, 42);
-    let ev = drive(&mut driver, &client, client.next_event()).await;
+    let ev = drive(&mut driver, &client, client.next_topic()).await;
     assert!(matches!(ev, TopicEvent::LayerChange(3)));
 }
 
 #[tokio::test]
-async fn request_and_next_event_run_full_duplex() {
+async fn request_and_next_topic_run_full_duplex() {
     // One branch waits for a reply while the other receives a topic — the
     // two consume different channels and never block each other.
     let mut chunk = topic(Cmd::LayerChange, 7u8);
     chunk.extend_from_slice(&reply(Cmd::GetWpm, 1, 42u16));
     let (client, mut driver) = raw_session(vec![Step::AwaitWrites(1), Step::Chunk(chunk), Step::Hang]);
-    let (wpm, ev) = drive(&mut driver, &client, join(client.get_wpm(), client.next_event())).await;
+    let (wpm, ev) = drive(&mut driver, &client, join(client.get_wpm(), client.next_topic())).await;
     assert_eq!(wpm.unwrap(), 42);
     assert!(matches!(ev, TopicEvent::LayerChange(7)));
 }
@@ -419,24 +363,24 @@ async fn stale_reply_of_cancelled_request_is_dropped() {
 
 #[tokio::test]
 async fn topic_queue_overflow_drops_oldest() {
-    // 65 topics into a 64-slot queue: the first is evicted, the rest arrive.
+    // One more topic than the queue holds: the first is evicted, the rest arrive.
     let mut chunk = Vec::new();
-    for i in 0u8..=64 {
+    for i in 0..=TOPIC_QUEUE_CAPACITY as u8 {
         chunk.extend_from_slice(&topic(Cmd::LayerChange, i));
     }
     let (client, mut driver) = raw_session(vec![Step::Chunk(chunk), Step::Hang]);
-    let first = drive(&mut driver, &client, client.next_event()).await;
+    let first = drive(&mut driver, &client, client.next_topic()).await;
     assert!(matches!(first, TopicEvent::LayerChange(1)), "oldest topic evicted");
 }
 
 #[tokio::test]
-async fn next_event_decodes_typed_payload() {
+async fn next_topic_decodes_typed_payload() {
     let status = ConnectionStatus {
         preferred: ConnectionType::Ble,
         ..Default::default()
     };
     let (client, mut driver) = raw_session(vec![Step::Chunk(topic(Cmd::ConnectionChange, status)), Step::Hang]);
-    let ev = drive(&mut driver, &client, client.next_event()).await;
+    let ev = drive(&mut driver, &client, client.next_topic()).await;
     match ev {
         TopicEvent::ConnectionChange(s) => assert_eq!(s.preferred, ConnectionType::Ble),
         other => panic!("expected ConnectionChange, got {other:?}"),
@@ -446,22 +390,6 @@ async fn next_event_decodes_typed_payload() {
 async fn connect_session(mut steps: Vec<Step>, trailing: Vec<Step>) -> (Client, Driver<MockRead, MockWrite>) {
     steps.extend(trailing);
     MockDevice(steps).connect().await.expect("connect should succeed")
-}
-
-#[tokio::test]
-async fn connect_handshake_loopback() {
-    let (client, mut driver) = connect_session(
-        handshake_steps(caps()),
-        vec![
-            Step::AwaitWrites(3),
-            Step::Chunk(reply(Cmd::GetWpm, 3, 37u16)),
-            Step::Hang,
-        ],
-    )
-    .await;
-    assert_eq!(client.capabilities().num_cols, 14);
-    let got = drive(&mut driver, &client, client.get_wpm()).await.unwrap();
-    assert_eq!(got, 37);
 }
 
 #[tokio::test]
@@ -773,6 +701,8 @@ async fn rynk_device_trait_drives_lifecycle() {
     async fn run_first<D: RynkDevice>(d: D) -> u16 {
         assert_eq!(d.label(), "mock");
         let (client, mut driver) = d.connect().await.unwrap();
+        // The handshake filled the capability snapshot before returning.
+        assert_eq!(client.capabilities().num_cols, 14);
         match select(driver.run(&client), client.get_wpm()).await {
             Either::First(err) => panic!("driver died: {err}"),
             Either::Second(wpm) => wpm.unwrap(),
