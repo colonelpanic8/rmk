@@ -76,8 +76,33 @@ pub(crate) fn expand_flash_init(hardware: &Hardware) -> TokenStream2 {
                     }
                 };
                 #[cfg(not(feature = "dfu_nrf"))]
+                // Wrap the singleton multiprotocol-safe flash
+                // driver in a shared async mutex so the application's
+                // runtime-config partition (rmk::shared_flash) can use it
+                // alongside RMK storage, and spawn the bounded service task
+                // that executes application flash requests against it. RMK
+                // storage receives a locking SharedFlash wrapper instead of
+                // the exclusive driver.
                 let flash_code = quote! {
-                    let flash = ::nrf_mpsl::Flash::take(mpsl, p.NVMC);
+                    let flash = {
+                        static SHARED_FLASH: ::static_cell::StaticCell<
+                            ::embassy_sync::mutex::Mutex<::rmk::RawMutex, ::nrf_mpsl::Flash<'static>>,
+                        > = ::static_cell::StaticCell::new();
+                        let shared = SHARED_FLASH.init(::embassy_sync::mutex::Mutex::new(
+                            ::nrf_mpsl::Flash::take(mpsl, p.NVMC),
+                        ));
+                        #[::embassy_executor::task]
+                        async fn shared_flash_service(
+                            shared: &'static ::embassy_sync::mutex::Mutex<
+                                ::rmk::RawMutex,
+                                ::nrf_mpsl::Flash<'static>,
+                            >,
+                        ) {
+                            ::rmk::shared_flash::service(shared).await
+                        }
+                        spawner.spawn(shared_flash_service(shared).unwrap());
+                        ::rmk::shared_flash::SharedFlash::new(shared)
+                    };
                 };
                 flash_code
             }
