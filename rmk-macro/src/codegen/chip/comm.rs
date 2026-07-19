@@ -65,7 +65,14 @@ pub(crate) fn usb_config_default(hardware: &Hardware) -> TokenStream2 {
             }
             ChipSeries::Nrf52 => quote! {
                 // use hardware vbus
-                let driver = ::embassy_nrf::usb::Driver::new(p.#peripheral_name, Irqs, ::embassy_nrf::usb::vbus_detect::HardwareVbusDetect::new(Irqs));
+                // GLOVE80 PATCH: publish generic application-visible VBUS edges.
+                let driver = ::embassy_nrf::usb::Driver::new(
+                    p.#peripheral_name,
+                    Irqs,
+                    ::rmk::usb::ReportingVbusDetect::new(
+                        ::embassy_nrf::usb::vbus_detect::HardwareVbusDetect::new(Irqs)
+                    ),
+                );
             },
             ChipSeries::Rp2040 => quote! {
                 let driver = ::embassy_rp::usb::Driver::new(p.#peripheral_name, Irqs);

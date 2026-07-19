@@ -354,7 +354,14 @@ fn expand_split_peripheral(
     let dfu_task_future = if dfu_enabled {
         let usb_init = match hardware.chip.series {
             ChipSeries::Nrf52 => quote! {
-                let driver = ::embassy_nrf::usb::Driver::new(p.USBD, Irqs, ::embassy_nrf::usb::vbus_detect::HardwareVbusDetect::new(Irqs));
+                // GLOVE80 PATCH: publish generic application-visible VBUS edges.
+                let driver = ::embassy_nrf::usb::Driver::new(
+                    p.USBD,
+                    Irqs,
+                    ::rmk::usb::ReportingVbusDetect::new(
+                        ::embassy_nrf::usb::vbus_detect::HardwareVbusDetect::new(Irqs)
+                    ),
+                );
             },
             ChipSeries::Rp2040 => quote! {
                 let driver = ::embassy_rp::usb::Driver::new(p.USB, Irqs);

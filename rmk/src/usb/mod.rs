@@ -1,6 +1,9 @@
 use embassy_futures::join::join4;
 use embassy_futures::select::{Either, select};
 use embassy_sync::signal::Signal;
+// GLOVE80 PATCH: generic nRF VBUS state hook for application-level status.
+#[cfg(feature = "_nrf_ble")]
+use embassy_sync::watch::Watch;
 #[cfg(feature = "host")]
 use embassy_usb::class::hid::HidReaderWriter;
 use embassy_usb::class::hid::{HidReader, HidWriter, ReportId, RequestHandler};
@@ -29,6 +32,62 @@ use crate::light::UsbLedReader;
 use crate::state::{current_usb_state, set_usb_state};
 
 pub(crate) static USB_REMOTE_WAKEUP: Signal<RawMutex, ()> = Signal::new();
+
+// ===== GLOVE80 PATCH (nRF VBUS state reporting) =====
+/// Last nRF USB VBUS state observed by Embassy's hardware detector. This is
+/// deliberately power presence, not USB enumeration: applications can use it
+/// for a local "charging" indicator even on a charge-only cable. One receiver
+/// is sufficient because each firmware image has one application state owner.
+#[cfg(feature = "_nrf_ble")]
+pub static USB_VBUS_DETECTED: Watch<RawMutex, bool, 1> = Watch::new();
+
+/// Transparent nRF VBUS detector wrapper that publishes only state edges.
+/// Generic over Embassy's detector so RMK keeps the extension reusable.
+#[cfg(feature = "_nrf_ble")]
+pub struct ReportingVbusDetect<D> {
+    inner: D,
+    last: core::sync::atomic::AtomicU8,
+}
+
+#[cfg(feature = "_nrf_ble")]
+impl<D: embassy_nrf::usb::vbus_detect::VbusDetect> ReportingVbusDetect<D> {
+    pub fn new(inner: D) -> Self {
+        let this = Self {
+            inner,
+            // 0 = unknown, 1 = absent, 2 = present.
+            last: core::sync::atomic::AtomicU8::new(0),
+        };
+        this.publish_if_changed(this.inner.is_usb_detected());
+        this
+    }
+
+    fn publish_if_changed(&self, detected: bool) {
+        use core::sync::atomic::Ordering;
+
+        let encoded = if detected { 2 } else { 1 };
+        if self.last.swap(encoded, Ordering::Relaxed) != encoded {
+            USB_VBUS_DETECTED.sender().send(detected);
+        }
+    }
+}
+
+#[cfg(feature = "_nrf_ble")]
+impl<D: embassy_nrf::usb::vbus_detect::VbusDetect> embassy_nrf::usb::vbus_detect::VbusDetect
+    for ReportingVbusDetect<D>
+{
+    fn is_usb_detected(&self) -> bool {
+        let detected = self.inner.is_usb_detected();
+        self.publish_if_changed(detected);
+        detected
+    }
+
+    async fn wait_power_ready(&mut self) -> Result<(), ()> {
+        let result = self.inner.wait_power_ready().await;
+        self.publish_if_changed(self.inner.is_usb_detected());
+        result
+    }
+}
+// ===== END GLOVE80 PATCH =====
 
 /// Borrowed view over the USB HID IN endpoints used by the report writer task.
 ///
