@@ -76,6 +76,9 @@ pub mod helper_macro;
 pub mod hid;
 #[cfg(feature = "host")]
 pub mod host;
+// Raw transport pipes for an application-defined host protocol.
+#[cfg(feature = "host")]
+pub mod vendor_transport;
 pub mod input_device;
 pub mod keyboard;
 pub mod keyboard_macros;

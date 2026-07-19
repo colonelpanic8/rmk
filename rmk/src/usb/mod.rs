@@ -17,6 +17,9 @@ use crate::config::DeviceConfig;
 use crate::core_traits::Runnable;
 #[cfg(feature = "steno")]
 use crate::hid::StenoReport;
+// Host-protocol vendor interface report.
+#[cfg(feature = "host")]
+use crate::hid::VendorHidReport;
 #[cfg(feature = "host")]
 use crate::hid::ViaReport;
 use crate::hid::{
@@ -161,9 +164,11 @@ pub(crate) fn new_usb_builder<'d, D: Driver<'d>>(driver: D, keyboard_config: Dev
     usb_config.composite_with_iads = true;
 
     // Extra interfaces (usb_log, steno, dfu) overflow the 128-byte config descriptor buffer.
-    #[cfg(any(feature = "usb_log", feature = "steno", feature = "dfu"))]
+    // The host-protocol vendor interface (feature "host") adds a
+    // fourth HID interface (~32 descriptor bytes), which also overflows 128.
+    #[cfg(any(feature = "usb_log", feature = "steno", feature = "dfu", feature = "host"))]
     const USB_BUF_SIZE: usize = 256;
-    #[cfg(not(any(feature = "usb_log", feature = "steno", feature = "dfu")))]
+    #[cfg(not(any(feature = "usb_log", feature = "steno", feature = "dfu", feature = "host")))]
     const USB_BUF_SIZE: usize = 128;
 
     // Control buffer must be large enough for the largest DFU transfer block.
@@ -204,6 +209,9 @@ pub struct UsbTransport<D: Driver<'static>> {
     steno_writer: HidWriter<'static, D, 9>,
     #[cfg(feature = "host")]
     host_rw: HidReaderWriter<'static, D, 32, 32>,
+    // Raw-HID vendor interface for the host protocol.
+    #[cfg(feature = "host")]
+    vendor_rw: HidReaderWriter<'static, D, 32, 32>,
     #[cfg(feature = "usb_log")]
     logger: Option<embassy_usb::class::cdc_acm::CdcAcmClass<'static, D>>,
 }
@@ -236,6 +244,9 @@ impl<D: Driver<'static>> UsbTransport<D> {
         let steno_writer = add_usb_writer!(&mut builder, StenoReport, 9, 16);
         #[cfg(feature = "host")]
         let host_rw = add_usb_reader_writer!(&mut builder, ViaReport, 32, 32, 32);
+        // Host-protocol vendor interface (32-byte IN/OUT reports).
+        #[cfg(feature = "host")]
+        let vendor_rw = add_usb_reader_writer!(&mut builder, VendorHidReport, 32, 32, 32);
         #[cfg(feature = "usb_log")]
         let logger = Some(add_usb_logger!(&mut builder));
 
@@ -265,6 +276,8 @@ impl<D: Driver<'static>> UsbTransport<D> {
             steno_writer,
             #[cfg(feature = "host")]
             host_rw,
+            #[cfg(feature = "host")]
+            vendor_rw,
             #[cfg(feature = "usb_log")]
             logger,
         }
@@ -282,6 +295,8 @@ impl<D: Driver<'static>> Runnable for UsbTransport<D> {
             steno_writer,
             #[cfg(feature = "host")]
             host_rw,
+            #[cfg(feature = "host")]
+            vendor_rw,
             #[cfg(feature = "usb_log")]
             logger,
         } = self;
@@ -315,7 +330,15 @@ impl<D: Driver<'static>> Runnable for UsbTransport<D> {
 
         let host_and_extras = async {
             #[cfg(feature = "host")]
-            let host_task = crate::host::usb::run_usb_host(host_rw);
+            let host_task = async {
+                // Run the host-protocol vendor interface pump
+                // alongside the Vial endpoint pump.
+                embassy_futures::join::join(
+                    crate::host::usb::run_usb_host(host_rw),
+                    run_usb_vendor(vendor_rw),
+                )
+                .await;
+            };
             #[cfg(not(feature = "host"))]
             let host_task = core::future::pending::<()>();
 
@@ -340,6 +363,34 @@ impl<D: Driver<'static>> Runnable for UsbTransport<D> {
 
         join4(usb_device_task, writer_task, led_task, host_and_extras).await;
         unreachable!("UsbTransport sub-tasks must run forever");
+    }
+}
+
+/// Drives the host-protocol vendor raw-HID interface: forwards 32-byte OUT
+/// reports into `vendor_transport::VENDOR_USB_RX` and writes IN reports pulled
+/// from `VENDOR_USB_TX`. Same session structure as [`crate::host::usb::run_usb_host`]:
+/// wait for the interface to be configured, drop stale replies on every
+/// (re)connect, then pump both directions until an endpoint is disabled.
+#[cfg(feature = "host")]
+async fn run_usb_vendor<'d, D: Driver<'d>>(rw: &mut HidReaderWriter<'d, D, 32, 32>) -> ! {
+    use crate::vendor_transport::{VENDOR_USB_RX, VENDOR_USB_TX};
+    let mut buf = [0u8; 32];
+    loop {
+        rw.ready().await;
+        // Drop replies queued for a prior, now-stale session.
+        VENDOR_USB_TX.clear();
+        loop {
+            match select(rw.read(&mut buf), VENDOR_USB_TX.receive()).await {
+                Either::First(Ok(_)) => VENDOR_USB_RX.send(buf).await,
+                Either::First(Err(embassy_usb::class::hid::ReadError::Disabled)) => break,
+                Either::First(Err(e)) => error!("USB vendor read error: {:?}", e),
+                Either::Second(report) => match rw.write(&report).await {
+                    Ok(()) => {}
+                    Err(EndpointError::Disabled) => break,
+                    Err(e) => error!("USB vendor write error: {:?}", e),
+                },
+            }
+        }
     }
 }
 
