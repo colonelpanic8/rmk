@@ -58,6 +58,31 @@ pub struct ViaReport {
     pub(crate) output_data: [u8; 32],
 }
 
+/// Raw-HID vendor interface for an application-defined host protocol.
+/// 32-byte IN/OUT reports carry opaque frames between the host and the
+/// firmware's own protocol pump; RMK attaches no meaning to the bytes.
+/// Hosts match the interface by its vendor usage page/usage. The values
+/// below (usage page `0xFF88`, usage `0x01`) are an example default,
+/// deliberately distinct from Via/Vial's `0xFF60`/`0x61` so the two raw-HID
+/// interfaces are unambiguous from hidraw/WebHID; a consumer that needs a
+/// different vendor page can change them here.
+#[cfg(feature = "host")]
+#[gen_hid_descriptor(
+    (collection = APPLICATION, usage_page = 0xFF88, usage = 0x01) = {
+        (usage = 0x02, logical_min = 0x0) = {
+            #[item_settings(data,variable,absolute)] input_data=input;
+        };
+        (usage = 0x03, logical_min = 0x0) = {
+            #[item_settings(data,variable,absolute)] output_data=output;
+        };
+    }
+)]
+#[derive(Default)]
+pub struct VendorHidReport {
+    pub(crate) input_data: [u8; 32],
+    pub(crate) output_data: [u8; 32],
+}
+
 /// Predefined report ids for composite hid report.
 /// Should be same with `#[gen_hid_descriptor]` of `CompositeReport` and `BleCompositeReport`
 /// DO NOT EDIT

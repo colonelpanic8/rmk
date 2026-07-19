@@ -272,6 +272,10 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
         server.host_service.input_data,
         server.host_service.hid_control_point,
     );
+    // Host-protocol GATT characteristics.
+    #[cfg(feature = "host")]
+    let (vendor_request, vendor_response) =
+        (server.vendor_gatt_service.request, server.vendor_gatt_service.response);
     let mouse = server.hid_service.mouse_report;
     let media = server.hid_service.media_report;
     let system_control = server.hid_service.system_report;
@@ -340,6 +344,38 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                         }
                     }
                     GattEvent::Write(event) => {
+                        // Host-protocol request frames are variable length (up
+                        // to 257 bytes), so they get their own copy-out path
+                        // instead of the 32-byte `data_buf` below. The write
+                        // also snapshots the negotiated ATT payload so the
+                        // protocol pump can size response chunks.
+                        #[cfg(feature = "host")]
+                        {
+                            if event.handle() == vendor_request.handle {
+                                // Only act on encrypted (bonded) peers; the
+                                // shared accept/reject logic below still sends
+                                // INSUFFICIENT_ENCRYPTION to everyone else.
+                                let encrypted =
+                                    conn.raw().security_level().map(|l| l.encrypted()).unwrap_or(false);
+                                if encrypted {
+                                    let mut chunk = crate::vendor_transport::BleChunk::empty();
+                                    let n = event.with_data(|_, data| {
+                                        let n = data.len().min(chunk.data.len());
+                                        chunk.data[..n].copy_from_slice(&data[..n]);
+                                        n
+                                    });
+                                    chunk.len = n as u16;
+                                    let att_payload = conn.raw().att_mtu().saturating_sub(3).max(20);
+                                    crate::vendor_transport::VENDOR_BLE_ATT_PAYLOAD
+                                        .store(att_payload, core::sync::atomic::Ordering::Relaxed);
+                                    if crate::vendor_transport::VENDOR_BLE_RX.try_send(chunk).is_err() {
+                                        warn!("vendor BLE RX full, dropping request frame");
+                                    }
+                                }
+                            } else if vendor_response.cccd_handle.is_some_and(|h| event.handle() == h) {
+                                cccd_updated = true;
+                            }
+                        }
                         #[cfg(feature = "host")]
                         let host_control_point_match = event.handle() == host_control_point.handle;
                         #[cfg(not(feature = "host"))]
@@ -696,7 +732,29 @@ async fn run_ble_keyboard<
     #[cfg(not(feature = "host"))]
     let host_task = core::future::pending::<()>();
 
-    let inner = embassy_futures::join::join3(writer_task, led_task, host_task);
+    // Drain host-protocol response chunks to the notify
+    // characteristic. `notify_raw` sends the actual chunk length (no padding);
+    // an unsubscribed client simply gets nothing. The startup `clear()` drops
+    // chunks queued for a previous, now-dead connection.
+    #[cfg(feature = "host")]
+    let vendor_task = async {
+        crate::vendor_transport::VENDOR_BLE_TX.clear();
+        loop {
+            let chunk = crate::vendor_transport::VENDOR_BLE_TX.receive().await;
+            if let Err(e) = server
+                .vendor_gatt_service
+                .response
+                .notify_raw(conn, &chunk.data[..chunk.len as usize], false)
+                .await
+            {
+                error!("Failed to notify vendor response: {:?}", e);
+            }
+        }
+    };
+    #[cfg(not(feature = "host"))]
+    let vendor_task = core::future::pending::<()>();
+
+    let inner = embassy_futures::join::join4(writer_task, led_task, host_task, vendor_task);
     select(communication_task, inner).await;
 }
 

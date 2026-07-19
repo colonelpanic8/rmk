@@ -76,16 +76,27 @@ pub mod helper_macro;
 pub mod hid;
 #[cfg(feature = "host")]
 pub mod host;
+// Raw transport pipes for an application-defined host protocol.
+#[cfg(feature = "host")]
+pub mod vendor_transport;
 pub mod input_device;
 pub mod keyboard;
 pub mod keyboard_macros;
 pub mod keymap;
+#[cfg(feature = "vial")]
+pub mod keymap_ops;
 pub mod layout_macro;
 pub mod light;
 pub mod matrix;
 pub mod processor;
+/// Shared access to the radio-safe nRF flash driver.
+#[cfg(feature = "shared_flash")]
+pub mod shared_flash;
 #[cfg(feature = "split")]
 pub mod split;
+// Bounded application-message hook for the split protocol.
+#[cfg(feature = "split")]
+pub mod split_app;
 pub mod state;
 #[cfg(feature = "storage")]
 pub mod storage;

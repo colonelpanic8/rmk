@@ -239,16 +239,50 @@ impl<'a> VialService<'a> {
     }
 }
 
+impl VialService<'_> {
+    /// Service one external keymap operation through the same conversion and
+    /// persistence path used by Vial's dynamic-keymap handlers. Keeping both
+    /// paths in this task gives keymap updates a single owner.
+    async fn process_keymap_op(&self, op: crate::keymap_ops::KeymapOp) -> u16 {
+        use crate::keymap_ops::KeymapOp;
+        match op {
+            KeymapOp::Get { layer, row, col } => to_via_keycode(self.ctx.get_action(layer, row, col)),
+            KeymapOp::Set {
+                layer,
+                row,
+                col,
+                keycode,
+            } => {
+                self.ctx.set_action(layer, row, col, from_via_keycode(keycode)).await;
+                // Return the canonical value after any lossy conversion.
+                to_via_keycode(self.ctx.get_action(layer, row, col))
+            }
+        }
+    }
+}
+
 impl Runnable for VialService<'_> {
     async fn run(&mut self) -> ! {
         loop {
-            let (transport, output_data) = HOST_REQUEST_CHANNEL.receive().await;
-            let mut report = ViaReport {
-                input_data: output_data,
-                output_data,
-            };
-            self.process_via_packet(&mut report).await;
-            try_send_host_reply(transport, report.input_data);
+            match embassy_futures::select::select(
+                HOST_REQUEST_CHANNEL.receive(),
+                crate::keymap_ops::KEYMAP_OPS.receive(),
+            )
+            .await
+            {
+                embassy_futures::select::Either::First((transport, output_data)) => {
+                    let mut report = ViaReport {
+                        input_data: output_data,
+                        output_data,
+                    };
+                    self.process_via_packet(&mut report).await;
+                    try_send_host_reply(transport, report.input_data);
+                }
+                embassy_futures::select::Either::Second(op) => {
+                    let result = self.process_keymap_op(op).await;
+                    crate::keymap_ops::KEYMAP_OP_RESULTS.send(result).await;
+                }
+            }
         }
     }
 }

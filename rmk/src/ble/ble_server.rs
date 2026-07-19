@@ -20,7 +20,32 @@ pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
     pub(crate) hid_service: HidService,
     pub(crate) host_service: VialService,
+    // Custom (non-HID) GATT service for an application-defined host protocol.
+    pub(crate) vendor_gatt_service: VendorGattService,
     pub(crate) device_config_service: DeviceConfigurationService,
+}
+
+/// Custom GATT service carrying an application-defined host protocol.
+/// Deliberately NOT part of any HID service: Web Bluetooth blocks
+/// HID-over-GATT, so a plain custom service keeps the channel reachable from
+/// browsers as well as native hosts.
+///
+/// - `request`: host → keyboard frames, write-without-response. Variable
+///   length, up to 257 bytes (2-byte frame header + 255 max payload).
+/// - `response`: keyboard → host frames via notify (variable-length
+///   `notify_raw`, sized to the negotiated ATT payload).
+///
+/// The `fc55…` UUIDs below are an example default; a consumer should pick its
+/// own service/characteristic UUIDs. Writes land in
+/// `vendor_transport::VENDOR_BLE_RX` (see `gatt_events_task`); responses are
+/// drained from `VENDOR_BLE_TX` by the notify task in `run_ble_keyboard`.
+#[cfg(feature = "host")]
+#[gatt_service(uuid = "fc550001-f8e0-459f-b421-c254fc42b138")]
+pub(crate) struct VendorGattService {
+    #[characteristic(uuid = "fc550002-f8e0-459f-b421-c254fc42b138", write_without_response, value = [0; 257])]
+    pub(crate) request: [u8; 257],
+    #[characteristic(uuid = "fc550003-f8e0-459f-b421-c254fc42b138", notify, value = [0; 257])]
+    pub(crate) response: [u8; 257],
 }
 
 /// GATT service exposing the Vial-over-HID protocol. The keyboard writes replies via
