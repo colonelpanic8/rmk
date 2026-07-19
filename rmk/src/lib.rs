@@ -80,6 +80,8 @@ pub mod input_device;
 pub mod keyboard;
 pub mod keyboard_macros;
 pub mod keymap;
+#[cfg(feature = "vial")]
+pub mod keymap_ops;
 pub mod layout_macro;
 pub mod light;
 pub mod matrix;
