@@ -26,6 +26,7 @@ dfu_rp = []
 ## Enable nRF DFU firmware update code generation
 dfu_nrf = []
 dfu_split = []
+shared_flash = []
 
 [lib]
 proc-macro = true

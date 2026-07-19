@@ -102,7 +102,7 @@ embedded-hal-mock = { version = "0.11.1", features = ["embedded-hal-async"] }
 crc32fast = "1.3"
 
 [package.metadata.docs.rs]
-features = ["split", "vial", "async_matrix", "_ble"]
+features = ["split", "vial", "async_matrix", "_ble", "shared_flash"]
 
 # Architecture specific dependencies
 [target.'cfg(all(target_arch = "arm", target_os = "none"))'.dependencies]
@@ -141,6 +141,9 @@ storage = [
     "dep:embedded-storage-async",
     "dep:embassy-embedded-hal",
 ]
+
+## Allow application flash access alongside RMK storage on nRF BLE keyboards
+shared_flash = ["storage", "rmk-macro/shared_flash"]
 
 ## Enable defmt support
 defmt = [

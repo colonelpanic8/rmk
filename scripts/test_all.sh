@@ -21,11 +21,17 @@ cargo "${nx[@]}" --manifest-path rmk-types/Cargo.toml
 cargo "${nx[@]}" --manifest-path rmk-types/Cargo.toml --features host
 cargo "${nx[@]}" --manifest-path rmk-types/Cargo.toml --features steno
 
+# Shared-flash code generation accepts only nRF+storage and diagnoses every
+# configuration that would otherwise expose a client without a service.
+cargo "${nx[@]}" --manifest-path rmk-macro/Cargo.toml --features shared_flash
+cargo "${nx[@]}" --manifest-path rmk-macro/Cargo.toml --features "shared_flash,dfu_nrf"
+
 cargo "${nx[@]}" --manifest-path rmk/Cargo.toml --no-default-features --features "split,vial,async_matrix,_ble"
 cargo "${nx[@]}" --manifest-path rmk/Cargo.toml --no-default-features --features "split,vial,async_matrix"
 cargo "${nx[@]}" --manifest-path rmk/Cargo.toml --no-default-features --features "split,async_matrix"
 cargo "${nx[@]}" --manifest-path rmk/Cargo.toml --no-default-features --features "split,async_matrix,_ble"
 cargo "${nx[@]}" --manifest-path rmk/Cargo.toml --no-default-features --features "async_matrix,storage"
+cargo "${nx[@]}" --manifest-path rmk/Cargo.toml --no-default-features --features "async_matrix,shared_flash"
 cargo "${nx[@]}" --manifest-path rmk/Cargo.toml --no-default-features --features "vial,storage"
 cargo "${nx[@]}" --manifest-path rmk/Cargo.toml --no-default-features --features "vial,_ble"
 cargo "${nx[@]}" --manifest-path rmk/Cargo.toml --no-default-features --features "passkey_entry"

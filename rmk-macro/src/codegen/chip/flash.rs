@@ -10,6 +10,15 @@ use rmk_config::resolved::hardware::ChipSeries;
 use rmk_config::resolved::hardware::DfuConfig;
 
 pub(crate) fn expand_flash_init(hardware: &Hardware) -> TokenStream2 {
+    #[cfg(feature = "shared_flash")]
+    if let Some(error) = shared_flash_configuration_error(
+        hardware.chip.series.clone(),
+        hardware.storage.is_some(),
+        hardware.communication.ble_enabled(),
+    ) {
+        return quote! { compile_error!(#error); };
+    }
+
     if hardware.storage.is_none() {
         // This config actually does nothing if storage is disabled
         return quote! {
@@ -75,34 +84,11 @@ pub(crate) fn expand_flash_init(hardware: &Hardware) -> TokenStream2 {
                         );
                     }
                 };
-                #[cfg(not(feature = "dfu_nrf"))]
-                // Wrap the singleton multiprotocol-safe flash
-                // driver in a shared async mutex so the application's
-                // runtime-config partition (rmk::shared_flash) can use it
-                // alongside RMK storage, and spawn the bounded service task
-                // that executes application flash requests against it. RMK
-                // storage receives a locking SharedFlash wrapper instead of
-                // the exclusive driver.
+                #[cfg(all(not(feature = "dfu_nrf"), feature = "shared_flash"))]
+                let flash_code = expand_shared_flash_init();
+                #[cfg(all(not(feature = "dfu_nrf"), not(feature = "shared_flash")))]
                 let flash_code = quote! {
-                    let flash = {
-                        static SHARED_FLASH: ::static_cell::StaticCell<
-                            ::embassy_sync::mutex::Mutex<::rmk::RawMutex, ::nrf_mpsl::Flash<'static>>,
-                        > = ::static_cell::StaticCell::new();
-                        let shared = SHARED_FLASH.init(::embassy_sync::mutex::Mutex::new(
-                            ::nrf_mpsl::Flash::take(mpsl, p.NVMC),
-                        ));
-                        #[::embassy_executor::task]
-                        async fn shared_flash_service(
-                            shared: &'static ::embassy_sync::mutex::Mutex<
-                                ::rmk::RawMutex,
-                                ::nrf_mpsl::Flash<'static>,
-                            >,
-                        ) {
-                            ::rmk::shared_flash::service(shared).await
-                        }
-                        spawner.spawn(shared_flash_service(shared).unwrap());
-                        ::rmk::shared_flash::SharedFlash::new(shared)
-                    };
+                    let flash = ::nrf_mpsl::Flash::take(mpsl, p.NVMC);
                 };
                 flash_code
             }
@@ -168,6 +154,51 @@ pub(crate) fn expand_flash_init(hardware: &Hardware) -> TokenStream2 {
     flash_init
 }
 
+#[cfg(feature = "shared_flash")]
+fn shared_flash_configuration_error(
+    series: ChipSeries,
+    storage_enabled: bool,
+    ble_enabled: bool,
+) -> Option<&'static str> {
+    if !storage_enabled {
+        return Some("the `shared_flash` feature requires `[storage].enabled = true`");
+    }
+    if series != ChipSeries::Nrf52 {
+        return Some(
+            "the generated `shared_flash` service is supported only on nRF52 BLE keyboards",
+        );
+    }
+    if !ble_enabled {
+        return Some("the generated `shared_flash` service requires BLE to be enabled");
+    }
+    #[cfg(feature = "dfu_nrf")]
+    return Some("the `shared_flash` and `dfu_nrf` features cannot be enabled together");
+    #[cfg(not(feature = "dfu_nrf"))]
+    None
+}
+
+#[cfg(all(feature = "shared_flash", not(feature = "dfu_nrf")))]
+fn expand_shared_flash_init() -> TokenStream2 {
+    quote! {
+        let flash = {
+            let flash_driver = ::nrf_mpsl::Flash::take(mpsl, p.NVMC);
+            let flash_capacity = ::rmk::shared_flash::flash_capacity(&flash_driver);
+            static SHARED_FLASH: ::static_cell::StaticCell<
+                ::rmk::shared_flash::FlashMutex<::nrf_mpsl::Flash<'static>>,
+            > = ::static_cell::StaticCell::new();
+            let shared = SHARED_FLASH.init(::rmk::shared_flash::FlashMutex::new(flash_driver));
+            #[::embassy_executor::task]
+            async fn shared_flash_service(
+                shared: &'static ::rmk::shared_flash::FlashMutex<::nrf_mpsl::Flash<'static>>,
+            ) {
+                ::rmk::shared_flash::service(shared).await
+            }
+            spawner.spawn(shared_flash_service(shared).unwrap());
+            ::rmk::shared_flash::StorageFlash::new(shared, flash_capacity)
+        };
+    }
+}
+
 /// Generate the `DFU_UNLOCK_KEYS` constant from the resolved DFU config.
 #[cfg(any(feature = "dfu_rp", feature = "dfu_nrf"))]
 fn expand_dfu_unlock_keys(dfu: &DfuConfig) -> TokenStream2 {
@@ -185,5 +216,41 @@ fn expand_dfu_unlock_keys(dfu: &DfuConfig) -> TokenStream2 {
         .collect::<Vec<_>>();
     quote! {
         const DFU_UNLOCK_KEYS: &[(u8, u8)] = &[#(#keys_expr), *];
+    }
+}
+
+#[cfg(all(test, feature = "shared_flash"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_storage_disabled_and_non_nrf_generation() {
+        assert!(shared_flash_configuration_error(ChipSeries::Nrf52, false, true).is_some());
+        assert!(shared_flash_configuration_error(ChipSeries::Nrf52, true, false).is_some());
+        assert!(shared_flash_configuration_error(ChipSeries::Stm32, true, true).is_some());
+        assert!(shared_flash_configuration_error(ChipSeries::Rp2040, true, true).is_some());
+        assert!(shared_flash_configuration_error(ChipSeries::Esp32, true, true).is_some());
+    }
+
+    #[cfg(not(feature = "dfu_nrf"))]
+    #[test]
+    fn accepts_nrf_storage_and_generates_service() {
+        assert_eq!(
+            shared_flash_configuration_error(ChipSeries::Nrf52, true, true),
+            None
+        );
+        let generated = expand_shared_flash_init().to_string();
+        assert!(generated.contains("shared_flash_service"));
+        assert!(generated.contains("StorageFlash"));
+        assert!(generated.contains("flash_capacity"));
+    }
+
+    #[cfg(feature = "dfu_nrf")]
+    #[test]
+    fn rejects_dfu_nrf_conflict() {
+        assert_eq!(
+            shared_flash_configuration_error(ChipSeries::Nrf52, true, true),
+            Some("the `shared_flash` and `dfu_nrf` features cannot be enabled together")
+        );
     }
 }

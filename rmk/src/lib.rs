@@ -62,10 +62,6 @@ pub mod ble;
 pub mod boot;
 pub mod channel;
 pub mod config;
-// Shared access to the radio-safe flash driver so an application can run
-// its own runtime-config partition alongside RMK's storage task.
-#[cfg(feature = "storage")]
-pub mod shared_flash;
 pub mod core_traits;
 #[cfg(feature = "dfu_split")]
 pub mod crc32;
@@ -88,6 +84,9 @@ pub mod layout_macro;
 pub mod light;
 pub mod matrix;
 pub mod processor;
+/// Shared access to the radio-safe nRF flash driver.
+#[cfg(feature = "shared_flash")]
+pub mod shared_flash;
 #[cfg(feature = "split")]
 pub mod split;
 pub mod state;
