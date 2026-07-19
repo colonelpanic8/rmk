@@ -63,7 +63,6 @@ pub mod boot;
 pub mod channel;
 pub mod config;
 pub mod core_traits;
-#[cfg(feature = "dfu_split")]
 pub mod crc32;
 pub mod debounce;
 #[cfg(feature = "dfu")]
