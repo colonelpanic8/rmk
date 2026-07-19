@@ -106,6 +106,9 @@ pub(crate) enum SplitMessage {
     /// Central → Peripheral: request system reset.
     #[cfg(feature = "dfu_split")]
     SystemReset,
+
+    /// Opaque application payload, appended after upstream messages.
+    Application(crate::split_app::SplitAppData),
 }
 
 // -----------------------------------------------------------------------
