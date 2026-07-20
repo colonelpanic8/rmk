@@ -38,6 +38,7 @@ RMK_FEATURESETS=(
     "log,std"
     "storage"
     "async_matrix,storage"
+    "async_matrix,shared_flash"
     "vial,host_lock,storage"
     "vial,_ble"
     "split,async_matrix"
@@ -50,6 +51,7 @@ RMK_FEATURESETS=(
     "vial,storage,steno"
     "split,vial,storage,async_matrix,_ble,steno"
     "rynk,_ble,split,storage,async_matrix"
+    "rynk,_ble,split,shared_flash,async_matrix"
     "rynk,storage"
 )
 
