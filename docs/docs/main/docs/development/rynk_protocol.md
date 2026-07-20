@@ -4,7 +4,7 @@
 
 # Rynk Protocol Reference
 
-Current protocol version: **0.1**.
+Current protocol version: **0.2**.
 
 Every transport (USB CDC, BLE GATT, BLE HID) carries the same frame — a 5-byte header plus a [postcard](https://docs.rs/postcard)-encoded payload:
 
@@ -35,6 +35,7 @@ Which commands a firmware answers depends on the RMK Cargo features it was built
 | `0x0008` | `Lock`                | `()`                   | `()`                    |         | Relock immediately.                                                          |
 | `0x0009` | `GetLayout`           | `u32`                  | `LayoutChunk`           |         | Get layout blob chunk. `u32` is the byte offset.                             |
 | `0x000A` | `GetDeviceInfo`       | `()`                   | `DeviceInfo`            |         | Identity strings and USB ids; feature gating stays in `GetCapabilities`.     |
+| `0x000B` | `GetBuildInfo`        | `()`                   | `BuildInfo`             |         | Application-defined diagnostic build label; never used for compatibility.    |
 | `0x0101` | `GetKeyAction`        | `KeyPosition`          | `KeyAction`             |         |                                                                              |
 | `0x0102` | `SetKeyAction`        | `SetKeyRequest`        | `()`                    |         |                                                                              |
 | `0x0103` | `GetDefaultLayer`     | `()`                   | `u8`                    |         |                                                                              |

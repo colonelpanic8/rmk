@@ -30,9 +30,10 @@ use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::morse::{Morse, MorseMode, MorseProfile};
 use rmk_types::protocol::rynk::{
-    BehaviorConfig as WireBehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetEncoderRequest, GetMacroRequest,
-    KeyPosition, LockStatus, MacroData, MatrixState, ProtocolVersion, RYNK_HEADER_SIZE, RynkError, SetComboRequest,
-    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetMacroRequest, SetMorseRequest, StorageResetMode,
+    BehaviorConfig as WireBehaviorConfig, BuildInfo, Cmd, DeviceCapabilities, DeviceInfo, GetEncoderRequest,
+    GetMacroRequest, KeyPosition, LockStatus, MacroData, MatrixState, ProtocolVersion, RYNK_HEADER_SIZE, RynkError,
+    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetMacroRequest, SetMorseRequest,
+    StorageResetMode,
 };
 
 use crate::common::rynk_link::{RynkHostClient, link_session, link_two_sessions};
@@ -153,6 +154,27 @@ fn get_device_info() {
         assert_eq!(info.rmk_version.major, env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap());
         assert_eq!(info.rmk_version.minor, env!("CARGO_PKG_VERSION_MINOR").parse().unwrap());
         assert_eq!(info.rmk_version.patch, env!("CARGO_PKG_VERSION_PATCH").parse().unwrap());
+    });
+}
+
+#[test]
+fn get_build_info_defaults_to_rmk_and_allows_application_override() {
+    let default_service = service();
+    link_session(&default_service, async |client| {
+        let info = client
+            .request::<(), BuildInfo>(Cmd::GetBuildInfo, 0x09, &())
+            .await
+            .expect("Ok envelope");
+        assert_eq!(info.label.as_str(), concat!("RMK v", env!("CARGO_PKG_VERSION")));
+    });
+
+    let custom_service = service().with_build_label("my-keyboard v2 / custom-config");
+    link_session(&custom_service, async |client| {
+        let info = client
+            .request::<(), BuildInfo>(Cmd::GetBuildInfo, 0x0a, &())
+            .await
+            .expect("Ok envelope");
+        assert_eq!(info.label.as_str(), "my-keyboard v2 / custom-config");
     });
 }
 

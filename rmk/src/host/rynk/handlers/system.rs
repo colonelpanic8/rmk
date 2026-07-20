@@ -2,14 +2,15 @@
 
 use rmk_types::constants;
 use rmk_types::protocol::rynk::command::{
-    BootloaderJump, GetCapabilities, GetDeviceInfo, GetLockStatus, GetVersion, Lock, Reboot, StorageReset, UnlockPoll,
+    BootloaderJump, GetBuildInfo, GetCapabilities, GetDeviceInfo, GetLockStatus, GetVersion, Lock, Reboot,
+    StorageReset, UnlockPoll,
 };
 use rmk_types::protocol::rynk::{
-    DEVICE_INFO_STRING_SIZE, DeviceCapabilities, DeviceInfo, LockStatus, ProtocolVersion, RYNK_HEADER_SIZE, RynkError,
+    BuildInfo, DeviceCapabilities, DeviceInfo, LockStatus, ProtocolVersion, RYNK_HEADER_SIZE, RynkError,
     StorageResetMode,
 };
 
-use super::super::{RMK_VERSION, RynkService, RynkSession};
+use super::super::{RMK_VERSION, RynkService, RynkSession, truncated};
 use super::Handle;
 
 impl Handle<GetVersion> for RynkService<'_> {
@@ -117,14 +118,8 @@ impl Handle<GetDeviceInfo> for RynkService<'_> {
     }
 }
 
-/// Copy `s` into the bounded wire string; over-long input is cut at the last
-/// whole char that fits, so multi-byte content can never panic or split.
-fn truncated(s: &str) -> heapless::String<DEVICE_INFO_STRING_SIZE> {
-    let mut out = heapless::String::new();
-    for c in s.chars() {
-        if out.push(c).is_err() {
-            break;
-        }
+impl Handle<GetBuildInfo> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<BuildInfo, RynkError> {
+        Ok(self.build_info.clone())
     }
-    out
 }

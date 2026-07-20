@@ -26,5 +26,8 @@ pub use rynk::RynkService as HostService;
 /// UART-backed rynk transport helper.
 #[cfg(feature = "rynk")]
 pub use rynk::run_rynk_uart;
+/// RMK's semantic version, available to downstream firmware build labels.
+#[cfg(feature = "rynk")]
+pub use rynk::{RMK_VERSION, RMK_VERSION_STRING};
 #[cfg(feature = "vial")]
 pub use via::VialService as HostService;

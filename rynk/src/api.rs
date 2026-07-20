@@ -13,11 +13,11 @@ use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::morse::Morse;
 use rmk_types::protocol::rynk::{
-    BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
-    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
-    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
+    BehaviorConfig, BuildInfo, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
+    GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest,
+    GetMorseBulkResponse, KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion,
+    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
+    SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
 };
 
 use crate::driver::{Client, RynkHostError};
@@ -57,6 +57,11 @@ impl Client {
     /// Read the firmware and device identity.
     pub async fn get_device_info(&self) -> Result<DeviceInfo, RynkHostError> {
         self.request::<command::GetDeviceInfo>(&()).await
+    }
+
+    /// Read the application-defined diagnostic build label.
+    pub async fn get_build_info(&self) -> Result<BuildInfo, RynkHostError> {
+        self.request::<command::GetBuildInfo>(&()).await
     }
 
     /// Reboot the device — fire-and-forget: the firmware resets before its

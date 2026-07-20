@@ -22,9 +22,9 @@ use rynk::rmk_types::fork::Fork;
 use rynk::rmk_types::led_indicator::LedIndicator;
 use rynk::rmk_types::morse::Morse;
 use rynk::rmk_types::protocol::rynk::{
-    BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse,
-    LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetKeymapBulkRequest,
-    SetMorseBulkRequest, StorageResetMode,
+    BehaviorConfig, BuildInfo, DeviceCapabilities, DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse,
+    GetMorseBulkResponse, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
+    SetKeymapBulkRequest, SetMorseBulkRequest, StorageResetMode,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -108,6 +108,7 @@ endpoints! {
     get_version() -> ProtocolVersion,
     get_capabilities() -> DeviceCapabilities,
     get_device_info() -> DeviceInfo,
+    get_build_info() -> BuildInfo,
     reboot() -> (),
     bootloader_jump() -> (),
     storage_reset(mode: StorageResetMode) -> (),
