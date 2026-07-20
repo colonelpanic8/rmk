@@ -1,5 +1,4 @@
 use core::cell::RefCell;
-use core::sync::atomic::Ordering;
 
 use bt_hci::cmd::le::{LeReadLocalSupportedFeatures, LeSetPhy, LeSetScanParams};
 use bt_hci::controller::{ControllerCmdAsync, ControllerCmdSync};
@@ -11,9 +10,8 @@ use heapless::VecView;
 use trouble_host::prelude::*;
 
 use crate::SPLIT_CENTRAL_SLEEP_TIMEOUT_SECONDS;
-use crate::ble::{SLEEPING_STATE, update_ble_phy, update_conn_params};
+use crate::ble::{update_ble_phy, update_conn_params};
 use crate::channel::FLASH_CHANNEL;
-use crate::event::{SleepStateEvent, publish_event};
 #[cfg(feature = "storage")]
 use crate::split::ble::PeerAddress;
 use crate::split::driver::{PeripheralManager, SplitDriverError, SplitReader, SplitWriter, set_peripheral_connected};
@@ -34,13 +32,6 @@ static SCANNING_MUTEX: Mutex<crate::RawMutex, ()> = Mutex::new(());
 /// - `signal(true)`: Indicates central has entered sleep mode
 /// - `signal(false)`: Indicates activity detected, wake up or reset sleep timer
 pub(crate) static CENTRAL_SLEEP: Signal<crate::RawMutex, bool> = Signal::new();
-
-/// Update `SLEEPING_STATE` and broadcast the change. The central owns the
-/// sleep value; host services read it via `crate::state::current_sleep_state`.
-pub(crate) fn set_sleeping(sleeping: bool) {
-    SLEEPING_STATE.store(sleeping, Ordering::Release);
-    publish_event(SleepStateEvent::new(sleeping));
-}
 
 /// Gatt service used in split central to send split message to peripheral
 #[gatt_service(uuid = "4dd5fbaa-18e5-4b07-bf0a-353698659946")]
@@ -484,7 +475,7 @@ async fn sleep_manager_task<
     );
 
     loop {
-        if !SLEEPING_STATE.load(Ordering::Acquire) {
+        if !crate::state::current_sleeping() {
             // Wait for timeout or activity (false signal means activity/wakeup)
             match select(
                 Timer::after_secs(SPLIT_CENTRAL_SLEEP_TIMEOUT_SECONDS.into()),
@@ -521,13 +512,13 @@ async fn sleep_manager_task<
 
             // Update connection parameters
             update_conn_params(stack, conn, &conn_params).await;
-            set_sleeping(true);
+            crate::state::set_sleeping(true);
         } else {
             // Wait for activity to wake up (false signal means activity/wakeup)
             let signal_value = CENTRAL_SLEEP.wait().await;
             if !signal_value {
                 info!("Waking up from sleep mode due to activity");
-                set_sleeping(false);
+                crate::state::set_sleeping(false);
 
                 // Restore normal connection parameters
                 update_conn_params(stack, conn, &defaul_central_conn_param()).await;
