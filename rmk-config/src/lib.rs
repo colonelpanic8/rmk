@@ -411,6 +411,8 @@ define_event_config!(
     dfu_status,
     // Action events
     action,
+    // Lighting control events
+    lighting_command,
 );
 
 /// Configurations for keyboard layout

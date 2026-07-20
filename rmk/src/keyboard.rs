@@ -1324,7 +1324,16 @@ impl<'a> Keyboard<'a> {
                 self.update_osl(event);
             }
             Action::OneShotKey(_k) => warn!("One-shot key is not supported: {:?}", action),
-            Action::Light(_light_action) => warn!("Light controll is not supported"),
+            Action::Light(light_action) => {
+                #[cfg(feature = "lighting")]
+                publish_event_async(crate::event::LightingCommandEvent::from_action(
+                    light_action,
+                    event.pressed,
+                ))
+                .await;
+                #[cfg(not(feature = "lighting"))]
+                warn!("Light control is not supported: {:?}", light_action);
+            }
             Action::KeyboardControl(c) => self.process_action_keyboard_control(c, event).await,
             Action::Special(special_key) => self.process_action_special(special_key, event).await,
             Action::User(id) => self.process_user(id, event).await,

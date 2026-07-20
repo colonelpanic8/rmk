@@ -40,6 +40,19 @@ events = [
     { name = "sleep_state" },
 ]
 
+# --- Lighting-gated internal subscribers ---
+
+[[subscriber]]
+features = ["lighting"]
+events = [
+    # lighting/mod.rs: LightingProcessor subscribes to these events
+    { name = "keyboard" },
+    { name = "layer_change" },
+    { name = "led_indicator" },
+    { name = "sleep_state" },
+    { name = "lighting_command" },
+]
+
 # --- BLE-gated internal subscribers ---
 
 [[subscriber]]

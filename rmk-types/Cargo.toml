@@ -47,6 +47,7 @@ host = ["rmk_protocol", "bulk", "_ble", "split"]
 _ble = []
 split = []
 display = []
+lighting = []
 passkey_entry = []
 # DFU firmware update support
 dfu = []

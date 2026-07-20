@@ -50,6 +50,8 @@ mod connection;
 #[cfg(feature = "dfu")]
 mod dfu;
 mod input;
+#[cfg(feature = "lighting")]
+mod lighting;
 #[cfg(feature = "split")]
 mod split;
 mod state;
@@ -63,6 +65,8 @@ pub use input::{
     Axis, AxisEvent, AxisValType, KeyPos, KeyboardEvent, KeyboardEventPos, ModifierEvent, PointingEvent,
     PointingProcessorEvent, PointingSetCpiEvent, RotaryEncoderPos,
 };
+#[cfg(feature = "lighting")]
+pub use lighting::{LightingCommand, LightingCommandEvent};
 #[cfg(feature = "split")]
 pub use split::{CentralConnectedEvent, PeripheralConnectedEvent};
 #[cfg(all(feature = "split", feature = "_ble"))]

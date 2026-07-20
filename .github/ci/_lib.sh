@@ -39,6 +39,7 @@ log_section() {
 RMK_FEATURESETS=(
     ""
     "log,std"
+    "lighting"
     "storage"
     "async_matrix,storage"
     "split,vial,storage"

@@ -58,6 +58,8 @@ peripheral_battery.subs = 4
 | `wpm_update`               | `WpmUpdateEvent`              |                        |
 | `led_indicator`            | `LedIndicatorEvent`           |                        |
 | `sleep_state`              | `SleepStateEvent`             |                        |
+| **Control Events**         |                               |                        |
+| `lighting_command`         | `LightingCommandEvent`        | lighting feature       |
 | **Battery Events**         |                               |                        |
 | `battery_adc`              | `BatteryAdcEvent`             | channel_size=2         |
 | `charging_state`           | `ChargingStateEvent`          | channel_size=2         |

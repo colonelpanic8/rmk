@@ -112,6 +112,7 @@ impl crate::KeyboardTomlConfig {
             clear_peer,
             dfu_status,
             action,
+            lighting_command,
         );
 
         // Auto-bump subscriber counts based on enabled feature flags.
@@ -219,7 +220,24 @@ fn resolve_passkey_enabled(ble: &crate::BleConfig) -> Result<Passkey, String> {
 #[cfg(test)]
 mod tests {
     use super::resolve_passkey_enabled;
-    use crate::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
+    use crate::{BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, KeyboardTomlConfig, MIN_PASSKEY_ENTRY_TIMEOUT_SECS};
+
+    #[test]
+    fn lighting_feature_reserves_processor_subscribers() {
+        let config: KeyboardTomlConfig = toml::from_str("").unwrap();
+        let constants = config.build_constants(&["lighting"]).unwrap();
+
+        for (name, expected) in [
+            ("keyboard", 4),
+            ("layer_change", 2),
+            ("led_indicator", 4),
+            ("sleep_state", 2),
+            ("lighting_command", 1),
+        ] {
+            let event = constants.events.iter().find(|event| event.name == name).unwrap();
+            assert_eq!(event.subs, expected, "subscriber count for {name}");
+        }
+    }
 
     #[test]
     fn validates_passkey_timeout() {
