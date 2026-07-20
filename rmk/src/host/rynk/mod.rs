@@ -17,7 +17,9 @@ pub use lighting::{
     StandardRynkLightingAdapter,
 };
 use rmk_types::constants::RYNK_BUFFER_SIZE;
-use rmk_types::protocol::rynk::{Cmd, FirmwareVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage, command};
+use rmk_types::protocol::rynk::{
+    BuildInfo, Cmd, FirmwareVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage, command,
+};
 #[allow(unused_imports)] // re-exported at `crate::host` for downstream users
 pub use uart::run_rynk_uart;
 
@@ -30,7 +32,8 @@ use crate::keymap::KeyMap;
 /// Unlock attempts live long enough for BLE WebHID round trips.
 const RYNK_UNLOCK_WINDOW: embassy_time::Duration = embassy_time::Duration::from_millis(500);
 
-const RMK_VERSION: FirmwareVersion = {
+/// Semantic version of the RMK crate serving Rynk.
+pub const RMK_VERSION: FirmwareVersion = {
     const fn component(s: &str) -> u8 {
         let bytes = s.as_bytes();
         let mut i = 0;
@@ -49,6 +52,22 @@ const RMK_VERSION: FirmwareVersion = {
     }
 };
 
+/// String form of [`RMK_VERSION`] for application-defined build labels.
+pub const RMK_VERSION_STRING: &str = env!("CARGO_PKG_VERSION");
+
+const DEFAULT_BUILD_LABEL: &str = concat!("RMK v", env!("CARGO_PKG_VERSION"));
+
+/// Copy a string into a bounded wire value without splitting UTF-8.
+fn truncated<const N: usize>(s: &str) -> heapless::String<N> {
+    let mut out = heapless::String::new();
+    for c in s.chars() {
+        if out.push(c).is_err() {
+            break;
+        }
+    }
+    out
+}
+
 /// Transport-agnostic Rynk service.
 pub struct RynkService<'a> {
     ctx: KeyboardContext<'a>,
@@ -58,6 +77,8 @@ pub struct RynkService<'a> {
     lock_config: LockConfig,
     #[cfg(feature = "lighting")]
     lighting: Option<RynkLightingController<'a>>,
+    /// Human-readable firmware identity served by `GetBuildInfo`.
+    build_info: BuildInfo,
 }
 
 struct RynkSession<'a> {
@@ -78,6 +99,9 @@ impl<'a> RynkService<'a> {
             lock_config: config.lock_config,
             #[cfg(feature = "lighting")]
             lighting: None,
+            build_info: BuildInfo {
+                label: truncated(DEFAULT_BUILD_LABEL),
+            },
         }
     }
 
@@ -87,6 +111,15 @@ impl<'a> RynkService<'a> {
     #[cfg(feature = "lighting")]
     pub fn with_lighting(mut self, lighting: RynkLightingController<'a>) -> Self {
         self.lighting = Some(lighting);
+        self
+    }
+
+    /// Replace the diagnostic build label advertised by `GetBuildInfo`.
+    ///
+    /// The label is for display and support diagnostics only. Protocol
+    /// compatibility continues to use `GetVersion`.
+    pub fn with_build_label(mut self, label: &str) -> Self {
+        self.build_info.label = truncated(label);
         self
     }
 
@@ -141,6 +174,7 @@ impl<'a> RynkService<'a> {
             Cmd::UnlockPoll => Serve::<command::UnlockPoll, _>::serve(session, msg).await,
             Cmd::Lock => Serve::<command::Lock, _>::serve(session, msg).await,
             Cmd::GetDeviceInfo => Serve::<command::GetDeviceInfo, _>::serve(self, msg).await,
+            Cmd::GetBuildInfo => Serve::<command::GetBuildInfo, _>::serve(self, msg).await,
 
             Cmd::GetKeyAction => Serve::<command::GetKeyAction, _>::serve(self, msg).await,
             Cmd::SetKeyAction => Serve::<command::SetKeyAction, _>::serve(self, msg).await,
