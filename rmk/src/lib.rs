@@ -86,13 +86,10 @@ pub mod helper_macro;
 pub mod hid;
 #[cfg(feature = "host")]
 pub mod host;
-// Raw transport pipes for an application-defined host protocol.
 pub mod input_device;
 pub mod keyboard;
 pub mod keyboard_macros;
 pub mod keymap;
-#[cfg(feature = "vial")]
-pub mod keymap_ops;
 pub mod layout_macro;
 pub mod light;
 pub mod matrix;
@@ -103,6 +100,7 @@ pub mod shared_flash;
 #[cfg(feature = "split")]
 pub mod split;
 #[cfg(feature = "host")]
+/// Raw transport pipes for an application-defined host protocol.
 pub mod vendor_transport;
 // Bounded application-message hook for the split protocol.
 #[cfg(feature = "split")]
