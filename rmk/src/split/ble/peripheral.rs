@@ -16,10 +16,22 @@ use crate::state::update_status;
 /// Gatt service used in split peripheral to send split message to central
 #[gatt_service(uuid = "4dd5fbaa-18e5-4b07-bf0a-353698659946")]
 pub(crate) struct SplitBleService {
-    #[characteristic(uuid = "0e6313e3-bd0b-45c2-8d2e-37a2e8128bc3", read, notify, indicate)]
+    #[characteristic(
+        uuid = "0e6313e3-bd0b-45c2-8d2e-37a2e8128bc3",
+        read,
+        notify,
+        indicate,
+        value = [0; SPLIT_MESSAGE_MAX_SIZE]
+    )]
     pub(crate) message_to_central: [u8; SPLIT_MESSAGE_MAX_SIZE],
 
-    #[characteristic(uuid = "4b3514fb-cae4-4d38-a097-3a2a3d1c3b9c", write_without_response, read, notify)]
+    #[characteristic(
+        uuid = "4b3514fb-cae4-4d38-a097-3a2a3d1c3b9c",
+        write_without_response,
+        read,
+        notify,
+        value = [0; SPLIT_MESSAGE_MAX_SIZE]
+    )]
     pub(crate) message_to_peripheral: [u8; SPLIT_MESSAGE_MAX_SIZE],
 }
 
