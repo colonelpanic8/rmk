@@ -183,7 +183,7 @@ impl<const ROW: usize, const COL: usize, const ROW_OFFSET: usize, const COL_OFFS
         let mut wpm_sub = crate::event::WpmUpdateEvent::subscriber();
         #[cfg(feature = "display")]
         let mut modifier_sub = crate::event::ModifierEvent::subscriber();
-        #[cfg(feature = "display")]
+        #[cfg(feature = "_render_state")]
         let mut sleep_sub = crate::event::SleepStateEvent::subscriber();
 
         // Expose the split-link state to the application. This
@@ -244,7 +244,7 @@ impl<const ROW: usize, const COL: usize, const ROW_OFFSET: usize, const COL_OFFS
                     },
                     with_feature("display"): e = wpm_sub.next_event().fuse() => SplitMessage::Wpm(e.0),
                     with_feature("display"): e = modifier_sub.next_event().fuse() => SplitMessage::Modifier(e.modifier.into_bits()),
-                    with_feature("display"): e = sleep_sub.next_event().fuse() => SplitMessage::SleepState(e.0),
+                    with_feature("_render_state"): e = sleep_sub.next_event().fuse() => SplitMessage::SleepState(e.0),
                     // Application messages, deliberately the
                     // last (lowest-priority) outgoing arm; the read arm of the
                     // outer select still beats all outgoing traffic.
