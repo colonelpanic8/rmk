@@ -26,5 +26,10 @@ pub use rynk::RynkService as HostService;
 /// UART-backed rynk transport helper.
 #[cfg(feature = "rynk")]
 pub use rynk::run_rynk_uart;
+#[cfg(all(feature = "rynk", feature = "lighting"))]
+pub use rynk::{
+    RYNK_LIGHTING_TRANSACTION_CAPACITY, RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox,
+    StandardRynkLightingAdapter,
+};
 #[cfg(feature = "vial")]
 pub use via::VialService as HostService;

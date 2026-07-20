@@ -44,7 +44,7 @@ GetMorse reply Ok(Morse{TAP->Key(A)})                                   01 04 01
 GetMorse request 0                                                      01 04 01 01 00 00
 GetSleepState reply Ok(true)                                            06 08 01 02 00 00 01
 GetSleepState request ()                                                06 08 01 00 00
-GetVersion reply Ok(CURRENT)                                            01 00 01 03 00 00 00 01
+GetVersion reply Ok(CURRENT)                                            01 00 01 03 00 00 00 02
 GetVersion request ()                                                   01 00 01 00 00
 GetWpm reply Ok(42)                                                     05 08 01 02 00 00 2a
 GetWpm request ()                                                       05 08 01 00 00
