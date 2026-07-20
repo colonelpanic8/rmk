@@ -70,6 +70,12 @@ events = [
 ]
 
 [[subscriber]]
+features = ["rynk", "lighting"]
+events = [
+    { name = "lighting_changed" },
+]
+
+[[subscriber]]
 features = ["rynk", "_ble"]
 events = [
     # battery_status is only subscribed under `_ble`; needs one slot per
@@ -104,6 +110,13 @@ features = ["dongle", "display"]
 events = [
     # display/mod.rs: DisplayProcessor subscribes on a dongle with a screen.
     { name = "dongle_state" },
+]
+
+[[subscriber]]
+features = ["rynk", "lighting", "_ble"]
+events = [
+    # Second Rynk session slot on dual-transport boards.
+    { name = "lighting_changed" },
 ]
 
 # --- Split-gated internal subscribers ---
