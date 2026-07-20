@@ -68,6 +68,12 @@ impl<'stack, 'server, 'c, P: PacketPool> SplitReader for BleSplitPeripheralDrive
                     return Err(SplitDriverError::Disconnected);
                 }
                 GattConnectionEvent::Gatt { event: gatt_event } => {
+                    #[cfg(feature = "dfu_split")]
+                    let split_notifications_cccd_written = matches!(
+                        &gatt_event,
+                        GattEvent::Write(event)
+                            if Some(event.handle()) == self.message_to_central.cccd_handle
+                    );
                     match &gatt_event {
                         GattEvent::Read(event) => {
                             info!("Gatt read event: {:?}", event.handle());
@@ -95,6 +101,14 @@ impl<'stack, 'server, 'c, P: PacketPool> SplitReader for BleSplitPeripheralDrive
                     match gatt_event.accept() {
                         Ok(r) => r.send().await,
                         Err(e) => warn!("[gatt] error sending response: {:?}", e),
+                    }
+                    // Accepting the CCCD write updates TrouBLE's subscription state.
+                    // Announce only when this write enabled notifications.
+                    #[cfg(feature = "dfu_split")]
+                    if split_notifications_cccd_written && self.message_to_central.should_notify(self.conn) {
+                        let hash = crate::dfu::read_embedded_firmware_hash();
+                        info!("dfu_split: notifications enabled, announcing hash {:#x}", hash);
+                        self.write(&SplitMessage::FirmwareHashResponse(hash)).await.ok();
                     }
                 }
                 GattConnectionEvent::ConnectionParamsUpdated {
@@ -131,7 +145,11 @@ impl<'stack, 'server, 'c, P: PacketPool> SplitWriter for BleSplitPeripheralDrive
             .notify(self.conn, &buf, true)
             .await
             .map_err(|e| {
-                error!("BLE notify error: {:?}", e);
+                if e == Error::NotSubscribed {
+                    debug!("Central has not subscribed to split notifications yet");
+                } else {
+                    error!("BLE notify error: {:?}", e);
+                }
                 SplitDriverError::BleError(1)
             })?;
         Ok(buf.len())

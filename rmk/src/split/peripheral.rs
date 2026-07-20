@@ -80,7 +80,7 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
     pub(crate) async fn run(&mut self) {
         // Proactively announce our firmware hash so the central can detect
         // us even when it booted first and already gave up waiting for a query response.
-        #[cfg(feature = "dfu_split")]
+        #[cfg(all(feature = "dfu_split", not(feature = "_ble")))]
         {
             let hash = crate::dfu::read_embedded_firmware_hash();
             self.split_driver
