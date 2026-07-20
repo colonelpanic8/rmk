@@ -470,11 +470,12 @@ fn expand_main(
             // Set all keyboard config
             #rmk_config
 
-            // Initialize the registered processors
-            #registered_processor_initializers
-
             // Initialize the storage and keymap, as `storage` and `keymap`
             #keymap_and_storage
+
+            // Initialize registered processors after the keymap so custom
+            // processor constructors can use authoritative keymap state.
+            #registered_processor_initializers
 
             // Initialize the matrix + keyboard, as `matrix` and `keyboard`
             #matrix_and_keyboard
