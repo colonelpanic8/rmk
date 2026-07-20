@@ -18,8 +18,19 @@
 #![cfg_attr(not(test), no_std)]
 
 // Mutual exclusivity guard
-#[cfg(all(feature = "rmk_protocol", feature = "vial"))]
-compile_error!("features `rmk_protocol` and `vial` are mutually exclusive");
+#[cfg(all(feature = "rynk", feature = "vial"))]
+compile_error!("features `rynk` and `vial` are mutually exclusive");
+
+// `host` needs a concrete configurator protocol to expose `HostService`.
+#[cfg(all(feature = "host", not(any(feature = "rynk", feature = "vial"))))]
+compile_error!("feature `host` requires enabling either `rynk` or `vial`");
+
+#[cfg(all(feature = "usb_log", feature = "_usb_high_speed"))]
+compile_error!(
+    "`usb_log` is not supported on high-speed USB chips yet: embassy-usb-logger \
+     only handles 64-byte packets, which high-speed bulk endpoints can't use. \
+     Use `defmt` logging on these chips."
+);
 
 // Re-export self as ::rmk for macro-generated code to work both inside and outside the crate
 extern crate self as rmk;
@@ -76,8 +87,6 @@ pub mod hid;
 #[cfg(feature = "host")]
 pub mod host;
 // Raw transport pipes for an application-defined host protocol.
-#[cfg(feature = "host")]
-pub mod vendor_transport;
 pub mod input_device;
 pub mod keyboard;
 pub mod keyboard_macros;
@@ -93,6 +102,8 @@ pub mod processor;
 pub mod shared_flash;
 #[cfg(feature = "split")]
 pub mod split;
+#[cfg(feature = "host")]
+pub mod vendor_transport;
 // Bounded application-message hook for the split protocol.
 #[cfg(feature = "split")]
 pub mod split_app;
