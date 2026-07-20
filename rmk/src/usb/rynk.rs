@@ -1,76 +1,119 @@
-//! Rynk over USB CDC-ACM (Web Serial-compatible).
+//! Rynk over USB HID.
+//!
+//! Rynk frames are fragmented into the same fixed 32-byte reports used by
+//! Rynk's BLE WebHID transport. The frame header's length trims padding from
+//! the final report before the byte stream reaches `RynkService`.
 
 use embassy_usb::Builder;
-use embassy_usb::class::cdc_acm::{BufferedReceiver, CdcAcmClass, Sender, State};
+use embassy_usb::class::hid::{HidReader, HidWriter};
 use embassy_usb::driver::Driver;
-use embedded_io_async::{ErrorType, Write};
-use static_cell::StaticCell;
+use embedded_io_async::{ErrorType, Read, Write};
+use rmk_types::protocol::rynk::{RYNK_HID_REPORT_SIZE, RynkHeader};
 
+use crate::hid::RynkHidReport;
 use crate::host::rynk::RynkService;
+use crate::host::transport::HostTransportError;
+use crate::usb::add_usb_reader_writer;
 
-#[cfg(feature = "_usb_high_speed")]
-const RYNK_USB_MAX_PACKET_SIZE: u16 = 512;
-#[cfg(not(feature = "_usb_high_speed"))]
-const RYNK_USB_MAX_PACKET_SIZE: u16 = 64;
+pub(crate) type HostUsbReader<D> = HidReader<'static, D, RYNK_HID_REPORT_SIZE>;
+pub(crate) type HostUsbWriter<D> = HidWriter<'static, D, RYNK_HID_REPORT_SIZE>;
 
-/// `BufferedReceiver` needs one packet worth of scratch to satisfy
-/// sub-packet `Read::read` requests.
-const RX_BUFFER_SIZE: usize = RYNK_USB_MAX_PACKET_SIZE as usize;
-
-/// Reader/writer halves of the Rynk USB transport (CDC-ACM).
-pub(crate) type HostUsbReader<D> = BufferedReceiver<'static, D>;
-pub(crate) type HostUsbWriter<D> = Sender<'static, D>;
-
-/// Build the Rynk CDC-ACM interface.
+/// Build the Rynk vendor-HID interface.
 pub fn build_host_usb<D: Driver<'static>>(builder: &mut Builder<'static, D>) -> (HostUsbReader<D>, HostUsbWriter<D>) {
-    static STATE: StaticCell<State> = StaticCell::new();
-    static RX_BUF: StaticCell<[u8; RX_BUFFER_SIZE]> = StaticCell::new();
-
-    let state = STATE.init(State::new());
-    let class = CdcAcmClass::new(builder, state, RYNK_USB_MAX_PACKET_SIZE);
-    let (sender, receiver) = class.split();
-    let receiver = receiver.into_buffered(RX_BUF.init([0; RX_BUFFER_SIZE]));
-    (receiver, sender)
+    add_usb_reader_writer!(builder, RynkHidReport, RYNK_HID_REPORT_SIZE, RYNK_HID_REPORT_SIZE, 32).split()
 }
 
-/// Rynk session loop
+/// Run one Rynk session for each USB connection.
 pub async fn run_host_usb<D: Driver<'static>>(
-    receiver: &mut HostUsbReader<D>,
-    sender: &mut HostUsbWriter<D>,
+    reader: &mut HostUsbReader<D>,
+    writer: &mut HostUsbWriter<D>,
     service: &RynkService<'_>,
 ) -> ! {
     loop {
-        sender.wait_connection().await;
-        let mut tx = RynkUsbTx { sender: &mut *sender };
-        service.run_session(receiver, &mut tx).await;
+        reader.ready().await;
+        let mut rx = RynkUsbRx::new(&mut *reader);
+        let mut tx = RynkUsbTx { writer: &mut *writer };
+        service.run_session(&mut rx, &mut tx).await;
     }
 }
 
-/// Rynk USB writer: sends one frame per `write`, then a zero-length packet when
-/// the frame fills the last bulk-IN packet. A CDC IN transfer completes on the
-/// host only at a packet shorter than the max packet size, so a frame whose
-/// length is a multiple of it would otherwise hang the host read (hit at
-/// Full-Speed's 64-byte packets; masked at High-Speed's 512). `run_session`
-/// writes each frame with a single `write_all`, so `buf` is one whole frame.
+struct RynkUsbRx<'a, D: Driver<'static>> {
+    reader: &'a mut HostUsbReader<D>,
+    report: [u8; RYNK_HID_REPORT_SIZE],
+    pos: usize,
+    end: usize,
+    remaining: usize,
+}
+
+impl<'a, D: Driver<'static>> RynkUsbRx<'a, D> {
+    fn new(reader: &'a mut HostUsbReader<D>) -> Self {
+        Self {
+            reader,
+            report: [0; RYNK_HID_REPORT_SIZE],
+            pos: 0,
+            end: 0,
+            remaining: 0,
+        }
+    }
+}
+
+impl<D: Driver<'static>> ErrorType for RynkUsbRx<'_, D> {
+    type Error = HostTransportError;
+}
+
+impl<D: Driver<'static>> Read for RynkUsbRx<'_, D> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            if self.pos < self.end {
+                let n = (self.end - self.pos).min(buf.len());
+                buf[..n].copy_from_slice(&self.report[self.pos..self.pos + n]);
+                self.pos += n;
+                return Ok(n);
+            }
+
+            let n = self
+                .reader
+                .read(&mut self.report)
+                .await
+                .map_err(|_| HostTransportError)?;
+            if self.remaining == 0 {
+                let Some(frame_len) = RynkHeader::peek_frame_len(&self.report[..n]) else {
+                    continue;
+                };
+                self.remaining = frame_len;
+            }
+            self.pos = 0;
+            self.end = self.remaining.min(n);
+            self.remaining -= self.end;
+        }
+    }
+}
+
 struct RynkUsbTx<'a, D: Driver<'static>> {
-    sender: &'a mut Sender<'static, D>,
+    writer: &'a mut HostUsbWriter<D>,
 }
 
 impl<D: Driver<'static>> ErrorType for RynkUsbTx<'_, D> {
-    type Error = <Sender<'static, D> as ErrorType>::Error;
+    type Error = HostTransportError;
 }
 
 impl<D: Driver<'static>> Write for RynkUsbTx<'_, D> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.sender.write_all(buf).await?;
-        let max_packet = self.sender.max_packet_size() as usize;
-        if !buf.is_empty() && buf.len().is_multiple_of(max_packet) {
-            self.sender.write(&[]).await?;
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        for chunk in buf.chunks(RYNK_HID_REPORT_SIZE) {
+            let mut report = [0u8; RYNK_HID_REPORT_SIZE];
+            report[..chunk.len()].copy_from_slice(chunk);
+            self.writer.write(&report).await.map_err(|_| HostTransportError)?;
         }
         Ok(buf.len())
     }
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.sender.flush().await
+        Ok(())
     }
 }
