@@ -47,7 +47,14 @@ pub async fn run_peripheral_manager<
     #[cfg(feature = "_ble")]
     {
         use crate::split::ble::central::run_ble_peripheral_manager;
-        run_ble_peripheral_manager::<C, ROW, COL, ROW_OFFSET, COL_OFFSET>(id, addr, stack).await;
+        run_ble_peripheral_manager::<C, ROW, COL, ROW_OFFSET, COL_OFFSET>(
+            id,
+            addr,
+            stack,
+            #[cfg(feature = "dfu_split")]
+            policy,
+        )
+        .await;
     };
 
     #[cfg(not(feature = "_ble"))]

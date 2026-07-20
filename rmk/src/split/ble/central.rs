@@ -38,10 +38,21 @@ pub(crate) static CENTRAL_SLEEP: Signal<crate::RawMutex, bool> = Signal::new();
 /// Gatt service used in split central to send split message to peripheral
 #[gatt_service(uuid = "4dd5fbaa-18e5-4b07-bf0a-353698659946")]
 struct SplitBleCentralService {
-    #[characteristic(uuid = "0e6313e3-bd0b-45c2-8d2e-37a2e8128bc3", read, notify)]
+    #[characteristic(
+        uuid = "0e6313e3-bd0b-45c2-8d2e-37a2e8128bc3",
+        read,
+        notify,
+        value = [0; SPLIT_MESSAGE_MAX_SIZE]
+    )]
     message_to_central: [u8; SPLIT_MESSAGE_MAX_SIZE],
 
-    #[characteristic(uuid = "4b3514fb-cae4-4d38-a097-3a2a3d1c3b9c", write_without_response, read, notify)]
+    #[characteristic(
+        uuid = "4b3514fb-cae4-4d38-a097-3a2a3d1c3b9c",
+        write_without_response,
+        read,
+        notify,
+        value = [0; SPLIT_MESSAGE_MAX_SIZE]
+    )]
     message_to_peripheral: [u8; SPLIT_MESSAGE_MAX_SIZE],
 }
 
@@ -174,6 +185,7 @@ pub(crate) async fn run_ble_peripheral_manager<
     peri_id: usize,
     addrs: &RefCell<VecView<Option<[u8; 6]>>>,
     stack: &'b Stack<'s, C, DefaultPacketPool>,
+    #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) {
     trace!("SPLIT_MESSAGE_MAX_SIZE: {}", SPLIT_MESSAGE_MAX_SIZE);
 
@@ -230,8 +242,14 @@ pub(crate) async fn run_ble_peripheral_manager<
                     connected: true,
                 });
 
-                if let Err(e) =
-                    run_central_manager_task::<_, _, ROW, COL, ROW_OFFSET, COL_OFFSET>(peri_id, stack, &conn).await
+                if let Err(e) = run_central_manager_task::<_, _, ROW, COL, ROW_OFFSET, COL_OFFSET>(
+                    peri_id,
+                    stack,
+                    &conn,
+                    #[cfg(feature = "dfu_split")]
+                    policy,
+                )
+                .await
                 {
                     #[cfg(feature = "defmt")]
                     let e = defmt::Debug2Format(&e);
@@ -279,6 +297,7 @@ async fn run_central_manager_task<
     id: usize,
     stack: &'b Stack<'s, C, P>,
     conn: &Connection<'b, P>,
+    #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) -> Result<(), BleHostError<C::Error>> {
     let client = GattClient::<C, P, 10>::new(stack, conn).await?;
 
@@ -290,7 +309,12 @@ async fn run_central_manager_task<
 
     match select3(
         ble_central_task(&client, conn),
-        run_peripheral_manager::<_, _, ROW, COL, ROW_OFFSET, COL_OFFSET>(id, &client),
+        run_peripheral_manager::<_, _, ROW, COL, ROW_OFFSET, COL_OFFSET>(
+            id,
+            &client,
+            #[cfg(feature = "dfu_split")]
+            policy,
+        ),
         sleep_manager_task(stack, conn),
     )
     .await
@@ -332,6 +356,7 @@ async fn run_peripheral_manager<
 >(
     id: usize,
     client: &GattClient<'a, C, P, 10>,
+    #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) -> Result<(), BleHostError<C::Error>> {
     let services = client
         .services_by_uuid(&Uuid::new_long([
@@ -364,7 +389,12 @@ async fn run_peripheral_manager<
         info!("Subscribing notifications");
         let listener = client.subscribe(&message_to_central, false).await?;
         let split_ble_driver = BleSplitCentralDriver::new(listener, message_to_peripheral, client);
-        let peripheral_manager = PeripheralManager::<ROW, COL, ROW_OFFSET, COL_OFFSET, _>::new(split_ble_driver, id);
+        let peripheral_manager = PeripheralManager::<ROW, COL, ROW_OFFSET, COL_OFFSET, _>::new(
+            split_ble_driver,
+            id,
+            #[cfg(feature = "dfu_split")]
+            policy,
+        );
         peripheral_manager.run().await;
         info!("Peripheral manager stopped");
     };
