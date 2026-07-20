@@ -4,11 +4,18 @@
 //! transport run creates independent authorization and topic-subscription state.
 
 mod handlers;
+#[cfg(feature = "lighting")]
+mod lighting;
 mod topics;
 mod uart;
 
 use embassy_futures::select::{Either, select};
 use embedded_io_async::{Read, Write};
+#[cfg(feature = "lighting")]
+pub use lighting::{
+    RYNK_LIGHTING_TRANSACTION_CAPACITY, RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox,
+    StandardRynkLightingAdapter,
+};
 use rmk_types::constants::RYNK_BUFFER_SIZE;
 use rmk_types::protocol::rynk::{Cmd, FirmwareVersion, RYNK_HEADER_SIZE, RynkError, RynkHeader, RynkMessage, command};
 #[allow(unused_imports)] // re-exported at `crate::host` for downstream users
@@ -49,11 +56,15 @@ pub struct RynkService<'a> {
     device: DeviceConfig<'static>,
     /// Policy copied into each session's authorization gate.
     lock_config: LockConfig,
+    #[cfg(feature = "lighting")]
+    lighting: Option<RynkLightingController<'a>>,
 }
 
 struct RynkSession<'a> {
     locker: HostLock<'a>,
     topics: topics::TopicSubscribers,
+    #[cfg(feature = "lighting")]
+    lighting: embassy_sync::mutex::Mutex<crate::RawMutex, handlers::lighting::LightingTransactionState>,
 }
 
 impl<'a> RynkService<'a> {
@@ -65,7 +76,18 @@ impl<'a> RynkService<'a> {
             ctx,
             device: config.device_config,
             lock_config: config.lock_config,
+            #[cfg(feature = "lighting")]
+            lighting: None,
         }
+    }
+
+    /// Attach a concrete lighting controller. Merely compiling the lighting
+    /// feature does not advertise support: discovery turns on only after this
+    /// binding is present and its bridge task is running.
+    #[cfg(feature = "lighting")]
+    pub fn with_lighting(mut self, lighting: RynkLightingController<'a>) -> Self {
+        self.lighting = Some(lighting);
+        self
     }
 
     /// Whether `cmd` needs an unlocked device.
@@ -86,6 +108,15 @@ impl<'a> RynkService<'a> {
             | Cmd::SetKeymapBulk
             | Cmd::SetComboBulk
             | Cmd::SetMorseBulk => self.lock_config.write_requires_unlock,
+            #[cfg(feature = "lighting")]
+            Cmd::SetLightingState
+            | Cmd::SetLightingOverlay
+            | Cmd::UnsetLightingOverlay
+            | Cmd::ClearLightingOverlay
+            | Cmd::BeginLightingOverlayReplace
+            | Cmd::PutLightingOverlayChunk
+            | Cmd::CommitLightingOverlayReplace
+            | Cmd::AbortLightingOverlayReplace => self.lock_config.write_requires_unlock,
             _ => false,
         }
     }
@@ -159,6 +190,41 @@ impl<'a> RynkService<'a> {
 
             Cmd::GetLayout => Serve::<command::GetLayout, _>::serve(self, msg).await,
 
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingCapabilities => Serve::<command::GetLightingCapabilities, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingState => Serve::<command::GetLightingState, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::SetLightingState => Serve::<command::SetLightingState, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingKeys => Serve::<command::GetLightingKeys, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingPhysicalKeys => Serve::<command::GetLightingPhysicalKeys, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingLeds => Serve::<command::GetLightingLeds, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingZones => Serve::<command::GetLightingZones, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingZoneMemberships => Serve::<command::GetLightingZoneMemberships, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingOutputs => Serve::<command::GetLightingOutputs, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingRoutes => Serve::<command::GetLightingRoutes, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::SetLightingOverlay => Serve::<command::SetLightingOverlay, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::UnsetLightingOverlay => Serve::<command::UnsetLightingOverlay, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::ClearLightingOverlay => Serve::<command::ClearLightingOverlay, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::BeginLightingOverlayReplace => handlers::lighting::serve_begin(self, session, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::PutLightingOverlayChunk => handlers::lighting::serve_put(self, session, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::CommitLightingOverlayReplace => handlers::lighting::serve_commit(self, session, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::AbortLightingOverlayReplace => handlers::lighting::serve_abort(self, session, msg).await,
+
             _ => Err(RynkError::UnknownCmd),
         } {
             msg.encode_error(error);
@@ -177,6 +243,8 @@ impl<'a> RynkService<'a> {
                 RYNK_UNLOCK_WINDOW,
             ),
             topics: topics::TopicSubscribers::new(),
+            #[cfg(feature = "lighting")]
+            lighting: embassy_sync::mutex::Mutex::new(handlers::lighting::LightingTransactionState::new()),
         };
         let mut buf = [0u8; RYNK_BUFFER_SIZE];
 

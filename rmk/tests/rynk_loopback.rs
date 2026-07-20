@@ -13,10 +13,20 @@ use heapless::Vec as HVec;
 use rmk::config::{BehaviorConfig, PositionalConfig, RmkConfig};
 #[cfg(feature = "_ble")]
 use rmk::event::BatteryStatusEvent;
+#[cfg(feature = "lighting")]
+use rmk::event::LightingChangedEvent;
 use rmk::event::{
     ConnectionStatusChangeEvent, LayerChangeEvent, LedIndicatorEvent, SleepStateEvent, WpmUpdateEvent, publish_event,
 };
 use rmk::host::HostService as RynkService;
+#[cfg(feature = "lighting")]
+use rmk::host::{RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox};
+#[cfg(feature = "lighting")]
+use rmk::lighting::{LedId, LedMetadata, LightingRouting, LightingTopology, MatrixSize, ZoneSpan};
+#[cfg(feature = "lighting")]
+use rmk::physical_layout::{
+    Coordinate, KeyPosition as CoreKeyPosition, KeySize, PhysicalKey, PhysicalLayout, Point3, Rotation,
+};
 use rmk::types::action::{Action, EncoderAction, KeyAction};
 use rmk::types::keycode::{HidKeyCode, KeyCode};
 #[cfg(feature = "_ble")]
@@ -33,6 +43,10 @@ use rmk_types::protocol::rynk::{
     BehaviorConfig as WireBehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetEncoderRequest, GetMacroRequest,
     KeyPosition, LockStatus, MacroData, MatrixState, ProtocolVersion, RYNK_HEADER_SIZE, RynkError, SetComboRequest,
     SetEncoderRequest, SetForkRequest, SetKeyRequest, SetMacroRequest, SetMorseRequest, StorageResetMode,
+};
+#[cfg(feature = "lighting")]
+use rmk_types::protocol::rynk::{
+    LightingChanged, LightingError, LightingKeysPageResult, LightingMatrixPosition, LightingPageRequest,
 };
 
 use crate::common::rynk_link::{RynkHostClient, link_session, link_two_sessions};
@@ -52,6 +66,48 @@ fn service() -> RynkService<'static> {
     let keymap = [[[KeyAction::No; 2]; 2]; 1];
     let km = wrap_keymap(keymap, per_key, behavior);
     RynkService::new(km, insecure_config())
+}
+
+#[cfg(feature = "lighting")]
+static LIGHTING_KEYS: [CoreKeyPosition; 2] = [CoreKeyPosition::new(0, 0), CoreKeyPosition::new(0, 2)];
+#[cfg(feature = "lighting")]
+static LIGHTING_PHYSICAL_KEYS: [PhysicalKey; 1] = [PhysicalKey {
+    matrix: CoreKeyPosition::new(0, 0),
+    center: Point3::new(Coordinate::ZERO, Coordinate::ONE, Coordinate::ZERO),
+    size: KeySize::ONE,
+    rotation: Rotation::ZERO,
+}];
+#[cfg(feature = "lighting")]
+static LIGHTING_LEDS: [LedMetadata; 1] = [LedMetadata {
+    id: LedId(99),
+    key: Some(CoreKeyPosition::new(0, 0)),
+    position: None,
+    zones: ZoneSpan::new(0, 0),
+}];
+
+#[cfg(feature = "lighting")]
+fn lighting_service() -> RynkService<'static> {
+    let mailbox = Box::leak(Box::new(RynkLightingMailbox::new()));
+    let descriptor = RynkLightingDescriptor {
+        topology_revision: 23,
+        topology: LightingTopology {
+            matrix: MatrixSize::new(1, 3),
+            keys: &LIGHTING_KEYS,
+            physical_layout: PhysicalLayout::new(&LIGHTING_PHYSICAL_KEYS),
+            leds: &LIGHTING_LEDS,
+            zones: &[],
+            zone_memberships: &[],
+        },
+        routing: LightingRouting {
+            outputs: &[],
+            routes: &[],
+        },
+    };
+    let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
+    let per_key: &'static PositionalConfig<1, 3> = Box::leak(Box::new(PositionalConfig::default()));
+    let keymap = [[[KeyAction::No; 3]; 1]; 1];
+    let km = wrap_keymap(keymap, per_key, behavior);
+    RynkService::new(km, insecure_config()).with_lighting(RynkLightingController::new(mailbox, descriptor, 8))
 }
 
 /// 2-layer service so SetDefaultLayer can make an observable change.
@@ -133,6 +189,53 @@ fn get_capabilities() {
         assert!(caps.bulk_transfer_supported);
         assert_eq!(caps.max_bulk_keys as usize, rmk_types::constants::BULK_KEYMAP_SIZE);
         assert_eq!(caps.max_bulk_configs as usize, rmk_types::constants::BULK_SIZE);
+    });
+}
+
+#[cfg(feature = "lighting")]
+#[test]
+fn lighting_discovery_and_revision_pinned_keys_cross_the_full_loopback() {
+    let service = lighting_service();
+    link_session(&service, async |client| {
+        let caps = client
+            .request::<(), DeviceCapabilities>(Cmd::GetCapabilities, 0x71, &())
+            .await
+            .expect("outer capability envelope");
+        assert!(caps.lighting_enabled);
+
+        let keys = client
+            .request::<_, LightingKeysPageResult>(
+                Cmd::GetLightingKeys,
+                0x72,
+                &LightingPageRequest {
+                    topology_revision: 23,
+                    offset: 0,
+                },
+            )
+            .await
+            .expect("outer keys envelope")
+            .expect("lighting keys page");
+        assert_eq!(keys.total_count, 2);
+        assert_eq!(keys.items[1], LightingMatrixPosition { row: 0, col: 2 });
+
+        let stale = client
+            .request::<_, LightingKeysPageResult>(
+                Cmd::GetLightingKeys,
+                0x73,
+                &LightingPageRequest {
+                    topology_revision: 22,
+                    offset: 0,
+                },
+            )
+            .await
+            .expect("outer stale-page envelope");
+        assert_eq!(
+            stale,
+            Err(LightingError::TopologyRevisionConflict {
+                expected: 22,
+                current: 23,
+            })
+        );
     });
 }
 
@@ -1399,6 +1502,18 @@ fn topic_led_indicator() {
         frame.raw::<LedIndicator>()
     });
     assert_eq!(v, LedIndicator::from_bits(0b0000_0101));
+}
+
+#[cfg(feature = "lighting")]
+#[test]
+fn topic_lighting_change_is_a_best_effort_readback_invalidation() {
+    let service = lighting_service();
+    link_session(&service, async |client| {
+        publish_event(LightingChangedEvent::new());
+        let frame = client.recv_topic().await;
+        assert_eq!(frame.header.cmd, Cmd::LightingChange);
+        frame.raw::<LightingChanged>();
+    });
 }
 
 #[test]

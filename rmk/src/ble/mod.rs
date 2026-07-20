@@ -1,5 +1,3 @@
-use core::sync::atomic::AtomicBool;
-
 use bt_hci::cmd::le::{LeReadLocalSupportedFeatures, LeSetPhy};
 use bt_hci::controller::{ControllerCmdAsync, ControllerCmdSync};
 use embassy_futures::join::join;
@@ -40,11 +38,6 @@ pub(crate) mod led;
 pub(crate) mod nrf;
 pub mod passkey;
 pub(crate) mod profile;
-
-/// Global state of sleep management
-/// - `true`: Indicates central is sleeping
-/// - `false`: Indicates central is awake
-pub(crate) static SLEEPING_STATE: AtomicBool = AtomicBool::new(false);
 
 /// Max number of connections
 pub(crate) const CONNECTIONS_MAX: usize = crate::SPLIT_PERIPHERALS_NUM + 1;
