@@ -24,6 +24,66 @@ use crate::event::{ModifierEvent, SleepStateEvent, WpmUpdateEvent};
 use crate::split::serial::SerialSplitDriver;
 use crate::state::update_status;
 
+#[cfg(any(feature = "dfu_split", test))]
+trait FirmwareHashWriter {
+    async fn write_firmware_hash(&mut self, hash: u32) -> bool;
+}
+
+#[cfg(feature = "dfu_split")]
+impl<S: SplitWriter> FirmwareHashWriter for S {
+    async fn write_firmware_hash(&mut self, hash: u32) -> bool {
+        self.write(&SplitMessage::FirmwareHashResponse(hash)).await.is_ok()
+    }
+}
+
+#[cfg(any(feature = "dfu_split", test))]
+struct FirmwareHashAnnouncement {
+    ready: bool,
+    complete: bool,
+}
+
+#[cfg(any(feature = "dfu_split", test))]
+impl FirmwareHashAnnouncement {
+    const fn new(wait_for_message: bool) -> Self {
+        Self {
+            ready: !wait_for_message,
+            complete: false,
+        }
+    }
+
+    async fn try_announce<W: FirmwareHashWriter>(&mut self, writer: &mut W, hash: u32) {
+        if self.ready && !self.complete && writer.write_firmware_hash(hash).await {
+            self.complete = true;
+        }
+    }
+
+    fn message_received(&mut self) {
+        self.ready = true;
+    }
+}
+
+async fn prepare_inbound_message<W: SplitWriter>(
+    writer: &mut W,
+    #[cfg(feature = "dfu_split")] announcement: &mut FirmwareHashAnnouncement,
+    message: SplitMessage,
+) -> SplitMessage {
+    #[cfg(all(feature = "dfu_split", feature = "_ble"))]
+    {
+        // A decoded BLE message proves that the central has completed its GATT
+        // subscription and can receive notifications.
+        announcement.message_received();
+        announcement
+            .try_announce(writer, crate::dfu::read_embedded_firmware_hash())
+            .await;
+    }
+    #[cfg(not(all(feature = "dfu_split", feature = "_ble")))]
+    let _ = writer;
+    #[cfg(all(feature = "dfu_split", not(feature = "_ble")))]
+    let _ = announcement;
+
+    message
+}
+
 /// Run the split peripheral service.
 ///
 /// # Arguments
@@ -81,13 +141,11 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
         // Proactively announce our firmware hash so the central can detect
         // us even when it booted first and already gave up waiting for a query response.
         #[cfg(feature = "dfu_split")]
-        {
-            let hash = crate::dfu::read_embedded_firmware_hash();
-            self.split_driver
-                .write(&SplitMessage::FirmwareHashResponse(hash))
-                .await
-                .ok();
-        }
+        let mut firmware_hash_announcement = FirmwareHashAnnouncement::new(cfg!(feature = "_ble"));
+        #[cfg(feature = "dfu_split")]
+        firmware_hash_announcement
+            .try_announce(&mut self.split_driver, crate::dfu::read_embedded_firmware_hash())
+            .await;
 
         let mut key_sub = KeyboardEvent::subscriber();
         #[cfg(feature = "_ble")]
@@ -114,7 +172,14 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
             match select(self.split_driver.read(), read_message_to_send).await {
                 Either::First(m) => match m {
                     // Process split messages from the central
-                    Ok(split_message) => match split_message {
+                    Ok(split_message) => match prepare_inbound_message(
+                        &mut self.split_driver,
+                        #[cfg(feature = "dfu_split")]
+                        &mut firmware_hash_announcement,
+                        split_message,
+                    )
+                    .await
+                    {
                         SplitMessage::ConnectionStatus(status) => {
                             trace!("Received central connection status: {:?}", status);
                             update_status(|c| *c = status);
@@ -242,5 +307,85 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use embassy_futures::block_on;
+
+    use super::*;
+
+    const FIRMWARE_HASH: u32 = 0x1234_5678;
+
+    struct FakeHashWriter {
+        results: VecDeque<bool>,
+        hashes: Vec<u32>,
+    }
+
+    impl FakeHashWriter {
+        fn new(results: impl IntoIterator<Item = bool>) -> Self {
+            Self {
+                results: results.into_iter().collect(),
+                hashes: Vec::new(),
+            }
+        }
+    }
+
+    impl FirmwareHashWriter for FakeHashWriter {
+        async fn write_firmware_hash(&mut self, hash: u32) -> bool {
+            self.hashes.push(hash);
+            self.results.pop_front().unwrap_or(true)
+        }
+    }
+
+    #[test]
+    fn ble_waits_for_a_message_before_announcing_hash() {
+        let mut announcement = FirmwareHashAnnouncement::new(true);
+        let mut writer = FakeHashWriter::new([true]);
+
+        block_on(announcement.try_announce(&mut writer, FIRMWARE_HASH));
+        assert!(writer.hashes.is_empty());
+
+        announcement.message_received();
+        block_on(announcement.try_announce(&mut writer, FIRMWARE_HASH));
+
+        assert_eq!(writer.hashes, [FIRMWARE_HASH]);
+    }
+
+    #[test]
+    fn ble_retries_hash_announcement_after_write_error() {
+        let mut announcement = FirmwareHashAnnouncement::new(true);
+        let mut writer = FakeHashWriter::new([false, true]);
+        announcement.message_received();
+
+        block_on(announcement.try_announce(&mut writer, FIRMWARE_HASH));
+        block_on(announcement.try_announce(&mut writer, FIRMWARE_HASH));
+
+        assert_eq!(writer.hashes, [FIRMWARE_HASH, FIRMWARE_HASH]);
+    }
+
+    #[test]
+    fn successful_announcement_is_not_repeated() {
+        let mut announcement = FirmwareHashAnnouncement::new(true);
+        let mut writer = FakeHashWriter::new([true]);
+        announcement.message_received();
+
+        block_on(announcement.try_announce(&mut writer, FIRMWARE_HASH));
+        block_on(announcement.try_announce(&mut writer, FIRMWARE_HASH));
+
+        assert_eq!(writer.hashes, [FIRMWARE_HASH]);
+    }
+
+    #[test]
+    fn serial_announcement_is_ready_immediately() {
+        let mut announcement = FirmwareHashAnnouncement::new(false);
+        let mut writer = FakeHashWriter::new([true]);
+
+        block_on(announcement.try_announce(&mut writer, FIRMWARE_HASH));
+
+        assert_eq!(writer.hashes, [FIRMWARE_HASH]);
     }
 }
