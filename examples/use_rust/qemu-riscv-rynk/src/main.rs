@@ -123,6 +123,7 @@ async fn main(_spawner: Spawner) {
     let rmk_config = RMK_CONFIG.init(RmkConfig {
         lock_config: LockConfig {
             insecure: true,
+            bootloader_requires_unlock: true,
             ..Default::default()
         },
         ..Default::default()

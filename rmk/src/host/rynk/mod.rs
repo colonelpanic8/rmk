@@ -135,7 +135,8 @@ impl<'a> RynkService<'a> {
     /// Whether `cmd` needs an unlocked device.
     fn requires_unlock(&self, cmd: Cmd) -> bool {
         match cmd {
-            Cmd::BootloaderJump | Cmd::PeripheralBootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => true,
+            Cmd::BootloaderJump | Cmd::PeripheralBootloaderJump => self.lock_config.bootloader_requires_unlock,
+            Cmd::StorageReset | Cmd::GetMatrixState => true,
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => true,
@@ -469,8 +470,18 @@ mod tests {
             unlock_keys: UNLOCK_KEYS,
             insecure: false,
             write_requires_unlock: false,
+            bootloader_requires_unlock: true,
         };
         let service = RynkService::new(&keymap, &config);
+        assert!(service.requires_unlock(Cmd::BootloaderJump));
+        assert!(service.requires_unlock(Cmd::PeripheralBootloaderJump));
+
+        config.lock_config.bootloader_requires_unlock = false;
+        let deployment_service = RynkService::new(&keymap, &config);
+        assert!(!deployment_service.requires_unlock(Cmd::BootloaderJump));
+        assert!(!deployment_service.requires_unlock(Cmd::PeripheralBootloaderJump));
+        assert!(deployment_service.requires_unlock(Cmd::StorageReset));
+        assert!(deployment_service.requires_unlock(Cmd::GetMatrixState));
 
         // Hold the challenge key for the whole session.
         keymap.update_matrix_state(&KeyboardEvent::key(0, 0, true));
