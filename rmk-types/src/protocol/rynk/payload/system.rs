@@ -20,8 +20,9 @@ pub struct ProtocolVersion {
 
 impl ProtocolVersion {
     /// Current protocol version for this firmware release.
-    /// The protocol is still under development; lighting endpoints were added in v0.2.
-    pub const CURRENT: Self = Self { major: 0, minor: 2 };
+    /// The protocol is still under development; lighting endpoints were added
+    /// in v0.2 and lighting scene endpoints in v0.3.
+    pub const CURRENT: Self = Self { major: 0, minor: 3 };
 }
 
 /// Device capabilities discovered during the connection handshake.
