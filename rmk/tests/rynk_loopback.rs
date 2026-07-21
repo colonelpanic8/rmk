@@ -10,6 +10,7 @@
 pub mod common;
 
 use core::sync::atomic::{AtomicU8, Ordering};
+
 use heapless::Vec as HVec;
 use rmk::config::{BehaviorConfig, PositionalConfig, RmkConfig};
 #[cfg(feature = "_ble")]
