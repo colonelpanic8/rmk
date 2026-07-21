@@ -22,14 +22,17 @@ use rynk::rmk_types::fork::Fork;
 use rynk::rmk_types::led_indicator::LedIndicator;
 use rynk::rmk_types::morse::Morse;
 use rynk::rmk_types::protocol::rynk::{
-    AbortLightingOverlayReplaceRequest, BeginLightingOverlayReplaceRequest, BehaviorConfig,
-    ClearLightingOverlayRequest, CommitLightingOverlayReplaceRequest, DeviceCapabilities, DeviceInfo,
-    GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, LightingCapabilities, LightingKeysPage,
-    LightingLedsPage, LightingOutputsPage, LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage,
-    LightingRoutesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData,
-    MatrixState, PeripheralStatus, ProtocolVersion, PutLightingOverlayChunkRequest, SetComboBulkRequest,
-    SetKeymapBulkRequest, SetLightingOverlayRequest, SetLightingStateRequest, SetMorseBulkRequest, StorageResetMode,
-    UnsetLightingOverlayRequest,
+    AbortLightingOverlayReplaceRequest, AbortLightingSceneReplaceRequest, BeginLightingOverlayReplaceRequest,
+    BeginLightingSceneReplaceRequest, BehaviorConfig, ClearLightingOverlayRequest, CommitLightingOverlayReplaceRequest,
+    CommitLightingSceneReplaceRequest, DeviceCapabilities, DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse,
+    GetMorseBulkResponse, LightingCapabilities, LightingKeysPage, LightingLedsPage, LightingOutputsPage,
+    LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage, LightingRoutesPage,
+    LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState,
+    LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState, PeripheralStatus,
+    ProtocolVersion, PutLightingOverlayChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest,
+    SetKeymapBulkRequest, SetLightingLayerPolicyRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest,
+    SetLightingStateRequest, SetMorseBulkRequest, StorageResetMode, UnsetLightingOverlayRequest,
+    UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -172,6 +175,15 @@ endpoints! {
     put_lighting_overlay_chunk(request: PutLightingOverlayChunkRequest) -> (),
     commit_lighting_overlay_replace(request: CommitLightingOverlayReplaceRequest) -> LightingState,
     abort_lighting_overlay_replace(request: AbortLightingOverlayReplaceRequest) -> (),
+    get_lighting_scene_status() -> LightingSceneStatus,
+    get_lighting_scenes(request: LightingScenePageRequest) -> LightingScenesPage,
+    set_lighting_scene_cell(request: SetLightingSceneCellRequest) -> LightingState,
+    unset_lighting_scene_cell(request: UnsetLightingSceneCellRequest) -> LightingState,
+    set_lighting_layer_policy(request: SetLightingLayerPolicyRequest) -> LightingState,
+    begin_lighting_scene_replace(request: BeginLightingSceneReplaceRequest) -> LightingSceneTransaction,
+    put_lighting_scene_chunk(request: PutLightingSceneChunkRequest) -> (),
+    commit_lighting_scene_replace(request: CommitLightingSceneReplaceRequest) -> LightingState,
+    abort_lighting_scene_replace(request: AbortLightingSceneReplaceRequest) -> (),
     // connection
     get_connection_type() -> ConnectionType,
     get_connection_status() -> ConnectionStatus,
