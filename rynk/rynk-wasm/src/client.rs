@@ -22,7 +22,7 @@ use rynk::rmk_types::fork::Fork;
 use rynk::rmk_types::led_indicator::LedIndicator;
 use rynk::rmk_types::morse::Morse;
 use rynk::rmk_types::protocol::rynk::{
-    AbortLightingOverlayReplaceRequest, BeginLightingOverlayReplaceRequest, BehaviorConfig,
+    AbortLightingOverlayReplaceRequest, BeginLightingOverlayReplaceRequest, BehaviorConfig, BuildInfo,
     ClearLightingOverlayRequest, CommitLightingOverlayReplaceRequest, DeviceCapabilities, DeviceInfo,
     GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, LightingCapabilities, LightingKeysPage,
     LightingLedsPage, LightingOutputsPage, LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage,
@@ -113,6 +113,7 @@ endpoints! {
     get_version() -> ProtocolVersion,
     get_capabilities() -> DeviceCapabilities,
     get_device_info() -> DeviceInfo,
+    get_build_info() -> BuildInfo,
     reboot() -> (),
     bootloader_jump() -> (),
     storage_reset(mode: StorageResetMode) -> (),
