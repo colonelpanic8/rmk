@@ -105,6 +105,11 @@ pub enum RynkHostError {
     Layout(String),
     #[error("response for {cmd:?} had trailing bytes")]
     TrailingBytes { cmd: Cmd },
+    /// A typed response decoded successfully but its pagination metadata was
+    /// internally inconsistent, so returning a partial snapshot would be
+    /// unsafe.
+    #[error("inconsistent response for {cmd:?}: {reason}")]
+    InconsistentResponse { cmd: Cmd, reason: &'static str },
     #[error("response cmd mismatch: sent {sent:?}, got {got:?}")]
     CmdMismatch { sent: Cmd, got: Cmd },
     /// Capabilities reject the command before touching the wire.
@@ -128,6 +133,7 @@ impl From<RynkHostError> for wasm_bindgen::JsValue {
             RynkHostError::Deserialize { .. } => "ResponseDecodeError",
             RynkHostError::Layout(_) => "LayoutDecodeError",
             RynkHostError::TrailingBytes { .. } => "ResponseTrailingBytes",
+            RynkHostError::InconsistentResponse { .. } => "InconsistentResponse",
             RynkHostError::CmdMismatch { .. } => "ResponseCommandMismatch",
         };
         let err = js_sys::Error::new(&e.to_string());

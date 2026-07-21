@@ -134,6 +134,11 @@ async fn client_against_run_session() {
         // Set + readback through the real persistence path.
         client.set_default_layer(1).await.unwrap();
         assert_eq!(client.get_default_layer().await.unwrap(), 1);
+        let ev = client.next_topic().await;
+        assert!(
+            matches!(ev, TopicEvent::LayerChange(1)),
+            "default-layer changes publish LayerChange, got {ev:?}"
+        );
 
         // Round-trip representative remaining domains.
         client.set_key(0, 1, 1, KeyAction::Morse(2)).await.unwrap();

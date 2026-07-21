@@ -17,15 +17,16 @@ use rmk_types::protocol::rynk::{
     BeginLightingSceneReplaceRequest, BehaviorConfig, BuildInfo, ClearLightingOverlayRequest, Cmd,
     CommitLightingOverlayReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities, DeviceInfo,
     GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse,
-    GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LightingCapabilities, LightingKeysPage,
-    LightingLedsPage, LightingOutputsPage, LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage,
-    LightingResult, LightingRoutesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
-    LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData,
-    MatrixState, PeripheralStatus, ProtocolVersion, PutLightingOverlayChunkRequest, PutLightingSceneChunkRequest,
-    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
-    SetLightingLayerPolicyRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, StorageResetMode, UnsetLightingOverlayRequest,
-    UnsetLightingSceneCellRequest, command,
+    GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LayerState, LightingCapabilities,
+    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingKeysPage, LightingLedsPage, LightingOutputsPage,
+    LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest,
+    LightingPhysicalKeysPage, LightingResult, LightingRoutesPage, LightingScenePageRequest, LightingSceneStatus,
+    LightingSceneTransaction, LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage,
+    LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, PutLightingOverlayChunkRequest,
+    PutLightingSceneChunkRequest, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
+    SetKeyRequest, SetKeymapBulkRequest, SetLightingLayerPolicyRequest, SetLightingOverlayRequest,
+    SetLightingSceneCellRequest, SetLightingStateRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest,
+    StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
 };
 
 use crate::driver::{Client, RynkHostError};
@@ -343,6 +344,11 @@ impl Client {
         self.request::<command::GetCurrentLayer>(&()).await
     }
 
+    /// Read the default layer and complete active-layer bitmap.
+    pub async fn get_layer_state(&self) -> Result<LayerState, RynkHostError> {
+        self.request::<command::GetLayerState>(&()).await
+    }
+
     /// Read the matrix scan bitmap.
     pub async fn get_matrix_state(&self) -> Result<MatrixState, RynkHostError> {
         self.request::<command::GetMatrixState>(&()).await
@@ -508,6 +514,15 @@ impl Client {
         Self::flatten_lighting(self.request::<command::AbortLightingOverlayReplace>(&request).await?)
     }
 
+    /// Read one page of transient overlay cells, pinned to a state revision.
+    pub async fn get_lighting_overlay(
+        &self,
+        request: LightingOverlayPageRequest,
+    ) -> Result<LightingOverlayPage, RynkHostError> {
+        self.require_lighting(Cmd::GetLightingOverlay)?;
+        Self::flatten_lighting(self.request::<command::GetLightingOverlay>(&request).await?)
+    }
+
     /// Read scene limits and occupancy. Scene support is discovered through
     /// [`LightingCapabilities::features`] (`LAYER_SCENES`) plus this endpoint;
     /// firmware without a scene table rejects it with `Unsupported`.
@@ -523,6 +538,21 @@ impl Client {
     ) -> Result<LightingScenesPage, RynkHostError> {
         self.require_lighting(Cmd::GetLightingScenes)?;
         Self::flatten_lighting(self.request::<command::GetLightingScenes>(&request).await?)
+    }
+
+    /// Discover the immutable board-compiled scene source, including empty sources.
+    pub async fn get_lighting_compiled_scene_status(&self) -> Result<LightingCompiledSceneStatus, RynkHostError> {
+        self.require_lighting(Cmd::GetLightingCompiledSceneStatus)?;
+        Self::flatten_lighting(self.request::<command::GetLightingCompiledSceneStatus>(&()).await?)
+    }
+
+    /// Read one topology-revision-pinned page of board-compiled scene cells.
+    pub async fn get_lighting_compiled_scenes(
+        &self,
+        request: LightingPageRequest,
+    ) -> Result<LightingCompiledScenesPage, RynkHostError> {
+        self.require_lighting(Cmd::GetLightingCompiledScenes)?;
+        Self::flatten_lighting(self.request::<command::GetLightingCompiledScenes>(&request).await?)
     }
 
     /// Insert or update one durable scene cell when the revision matches.
@@ -680,6 +710,136 @@ impl Client {
             .await
         })
         .await
+    }
+
+    /// Read the whole transient overlay under one state revision. Expiry or a
+    /// concurrent mutation restarts the snapshot, bounded to a few attempts.
+    pub async fn read_all_lighting_overlay(
+        &self,
+    ) -> Result<(u32, Vec<rmk_types::protocol::rynk::LightingOverlayCell>), RynkHostError> {
+        const ATTEMPTS: usize = 4;
+        let mut last_error = None;
+        for _ in 0..ATTEMPTS {
+            let state = self.get_lighting_state().await?;
+            let mut cells = Vec::new();
+            let mut offset: u16 = 0;
+            let mut first_page = true;
+            let mut conflicted = false;
+            while first_page || offset < state.overlay_len {
+                first_page = false;
+                match self
+                    .get_lighting_overlay(LightingOverlayPageRequest {
+                        revision: state.revision,
+                        offset,
+                    })
+                    .await
+                {
+                    Ok(page) => {
+                        if page.revision != state.revision || page.total_count != state.overlay_len {
+                            return Err(RynkHostError::InconsistentResponse {
+                                cmd: Cmd::GetLightingOverlay,
+                                reason: "page revision/count disagrees with the pinned state",
+                            });
+                        }
+                        if offset >= state.overlay_len {
+                            if !page.items.is_empty() {
+                                return Err(RynkHostError::InconsistentResponse {
+                                    cmd: Cmd::GetLightingOverlay,
+                                    reason: "empty snapshot returned unexpected cells",
+                                });
+                            }
+                            break;
+                        }
+                        if page.items.is_empty() || offset as usize + page.items.len() > state.overlay_len as usize {
+                            return Err(RynkHostError::InconsistentResponse {
+                                cmd: Cmd::GetLightingOverlay,
+                                reason: "page is empty or extends beyond the advertised count",
+                            });
+                        }
+                        offset += page.items.len() as u16;
+                        cells.extend(page.items.iter().copied());
+                    }
+                    Err(
+                        error @ RynkHostError::LightingRejected(
+                            rmk_types::protocol::rynk::LightingError::StateRevisionConflict { .. },
+                        ),
+                    ) => {
+                        last_error = Some(error);
+                        conflicted = true;
+                        break;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            if !conflicted {
+                if cells.len() != state.overlay_len as usize {
+                    return Err(RynkHostError::InconsistentResponse {
+                        cmd: Cmd::GetLightingOverlay,
+                        reason: "pagination ended before the advertised count",
+                    });
+                }
+                return Ok((state.revision, cells));
+            }
+        }
+        Err(last_error.expect("a retried read only exits with a recorded conflict"))
+    }
+
+    /// Read every immutable board-compiled scene cell under one topology revision.
+    pub async fn read_all_lighting_compiled_scenes(
+        &self,
+    ) -> Result<
+        (
+            LightingCompiledSceneStatus,
+            Vec<rmk_types::protocol::rynk::LightingSceneCell>,
+        ),
+        RynkHostError,
+    > {
+        let status = self.get_lighting_compiled_scene_status().await?;
+        let mut cells = Vec::new();
+        let mut offset: u16 = 0;
+        let mut first_page = true;
+        while first_page || offset < status.scene_len {
+            first_page = false;
+            let page = self
+                .get_lighting_compiled_scenes(LightingPageRequest {
+                    topology_revision: status.topology_revision,
+                    offset,
+                })
+                .await?;
+            if page.topology_revision != status.topology_revision || page.total_count != status.scene_len {
+                return Err(RynkHostError::InconsistentResponse {
+                    cmd: Cmd::GetLightingCompiledScenes,
+                    reason: "page topology revision/count disagrees with status",
+                });
+            }
+            if offset >= status.scene_len {
+                if !page.items.is_empty() {
+                    return Err(RynkHostError::InconsistentResponse {
+                        cmd: Cmd::GetLightingCompiledScenes,
+                        reason: "empty compiled source returned unexpected cells",
+                    });
+                }
+                break;
+            }
+            if page.items.is_empty()
+                || page.items.len() > status.chunk_capacity as usize
+                || offset as usize + page.items.len() > status.scene_len as usize
+            {
+                return Err(RynkHostError::InconsistentResponse {
+                    cmd: Cmd::GetLightingCompiledScenes,
+                    reason: "page is empty, oversized, or extends beyond the advertised count",
+                });
+            }
+            offset += page.items.len() as u16;
+            cells.extend(page.items.iter().copied());
+        }
+        if cells.len() != status.scene_len as usize {
+            return Err(RynkHostError::InconsistentResponse {
+                cmd: Cmd::GetLightingCompiledScenes,
+                reason: "pagination ended before the advertised count",
+            });
+        }
+        Ok((status, cells))
     }
 
     /// Read the whole stored scene table by paging `GetLightingScenes` under

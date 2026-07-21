@@ -34,6 +34,8 @@ GetFork reply Ok(Fork{Single(A),No,Morse(2)})                           01 05 01
 GetFork request 2                                                       01 05 01 01 00 02
 GetKeyAction reply Ok(Morse(7))                                         01 01 01 03 00 00 05 07
 GetKeyAction request KeyPosition{0,5,13}                                01 01 01 03 00 00 05 0d
+GetLayerState reply Ok(LayerState{default:2,active:[0x05,..,0x80]})     08 08 01 0a 00 00 02 05 00 00 00 00 00 00 80
+GetLayerState request ()                                                08 08 01 00 00
 GetLedIndicator reply Ok(LedIndicator(Num|Scroll))                      07 08 01 02 00 00 05
 GetLedIndicator request ()                                              07 08 01 00 00
 GetLockStatus reply Ok(LockStatus{true,false,2,[(1,2),(3,4)]})          06 00 01 09 00 00 01 00 02 02 01 02 03 04
