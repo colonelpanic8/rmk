@@ -28,6 +28,7 @@ use crate::combo::Combo;
 use crate::connection::{ConnectionStatus, ConnectionType};
 use crate::fork::Fork;
 use crate::led_indicator::LedIndicator;
+use crate::modifier::ModifierCombination;
 use crate::morse::Morse;
 #[cfg(feature = "split")]
 use crate::protocol::rynk::PeripheralStatus;
@@ -367,6 +368,8 @@ endpoints! {
     GetLedIndicator = 0x0807: () => LedIndicator;
     /// Default layer and complete active-layer bitmap.
     GetLayerState = 0x0808: () => LayerState;
+    /// Final resolved modifier bitmap used by the HID keyboard report.
+    GetModifierState = 0x0809: () => ModifierCombination;
 
     // Lighting (0x09xx). Lighting-domain errors are nested inside Rynk's
     // outer protocol result so hosts retain precise rejection reasons.
@@ -449,6 +452,8 @@ topics! {
     BatteryStatusChange = 0x8006: BatteryStatus;
     #[cfg(feature = "lighting")]
     LightingChange = 0x8007: LightingChanged;
+    // Final resolved modifier bitmap changed.
+    ModifierChange = 0x8008: ModifierCombination;
 }
 
 /// Largest rynk frame payload the firmware must buffer, folded from the tables

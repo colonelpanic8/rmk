@@ -18,11 +18,9 @@ use usbd_hid::descriptor::{MediaKeyboardReport, SystemControlReport};
 
 use crate::channel::send_hid_report;
 use crate::core_traits::Runnable;
+use crate::event::{ActionEvent, KeyboardEvent, KeyboardEventPos, SubscribableEvent, publish_event_async};
 #[cfg(all(feature = "split", feature = "_ble"))]
-use crate::event::ClearPeerEvent;
-use crate::event::{
-    ActionEvent, KeyboardEvent, KeyboardEventPos, ModifierEvent, SubscribableEvent, publish_event, publish_event_async,
-};
+use crate::event::{ClearPeerEvent, publish_event};
 use crate::hid::{KeyboardReport, Report};
 use crate::keyboard::combo::Combo;
 use crate::keyboard::fork::ActiveFork;
@@ -1799,6 +1797,7 @@ impl<'a> Keyboard<'a> {
     pub(crate) async fn send_keyboard_report_with_resolved_modifiers(&mut self, pressed: bool) {
         // all modifier related effects are combined here to be sent with the hid report:
         let modifiers = self.resolve_modifiers(pressed);
+        crate::state::set_modifier_state(modifiers);
         info!(
             "Sending keyboard report, modifiers: {:?}, keycodes: {:?}",
             modifiers, &self.held_keycodes,
@@ -1909,10 +1908,6 @@ impl<'a> Keyboard<'a> {
     fn register_modifier_key(&mut self, key: HidKeyCode) {
         self.held_modifiers |= key.to_hid_modifiers();
 
-        publish_event(ModifierEvent {
-            modifier: self.held_modifiers,
-        });
-
         // if a modifier key arrives after fork activation, it should be kept
         self.fork_keep_mask |= key.to_hid_modifiers();
     }
@@ -1920,19 +1915,11 @@ impl<'a> Keyboard<'a> {
     /// Unregister a modifier from hid report.
     fn unregister_modifier_key(&mut self, key: HidKeyCode) {
         self.held_modifiers &= !key.to_hid_modifiers();
-
-        publish_event(ModifierEvent {
-            modifier: self.held_modifiers,
-        });
     }
 
     /// Register a modifier combination to be sent in hid report.
     fn register_modifiers(&mut self, modifiers: ModifierCombination) {
         self.held_modifiers |= modifiers;
-
-        publish_event(ModifierEvent {
-            modifier: self.held_modifiers,
-        });
 
         // if a modifier key arrives after fork activation, it should be kept
         self.fork_keep_mask |= modifiers;
@@ -1941,10 +1928,6 @@ impl<'a> Keyboard<'a> {
     /// Unregister a modifier combination from hid report.
     fn unregister_modifiers(&mut self, modifiers: ModifierCombination) {
         self.held_modifiers &= !modifiers;
-
-        publish_event(ModifierEvent {
-            modifier: self.held_modifiers,
-        });
     }
 }
 
@@ -2053,6 +2036,20 @@ mod test {
 
     fn create_test_keyboard() -> Keyboard<'static> {
         create_test_keyboard_with_config(BehaviorConfig::default())
+    }
+
+    #[test]
+    fn keyboard_report_snapshots_final_resolved_modifiers() {
+        let mut keyboard = create_test_keyboard();
+        keyboard.with_modifiers = ModifierCombination::LSHIFT | ModifierCombination::RALT;
+        crate::state::set_modifier_state(ModifierCombination::new());
+
+        block_on(keyboard.send_keyboard_report_with_resolved_modifiers(true));
+
+        assert_eq!(
+            crate::state::current_modifier_state(),
+            ModifierCombination::LSHIFT | ModifierCombination::RALT,
+        );
     }
 
     async fn force_timeout_first_hold(keyboard: &mut Keyboard<'static>) {

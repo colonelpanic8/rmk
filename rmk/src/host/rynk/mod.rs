@@ -240,6 +240,7 @@ impl<'a> RynkService<'a> {
             Cmd::GetSleepState => Serve::<command::GetSleepState, _>::serve(self, msg).await,
             Cmd::GetLedIndicator => Serve::<command::GetLedIndicator, _>::serve(self, msg).await,
             Cmd::GetLayerState => Serve::<command::GetLayerState, _>::serve(self, msg).await,
+            Cmd::GetModifierState => Serve::<command::GetModifierState, _>::serve(self, msg).await,
 
             Cmd::GetLayout => Serve::<command::GetLayout, _>::serve(self, msg).await,
 

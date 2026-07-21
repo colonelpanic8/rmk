@@ -44,6 +44,8 @@ GetMacro reply Ok(MacroData{[0x01,0x02,0x03]})                          01 02 01
 GetMacro request GetMacroRequest{256}                                   01 02 01 02 00 80 02
 GetMatrixState reply Ok(MatrixState{[0x05,0x00,0x20]})                  02 08 01 05 00 00 03 05 00 20
 GetMatrixState request ()                                               02 08 01 00 00
+GetModifierState reply Ok(ModifierCombination(LShift|RAlt))             09 08 01 02 00 00 42
+GetModifierState request ()                                             09 08 01 00 00
 GetMorse reply Ok(Morse{TAP->Key(A)})                                   01 04 01 07 00 00 00 01 02 01 00 04
 GetMorse request 0                                                      01 04 01 01 00 00
 GetSleepState reply Ok(true)                                            06 08 01 02 00 00 01
@@ -56,6 +58,7 @@ LayerChange topic 3                                                     01 80 00
 LedIndicatorChange topic LedIndicator(Num|Scroll)                       05 80 00 01 00 05
 Lock reply Ok(())                                                       08 00 01 01 00 00
 Lock request ()                                                         08 00 01 00 00
+ModifierChange topic ModifierCombination(LShift|RAlt)                   08 80 00 01 00 42
 PeripheralBootloaderJump reply Ok(())                                   0c 00 01 01 00 00
 PeripheralBootloaderJump request slot 1                                 0c 00 01 01 00 01
 Reboot reply Ok(())                                                     03 00 01 01 00 00

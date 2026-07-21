@@ -11,6 +11,7 @@ use rmk_types::combo::Combo;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
+use rmk_types::modifier::ModifierCombination;
 use rmk_types::morse::Morse;
 use rmk_types::protocol::rynk::{
     AbortLightingOverlayReplaceRequest, AbortLightingSceneReplaceRequest, BeginLightingOverlayReplaceRequest,
@@ -347,6 +348,11 @@ impl Client {
     /// Read the default layer and complete active-layer bitmap.
     pub async fn get_layer_state(&self) -> Result<LayerState, RynkHostError> {
         self.request::<command::GetLayerState>(&()).await
+    }
+
+    /// Read the final resolved modifier bitmap used by the HID report.
+    pub async fn get_modifier_state(&self) -> Result<ModifierCombination, RynkHostError> {
+        self.request::<command::GetModifierState>(&()).await
     }
 
     /// Read the matrix scan bitmap.
