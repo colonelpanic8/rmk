@@ -46,7 +46,7 @@ GetMorse reply Ok(Morse{TAP->Key(A)})                                   01 04 01
 GetMorse request 0                                                      01 04 01 01 00 00
 GetSleepState reply Ok(true)                                            06 08 01 02 00 00 01
 GetSleepState request ()                                                06 08 01 00 00
-GetVersion reply Ok(CURRENT)                                            01 00 01 03 00 00 00 02
+GetVersion reply Ok(CURRENT)                                            01 00 01 03 00 00 00 04
 GetVersion request ()                                                   01 00 01 00 00
 GetWpm reply Ok(42)                                                     05 08 01 02 00 00 2a
 GetWpm request ()                                                       05 08 01 00 00
@@ -54,6 +54,8 @@ LayerChange topic 3                                                     01 80 00
 LedIndicatorChange topic LedIndicator(Num|Scroll)                       05 80 00 01 00 05
 Lock reply Ok(())                                                       08 00 01 01 00 00
 Lock request ()                                                         08 00 01 00 00
+PeripheralBootloaderJump reply Ok(())                                   0c 00 01 01 00 00
+PeripheralBootloaderJump request slot 1                                 0c 00 01 01 00 01
 Reboot reply Ok(())                                                     03 00 01 01 00 00
 Reboot request ()                                                       03 00 01 00 00
 SetBehaviorConfig reply Ok(())                                          02 06 01 01 00 00

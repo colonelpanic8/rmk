@@ -9,6 +9,7 @@
 
 pub mod common;
 
+use core::sync::atomic::{AtomicU8, Ordering};
 use heapless::Vec as HVec;
 use rmk::config::{BehaviorConfig, PositionalConfig, RmkConfig};
 #[cfg(feature = "_ble")]
@@ -67,6 +68,16 @@ fn service() -> RynkService<'static> {
     let keymap = [[[KeyAction::No; 2]; 2]; 1];
     let km = wrap_keymap(keymap, per_key, behavior);
     RynkService::new(km, insecure_config())
+}
+
+static BOOTLOADER_SLOT: AtomicU8 = AtomicU8::new(u8::MAX);
+
+fn route_test_peripheral_bootloader(slot: u8) -> Result<(), RynkError> {
+    if slot != 0 {
+        return Err(RynkError::Invalid);
+    }
+    BOOTLOADER_SLOT.store(slot, Ordering::SeqCst);
+    Ok(())
 }
 
 #[cfg(feature = "lighting")]
@@ -297,6 +308,29 @@ fn bootloader_jump_acks_where_jump_is_a_no_op() {
     link_session(&service, async |client| {
         let r = client.request::<(), ()>(Cmd::BootloaderJump, 0x61, &()).await;
         assert_eq!(r, Ok(()));
+    });
+}
+
+#[test]
+fn peripheral_bootloader_jump_requires_a_board_route() {
+    let service = service();
+    link_session(&service, async |client| {
+        let r = client.request::<u8, ()>(Cmd::PeripheralBootloaderJump, 0x64, &0).await;
+        assert_eq!(r, Err(RynkError::Unimplemented));
+    });
+}
+
+#[test]
+fn peripheral_bootloader_jump_uses_the_board_route() {
+    BOOTLOADER_SLOT.store(u8::MAX, Ordering::SeqCst);
+    let service = service().with_peripheral_bootloader(route_test_peripheral_bootloader);
+    link_session(&service, async |client| {
+        let accepted = client.request::<u8, ()>(Cmd::PeripheralBootloaderJump, 0x65, &0).await;
+        assert_eq!(accepted, Ok(()));
+        assert_eq!(BOOTLOADER_SLOT.load(Ordering::SeqCst), 0);
+
+        let rejected = client.request::<u8, ()>(Cmd::PeripheralBootloaderJump, 0x66, &1).await;
+        assert_eq!(rejected, Err(RynkError::Invalid));
     });
 }
 
