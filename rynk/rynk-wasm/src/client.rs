@@ -29,6 +29,7 @@ use rynk::rmk_types::protocol::rynk::{
     GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, LayerState, LightingCapabilities,
     LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
     LightingConditionalScenesPage, LightingKeysPage, LightingLedsPage, LightingOutputsPage, LightingOverlayPage,
+    LightingOutputModeState,
     LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage,
     LightingRoutesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction, LightingScenesPage,
     LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState,
@@ -169,6 +170,7 @@ endpoints! {
     // lighting
     get_lighting_capabilities() -> LightingCapabilities,
     get_lighting_state() -> LightingState,
+    get_lighting_output_mode() -> LightingOutputModeState,
     set_lighting_state(request: SetLightingStateRequest) -> LightingState,
     get_lighting_keys(request: LightingPageRequest) -> LightingKeysPage,
     get_lighting_physical_keys(request: LightingPageRequest) -> LightingPhysicalKeysPage,

@@ -20,15 +20,16 @@ use rmk_types::protocol::rynk::{
     GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse,
     GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LayerState, LightingCapabilities,
     LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
-    LightingConditionalScenesPage, LightingKeysPage, LightingLedsPage, LightingOutputsPage, LightingOverlayPage,
-    LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage,
-    LightingResult, LightingRoutesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
-    LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData,
-    MatrixState, PeripheralStatus, ProtocolVersion, PutLightingOverlayChunkRequest, PutLightingSceneChunkRequest,
-    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
-    SetLightingLayerPolicyRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState,
-    StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
+    LightingConditionalScenesPage, LightingKeysPage, LightingLedsPage, LightingOutputModeState, LightingOutputsPage,
+    LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest,
+    LightingPhysicalKeysPage, LightingResult, LightingRoutesPage, LightingScenePageRequest, LightingSceneStatus,
+    LightingSceneTransaction, LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage,
+    LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, PutLightingOverlayChunkRequest,
+    PutLightingSceneChunkRequest, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
+    SetKeyRequest, SetKeymapBulkRequest, SetLightingLayerPolicyRequest, SetLightingOverlayRequest,
+    SetLightingSceneCellRequest, SetLightingStateRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest,
+    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
+    UnsetLightingSceneCellRequest, command,
 };
 
 use crate::driver::{Client, RynkHostError};
@@ -405,6 +406,12 @@ impl Client {
     pub async fn get_lighting_state(&self) -> Result<LightingState, RynkHostError> {
         self.require_lighting(Cmd::GetLightingState)?;
         Self::flatten_lighting(self.request::<command::GetLightingState>(&()).await?)
+    }
+
+    /// Read the configured three-state lighting output policy and its live inputs.
+    pub async fn get_lighting_output_mode(&self) -> Result<LightingOutputModeState, RynkHostError> {
+        self.require_lighting(Cmd::GetLightingOutputMode)?;
+        Self::flatten_lighting(self.request::<command::GetLightingOutputMode>(&()).await?)
     }
 
     /// Atomically replace standard mutable state when the revision still matches.
