@@ -51,6 +51,8 @@ RMK_FEATURESETS=(
     "split,vial,storage,async_matrix,_ble,steno"
     "rynk,_ble,split,storage,async_matrix"
     "rynk,storage"
+    "rynk,lighting"
+    "rynk,storage,lighting"
 )
 
 # Examples auto-discovery skiplist. Reasons:
