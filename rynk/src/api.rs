@@ -27,7 +27,8 @@ use rmk_types::protocol::rynk::{
     PutLightingSceneChunkRequest, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
     SetKeyRequest, SetKeymapBulkRequest, SetLightingLayerPolicyRequest, SetLightingOverlayRequest,
     SetLightingSceneCellRequest, SetLightingStateRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest,
-    StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
+    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
+    UnsetLightingSceneCellRequest, command,
 };
 
 use crate::driver::{Client, RynkHostError};
@@ -630,6 +631,19 @@ impl Client {
     /// topic pushes, for recovering a missed push.
     pub async fn get_connection_status(&self) -> Result<ConnectionStatus, RynkHostError> {
         self.request::<command::GetConnectionStatus>(&()).await
+    }
+
+    /// Read active split BLE latency defaults, override, and effective value.
+    pub async fn get_split_central_latency(&self) -> Result<SplitCentralLatencyState, RynkHostError> {
+        self.request::<command::GetSplitCentralLatency>(&()).await
+    }
+
+    /// Replace the volatile active split BLE latency policy.
+    pub async fn set_split_central_latency(
+        &self,
+        policy: SplitCentralLatencyPolicy,
+    ) -> Result<SplitCentralLatencyState, RynkHostError> {
+        self.request::<command::SetSplitCentralLatency>(&policy).await
     }
 
     /// Read BLE status (active profile, connection state). BLE firmware only

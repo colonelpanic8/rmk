@@ -3,7 +3,7 @@
 # Each entry is a full Rynk frame — 5-byte header (CMD u16 LE + SEQ u8 + LEN
 # u16 LE) + postcard payload — one per protocol message; the label names the
 # decoded payload (`()` = empty). A diff means the header, a CMD number, or a
-# message frame changed. If intentional, bump ProtocolVersion::CURRENT and regenerate:
+# message frame changed. If intentional, regenerate and review compatibility:
 #   UPDATE_SNAPSHOTS=1 cargo test -p rmk-types --features rynk wire_frames
 # Format: <label>  <hex bytes>
 

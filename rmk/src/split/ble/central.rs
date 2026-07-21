@@ -1,15 +1,16 @@
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 
 use bt_hci::cmd::le::{LeReadLocalSupportedFeatures, LeSetPhy, LeSetScanParams};
 use bt_hci::controller::{ControllerCmdAsync, ControllerCmdSync};
 use embassy_futures::select::{Either, Either3, select, select3};
+use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
 use embassy_sync::mutex::Mutex;
+use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer, with_timeout};
 use heapless::VecView;
 use trouble_host::prelude::*;
 
-use crate::SPLIT_CENTRAL_SLEEP_TIMEOUT_SECONDS;
 use crate::ble::{update_ble_phy, update_conn_params};
 use crate::channel::FLASH_CHANNEL;
 #[cfg(feature = "storage")]
@@ -17,6 +18,9 @@ use crate::split::ble::PeerAddress;
 use crate::split::driver::{PeripheralManager, SplitDriverError, SplitReader, SplitWriter, set_peripheral_connected};
 use crate::split::{SPLIT_MESSAGE_MAX_SIZE, SplitMessage};
 use crate::storage::FlashOperationMessage;
+use crate::{
+    SPLIT_CENTRAL_MAX_LATENCY_BATTERY, SPLIT_CENTRAL_MAX_LATENCY_POWERED, SPLIT_CENTRAL_SLEEP_TIMEOUT_SECONDS,
+};
 
 pub(crate) static STACK_STARTED: Signal<crate::RawMutex, bool> = Signal::new();
 pub(crate) static PERIPHERAL_FOUND: Signal<crate::RawMutex, (u8, BdAddr)> = Signal::new();
@@ -32,6 +36,126 @@ static SCANNING_MUTEX: Mutex<crate::RawMutex, ()> = Mutex::new(());
 /// - `signal(true)`: Indicates central has entered sleep mode
 /// - `signal(false)`: Indicates activity detected, wake up or reset sleep timer
 pub(crate) static CENTRAL_SLEEP: Signal<crate::RawMutex, bool> = Signal::new();
+
+/// Runtime active-mode split BLE latency policy.
+///
+/// Changes are volatile and take effect on connected peripherals immediately.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LatencyPolicy {
+    pub powered: u16,
+    pub battery: u16,
+    pub override_latency: Option<u16>,
+}
+
+/// Current policy inputs and selected active-mode latency.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LatencyState {
+    pub policy: LatencyPolicy,
+    pub powered: bool,
+    pub effective: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidLatency;
+
+impl LatencyPolicy {
+    fn effective(self, powered: bool) -> u16 {
+        self.override_latency
+            .unwrap_or(if powered { self.powered } else { self.battery })
+    }
+
+    fn is_valid(self) -> bool {
+        self.powered < 500 && self.battery < 500 && self.override_latency.is_none_or(|value| value < 500)
+    }
+}
+
+static LATENCY_POLICY: BlockingMutex<crate::RawMutex, Cell<LatencyPolicy>> =
+    BlockingMutex::new(Cell::new(LatencyPolicy {
+        powered: SPLIT_CENTRAL_MAX_LATENCY_POWERED,
+        battery: SPLIT_CENTRAL_MAX_LATENCY_BATTERY,
+        override_latency: None,
+    }));
+static LATENCY_CHANGED: PubSubChannel<crate::RawMutex, (), 1, 8, 1> = PubSubChannel::new();
+
+fn externally_powered() -> bool {
+    crate::state::current_usb_state() != rmk_types::connection::UsbState::Disabled
+}
+
+pub fn latency_state() -> LatencyState {
+    let policy = LATENCY_POLICY.lock(Cell::get);
+    let powered = externally_powered();
+    let effective = policy.effective(powered);
+    LatencyState {
+        policy,
+        powered,
+        effective,
+    }
+}
+
+/// Replace the volatile latency policy and update live split connections.
+pub fn set_latency_policy(policy: LatencyPolicy) -> Result<(), InvalidLatency> {
+    if !policy.is_valid() {
+        return Err(InvalidLatency);
+    }
+    LATENCY_POLICY.lock(|current| current.set(policy));
+    LATENCY_CHANGED.immediate_publisher().publish_immediate(());
+    Ok(())
+}
+
+#[cfg(test)]
+mod latency_tests {
+    use super::*;
+
+    #[test]
+    fn policy_selects_power_source_unless_overridden() {
+        let policy = LatencyPolicy {
+            powered: 0,
+            battery: 4,
+            override_latency: None,
+        };
+        assert_eq!(policy.effective(true), 0);
+        assert_eq!(policy.effective(false), 4);
+        assert_eq!(
+            LatencyPolicy {
+                override_latency: Some(2),
+                ..policy
+            }
+            .effective(true),
+            2
+        );
+        assert_eq!(
+            LatencyPolicy {
+                override_latency: Some(2),
+                ..policy
+            }
+            .effective(false),
+            2
+        );
+    }
+
+    #[test]
+    fn policy_rejects_values_outside_the_ble_limit() {
+        let valid = LatencyPolicy {
+            powered: 499,
+            battery: 499,
+            override_latency: Some(499),
+        };
+        assert!(valid.is_valid());
+        assert!(!LatencyPolicy { powered: 500, ..valid }.is_valid());
+        assert!(!LatencyPolicy { battery: 500, ..valid }.is_valid());
+        assert!(
+            !LatencyPolicy {
+                override_latency: Some(500),
+                ..valid
+            }
+            .is_valid()
+        );
+    }
+}
+
+pub(crate) fn power_source_changed() {
+    LATENCY_CHANGED.immediate_publisher().publish_immediate(());
+}
 
 /// Gatt service used in split central to send split message to peripheral
 #[gatt_service(uuid = "4dd5fbaa-18e5-4b07-bf0a-353698659946")]
@@ -252,7 +376,7 @@ fn defaul_central_conn_param() -> RequestedConnParams {
     RequestedConnParams {
         min_connection_interval: Duration::from_micros(7500),
         max_connection_interval: Duration::from_micros(7500),
-        max_latency: 30, // 225ms
+        max_latency: latency_state().effective,
         supervision_timeout: Duration::from_secs(5),
         ..Default::default()
     }
@@ -462,11 +586,18 @@ async fn sleep_manager_task<
     stack: &'b Stack<'s, C, P>,
     conn: &Connection<'b, P>,
 ) -> Result<(), BleHostError<C::Error>> {
-    // Skip sleep management if timeout is 0 (disabled)
+    let mut latency_changes = LATENCY_CHANGED
+        .subscriber()
+        .expect("split latency policy supports eight peripheral managers");
+
+    // Sleep management may be disabled, but runtime policy and USB-power
+    // changes must still update the live connection.
     if SPLIT_CENTRAL_SLEEP_TIMEOUT_SECONDS == 0 {
         info!("Sleep management disabled (timeout = 0)");
-        core::future::pending::<()>().await;
-        return Ok(());
+        loop {
+            latency_changes.next_message_pure().await;
+            update_conn_params(stack, conn, &defaul_central_conn_param()).await;
+        }
     }
 
     info!(
@@ -477,22 +608,27 @@ async fn sleep_manager_task<
     loop {
         if !crate::state::current_sleeping() {
             // Wait for timeout or activity (false signal means activity/wakeup)
-            match select(
+            match select3(
                 Timer::after_secs(SPLIT_CENTRAL_SLEEP_TIMEOUT_SECONDS.into()),
                 CENTRAL_SLEEP.wait(),
+                latency_changes.next_message_pure(),
             )
             .await
             {
-                Either::First(_) => {
+                Either3::First(_) => {
                     // Timeout: enter sleep mode
                 }
-                Either::Second(signal_value) => {
+                Either3::Second(signal_value) => {
                     // Received signal - if false, it means activity detected
                     if !signal_value {
                         debug!("Activity detected, resetting sleep timeout");
                         continue;
                     }
                     // True, enter sleep mode
+                }
+                Either3::Third(()) => {
+                    update_conn_params(stack, conn, &defaul_central_conn_param()).await;
+                    continue;
                 }
             }
 
@@ -515,13 +651,16 @@ async fn sleep_manager_task<
             crate::state::set_sleeping(true);
         } else {
             // Wait for activity to wake up (false signal means activity/wakeup)
-            let signal_value = CENTRAL_SLEEP.wait().await;
-            if !signal_value {
-                info!("Waking up from sleep mode due to activity");
-                crate::state::set_sleeping(false);
+            match select(CENTRAL_SLEEP.wait(), latency_changes.next_message_pure()).await {
+                Either::First(signal_value) if !signal_value => {
+                    info!("Waking up from sleep mode due to activity");
+                    crate::state::set_sleeping(false);
 
-                // Restore normal connection parameters
-                update_conn_params(stack, conn, &defaul_central_conn_param()).await;
+                    // Restore normal connection parameters using the latest
+                    // power source and runtime override.
+                    update_conn_params(stack, conn, &defaul_central_conn_param()).await;
+                }
+                Either::First(_) | Either::Second(()) => {}
             }
         }
     }

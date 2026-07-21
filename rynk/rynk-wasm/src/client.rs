@@ -34,7 +34,8 @@ use rynk::rmk_types::protocol::rynk::{
     LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, PutLightingOverlayChunkRequest,
     PutLightingSceneChunkRequest, SetComboBulkRequest, SetKeymapBulkRequest, SetLightingLayerPolicyRequest,
     SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest, SetMorseBulkRequest,
-    StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
+    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
+    UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -153,6 +154,8 @@ endpoints! {
     // behavior
     get_behavior() -> BehaviorConfig,
     set_behavior(config: BehaviorConfig) -> (),
+    get_split_central_latency() -> SplitCentralLatencyState,
+    set_split_central_latency(policy: SplitCentralLatencyPolicy) -> SplitCentralLatencyState,
     // status
     get_current_layer() -> u8,
     get_layer_state() -> LayerState,

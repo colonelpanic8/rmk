@@ -140,6 +140,8 @@ impl<'a> RynkService<'a> {
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => true,
+            #[cfg(all(feature = "_ble", feature = "split"))]
+            Cmd::SetSplitCentralLatency => self.lock_config.write_requires_unlock,
             Cmd::SetKeyAction
             | Cmd::SetDefaultLayer
             | Cmd::SetEncoderAction
@@ -229,6 +231,10 @@ impl<'a> RynkService<'a> {
             Cmd::SwitchBleProfile => Serve::<command::SwitchBleProfile, _>::serve(self, msg).await,
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => Serve::<command::ClearBleProfile, _>::serve(self, msg).await,
+            #[cfg(all(feature = "_ble", feature = "split"))]
+            Cmd::GetSplitCentralLatency => Serve::<command::GetSplitCentralLatency, _>::serve(self, msg).await,
+            #[cfg(all(feature = "_ble", feature = "split"))]
+            Cmd::SetSplitCentralLatency => Serve::<command::SetSplitCentralLatency, _>::serve(self, msg).await,
 
             Cmd::GetCurrentLayer => Serve::<command::GetCurrentLayer, _>::serve(self, msg).await,
             Cmd::GetMatrixState => Serve::<command::GetMatrixState, _>::serve(self, msg).await,
