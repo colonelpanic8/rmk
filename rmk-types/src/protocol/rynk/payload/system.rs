@@ -24,8 +24,9 @@ pub struct ProtocolVersion {
 impl ProtocolVersion {
     /// Current protocol version for this firmware release.
     /// The protocol is still under development; lighting endpoints were added
-    /// in v0.2 and build-info discovery in v0.3.
-    pub const CURRENT: Self = Self { major: 0, minor: 3 };
+    /// in v0.2, build-info discovery in v0.3, and routed split bootloader
+    /// entry in v0.4.
+    pub const CURRENT: Self = Self { major: 0, minor: 4 };
 }
 
 /// Human-readable identity of the firmware build.
