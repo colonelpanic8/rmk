@@ -14,7 +14,8 @@ use rmk_types::action::LightAction;
 
 use super::Rgb8;
 use super::compositor::{
-    Compositor, Contribution, LightingSource, LogicalFrame, RenderError, RenderInput as SourceRenderInput,
+    Compositor, Contribution, ExtensionDescriptor, ExtensionState, LightingSource, LogicalFrame, RenderError,
+    RenderInput as SourceRenderInput,
 };
 use super::context::{LightingContext, LightingContextProvider};
 use super::effect::{BuiltinEffect, LightingEffect};
@@ -518,6 +519,12 @@ pub enum StandardCommand<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
     /// slot. Intended for a renderer replica, not a second authority.
     ApplyReplica(&'static StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP>),
     ReadState,
+    /// Descriptor and current selection of the extension source, if any.
+    ReadExtension,
+    SetExtensionIfRevision {
+        expected_revision: u32,
+        state: ExtensionState,
+    },
     /// One atomically sampled page of the transient overlay.
     ReadOverlay {
         offset: u16,
@@ -601,6 +608,16 @@ pub struct ScenePage {
     pub cells: SceneChunk,
 }
 
+/// Extension-source readback: selectable content plus current selection.
+/// `descriptor`/`state` are `None` when the engine's extension band is not
+/// user-selectable (e.g. `EmptySource`).
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct ExtensionPage {
+    pub revision: u32,
+    pub descriptor: Option<ExtensionDescriptor>,
+    pub state: Option<ExtensionState>,
+}
+
 /// One page of immutable board-compiled layer scenes.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct CompiledScenePage {
@@ -619,6 +636,7 @@ pub enum StandardReply {
     ScenesPage(ScenePage),
     CompiledScenesPage(CompiledScenePage),
     SceneTransaction { id: u32, cell_count: u16 },
+    Extension(ExtensionPage),
 }
 
 impl StandardReply {
@@ -650,6 +668,10 @@ pub struct StandardReplicaState<const OVERLAY_CAP: usize, const SCENE_CAP: usize
     pub scenes: SceneTable<SCENE_CAP>,
     pub context: LightingContext,
     pub sample_time_ms: u64,
+    /// Extension-source selection, carried so split renderer replicas track
+    /// the authority's animated band. `None` when the authority has no
+    /// selectable extension.
+    pub extension: Option<ExtensionState>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -731,6 +753,9 @@ pub enum StandardError {
     /// Malformed scene request: bad chunk order, count overflow, or a
     /// duplicate `(layer, slot)` within one staged replacement.
     InvalidSceneRequest,
+    /// The extension source declined the state (none installed, or an index
+    /// out of its descriptor's range).
+    ExtensionUnsupported,
     SceneTransactionBusy,
     InvalidSceneTransaction,
     SceneTransactionExpired,
@@ -1049,14 +1074,15 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
             scenes: self.scenes,
             context: *context.lighting_context(),
             sample_time_ms,
+            // Filled by handle_command, where the LightingSource bound is
+            // available on the Extension parameter.
+            extension: None,
         })
     }
 
-    fn apply_replica(
-        &mut self,
-        local_now_ms: u64,
-        replica: StandardReplicaState<OVERLAY_CAP, SCENE_CAP>,
-    ) -> Result<(), StandardError> {
+    fn replica_overlay(
+        replica: &StandardReplicaState<OVERLAY_CAP, SCENE_CAP>,
+    ) -> Result<TtlOverlay<BuiltinEffect, OVERLAY_CAP>, StandardError> {
         let mut updates = [OverlayUpdate {
             slot: LedSlot(0),
             effect: BuiltinEffect::Solid { color: Rgb8::BLACK },
@@ -1074,14 +1100,23 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
                 return Err(StandardError::DeadlineOverflow);
             }
         }
-        self.overlay
-            .replace(replica.sample_time_ms, &updates[..replica.overlay.as_slice().len()])?;
+        let mut overlay = TtlOverlay::new();
+        overlay.replace(replica.sample_time_ms, &updates[..replica.overlay.as_slice().len()])?;
+        Ok(overlay)
+    }
+
+    fn apply_replica(
+        &mut self,
+        local_now_ms: u64,
+        replica: StandardReplicaState<OVERLAY_CAP, SCENE_CAP>,
+        overlay: TtlOverlay<BuiltinEffect, OVERLAY_CAP>,
+    ) {
+        self.overlay = overlay;
         self.set_mutable_state(replica.mutable);
         self.output_mode = replica.output_mode;
         self.scenes = replica.scenes;
         self.revision = replica.revision;
         self.animation_clock.anchor(local_now_ms, replica.sample_time_ms);
-        Ok(())
     }
 
     fn expires_at(now_ms: u64, ttl_ms: Option<NonZeroU32>) -> Result<Option<u64>, StandardError> {
@@ -1492,11 +1527,20 @@ where
                 (Invalidation::Render, true)
             }
             StandardCommand::ExportReplica(slot) => {
-                slot.put(self.replica_state(now_ms, snapshot)?)?;
+                let mut replica = self.replica_state(now_ms, snapshot)?;
+                replica.extension = self.extension.extension_state();
+                slot.put(replica)?;
                 (Invalidation::None, false)
             }
             StandardCommand::ApplyReplica(slot) => {
-                self.apply_replica(now_ms, slot.take()?)?;
+                let replica = slot.take()?;
+                let overlay = Self::replica_overlay(&replica)?;
+                match (replica.extension, self.extension.extension_state()) {
+                    (None, None) => {}
+                    (Some(extension), Some(_)) if self.extension.apply_extension_state(extension) => {}
+                    _ => return Err(StandardError::ExtensionUnsupported),
+                }
+                self.apply_replica(now_ms, replica, overlay);
                 (Invalidation::Render, false)
             }
             StandardCommand::SetSceneCellIfRevision {
@@ -1538,6 +1582,23 @@ where
                     },
                     true,
                 )
+            }
+            StandardCommand::ReadExtension => {
+                return Ok(CommandResult::unchanged(StandardReply::Extension(ExtensionPage {
+                    revision: self.revision,
+                    descriptor: self.extension.extension_descriptor(),
+                    state: self.extension.extension_state(),
+                })));
+            }
+            StandardCommand::SetExtensionIfRevision {
+                expected_revision,
+                state,
+            } => {
+                self.check_revision(expected_revision)?;
+                if !self.extension.apply_extension_state(state) {
+                    return Err(StandardError::ExtensionUnsupported);
+                }
+                (Invalidation::Render, true)
             }
             StandardCommand::ReadState => (Invalidation::None, false),
             StandardCommand::ReadOverlay { .. }
@@ -1678,6 +1739,38 @@ mod tests {
 
     type Engine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2>;
 
+    #[derive(Copy, Clone)]
+    struct ReplicaExtension {
+        state: ExtensionState,
+        accept: bool,
+    }
+
+    impl<Context> LightingSource<Rgb8, Context> for ReplicaExtension {
+        fn len(&self, _: &SourceRenderInput<'_, Context>) -> usize {
+            0
+        }
+
+        fn slot(&self, _: usize, _: &SourceRenderInput<'_, Context>) -> LedSlot {
+            unreachable!("replica test extension has no targets")
+        }
+
+        fn contribution(&mut self, _: usize, _: &SourceRenderInput<'_, Context>) -> Contribution<Rgb8> {
+            unreachable!("replica test extension has no samples")
+        }
+
+        fn extension_state(&self) -> Option<ExtensionState> {
+            Some(self.state)
+        }
+
+        fn apply_extension_state(&mut self, state: ExtensionState) -> bool {
+            if !self.accept {
+                return false;
+            }
+            self.state = state;
+            true
+        }
+    }
+
     static LAYER_CELLS: [SceneCell<BuiltinEffect>; 1] = [SceneCell {
         slot: LedSlot(0),
         effect: BuiltinEffect::Solid { color: RED },
@@ -1702,6 +1795,29 @@ mod tests {
                 policy: LayerPolicy::ActiveStack,
             },
             EmptySource,
+            EmptySource,
+        )
+    }
+
+    fn replica_engine(accept: bool) -> StandardLightingEngine<'static, ReplicaExtension, EmptySource, 2, 2> {
+        StandardLightingEngine::new(
+            BackgroundState {
+                value: 10,
+                ..BackgroundState::default()
+            },
+            LayerScenes {
+                scenes: &LAYERS,
+                policy: LayerPolicy::ActiveStack,
+            },
+            ReplicaExtension {
+                state: ExtensionState {
+                    effect: 0,
+                    palette: 0,
+                    value: 10,
+                    speed: 20,
+                },
+                accept,
+            },
             EmptySource,
         )
     }
@@ -1829,11 +1945,104 @@ mod tests {
             scenes: SceneTable::new(),
             context: context(0),
             sample_time_ms: 9,
+            extension: None,
         };
         slot.put(snapshot).unwrap();
         assert_eq!(slot.put(snapshot), Err(ReplicaSlotError::Busy));
         assert_eq!(slot.take(), Ok(snapshot));
         assert_eq!(slot.take(), Err(ReplicaSlotError::Empty));
+    }
+
+    #[test]
+    fn replica_application_is_atomic_across_common_and_extension_state() {
+        let next_extension = ExtensionState {
+            effect: 1,
+            palette: 2,
+            value: 30,
+            speed: 40,
+        };
+        let snapshot = StandardReplicaState {
+            revision: 9,
+            mutable: StandardMutableState {
+                output_enabled: false,
+                output_brightness: 42,
+                background: BackgroundState {
+                    value: 99,
+                    ..BackgroundState::default()
+                },
+            },
+            output_mode: OutputMode::AlwaysOff,
+            overlay: OverlayBatch::new(),
+            scenes: SceneTable::new(),
+            context: context(0),
+            sample_time_ms: 50,
+            extension: Some(next_extension),
+        };
+
+        let mut declining = replica_engine(false);
+        let before = declining.state();
+        let before_extension = declining.extension().state;
+        static DECLINING_SLOT: StandardReplicaSlot<2> = StandardReplicaSlot::new();
+        DECLINING_SLOT.put(snapshot).unwrap();
+        assert_eq!(
+            declining.handle_command(100, StandardCommand::ApplyReplica(&DECLINING_SLOT), &context(0),),
+            Err(StandardError::ExtensionUnsupported)
+        );
+        assert_eq!(declining.state(), before);
+        assert_eq!(declining.extension().state, before_extension);
+
+        let mut accepting = replica_engine(true);
+        static ACCEPTING_SLOT: StandardReplicaSlot<2> = StandardReplicaSlot::new();
+        ACCEPTING_SLOT.put(snapshot).unwrap();
+        accepting
+            .handle_command(100, StandardCommand::ApplyReplica(&ACCEPTING_SLOT), &context(0))
+            .unwrap();
+        assert_eq!(accepting.state().revision, 9);
+        assert_eq!(accepting.state().output_brightness, 42);
+        assert_eq!(accepting.extension().state, next_extension);
+    }
+
+    #[test]
+    fn invalid_replica_common_state_does_not_mutate_extension() {
+        let mut overlay = OverlayBatch::new();
+        for _ in 0..2 {
+            overlay
+                .push(OverlayCell {
+                    slot: LedSlot(0),
+                    effect: BuiltinEffect::Solid { color: RED },
+                    ttl_ms: None,
+                })
+                .unwrap();
+        }
+        let snapshot = StandardReplicaState {
+            revision: 9,
+            mutable: StandardMutableState {
+                output_enabled: true,
+                output_brightness: 42,
+                background: BackgroundState::default(),
+            },
+            output_mode: OutputMode::AlwaysOn,
+            overlay,
+            scenes: SceneTable::new(),
+            context: context(0),
+            sample_time_ms: 50,
+            extension: Some(ExtensionState {
+                effect: 1,
+                palette: 2,
+                value: 30,
+                speed: 40,
+            }),
+        };
+        let mut engine = replica_engine(true);
+        let before = engine.extension().state;
+        static INVALID_SLOT: StandardReplicaSlot<2> = StandardReplicaSlot::new();
+        INVALID_SLOT.put(snapshot).unwrap();
+        assert_eq!(
+            engine.handle_command(100, StandardCommand::ApplyReplica(&INVALID_SLOT), &context(0),),
+            Err(StandardError::Overlay(OverlayError::DuplicateSlot { slot: LedSlot(0) }))
+        );
+        assert_eq!(engine.extension().state, before);
+        assert_eq!(engine.state().revision, 0);
     }
 
     #[test]

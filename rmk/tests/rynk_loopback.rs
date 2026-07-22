@@ -49,7 +49,10 @@ use rmk_types::protocol::rynk::{
 };
 #[cfg(feature = "lighting")]
 use rmk_types::protocol::rynk::{
-    LightingChanged, LightingError, LightingKeysPageResult, LightingMatrixPosition, LightingPageRequest,
+    LightingCapabilitiesResult, LightingChanged, LightingError, LightingExtensionNameKind,
+    LightingExtensionNamesPageResult, LightingExtensionNamesRequest, LightingExtensionResult, LightingExtensionState,
+    LightingFeatureFlags, LightingKeysPageResult, LightingMatrixPosition, LightingPageRequest, LightingStateResult,
+    SetLightingExtensionStateRequest,
 };
 
 use crate::common::rynk_link::{RynkHostClient, link_session, link_two_sessions};
@@ -99,9 +102,8 @@ static LIGHTING_LEDS: [LedMetadata; 1] = [LedMetadata {
 }];
 
 #[cfg(feature = "lighting")]
-fn lighting_service() -> RynkService<'static> {
-    let mailbox = Box::leak(Box::new(RynkLightingMailbox::new()));
-    let descriptor = RynkLightingDescriptor {
+fn lighting_descriptor() -> RynkLightingDescriptor<'static> {
+    RynkLightingDescriptor {
         topology_revision: 23,
         topology: LightingTopology {
             matrix: MatrixSize::new(1, 3),
@@ -115,12 +117,22 @@ fn lighting_service() -> RynkService<'static> {
             outputs: &[],
             routes: &[],
         },
-    };
+    }
+}
+
+#[cfg(feature = "lighting")]
+fn lighting_service_with(controller: RynkLightingController<'static>) -> RynkService<'static> {
     let behavior: &'static mut BehaviorConfig = Box::leak(Box::new(BehaviorConfig::default()));
     let per_key: &'static PositionalConfig<1, 3> = Box::leak(Box::new(PositionalConfig::default()));
     let keymap = [[[KeyAction::No; 3]; 1]; 1];
     let km = wrap_keymap(keymap, per_key, behavior);
-    RynkService::new(km, insecure_config()).with_lighting(RynkLightingController::new(mailbox, descriptor, 8))
+    RynkService::new(km, insecure_config()).with_lighting(controller)
+}
+
+#[cfg(feature = "lighting")]
+fn lighting_service() -> RynkService<'static> {
+    let mailbox = Box::leak(Box::new(RynkLightingMailbox::new()));
+    lighting_service_with(RynkLightingController::new(mailbox, lighting_descriptor(), 8))
 }
 
 /// 2-layer service so SetDefaultLayer can make an observable change.
@@ -249,6 +261,204 @@ fn lighting_discovery_and_revision_pinned_keys_cross_the_full_loopback() {
                 current: 23,
             })
         );
+    });
+}
+
+/// Zero-target lighting source serving only the extension hooks.
+#[cfg(feature = "lighting")]
+struct LoopbackExtensionSource {
+    state: rmk::lighting::compositor::ExtensionState,
+}
+
+#[cfg(feature = "lighting")]
+impl<Context> rmk::lighting::compositor::LightingSource<rmk::lighting::Rgb8, Context> for LoopbackExtensionSource {
+    fn len(&self, _: &rmk::lighting::compositor::RenderInput<'_, Context>) -> usize {
+        0
+    }
+
+    fn slot(&self, _: usize, _: &rmk::lighting::compositor::RenderInput<'_, Context>) -> rmk::lighting::LedSlot {
+        unreachable!("loopback extension source has no targets")
+    }
+
+    fn contribution(
+        &mut self,
+        _: usize,
+        _: &rmk::lighting::compositor::RenderInput<'_, Context>,
+    ) -> rmk::lighting::compositor::Contribution<rmk::lighting::Rgb8> {
+        unreachable!("loopback extension source has no samples")
+    }
+
+    fn extension_descriptor(&self) -> Option<rmk::lighting::compositor::ExtensionDescriptor> {
+        Some(rmk::lighting::compositor::ExtensionDescriptor {
+            effects: &["Gradient", "Flow"],
+            palettes: &["Lava", "Ocean", "Forest"],
+        })
+    }
+
+    fn extension_state(&self) -> Option<rmk::lighting::compositor::ExtensionState> {
+        Some(self.state)
+    }
+
+    fn apply_extension_state(&mut self, state: rmk::lighting::compositor::ExtensionState) -> bool {
+        self.state = state;
+        true
+    }
+}
+
+/// Full stack for the extension endpoints: wire frames → dispatch → handler →
+/// protocol mailbox → adapter → standard engine, and back.
+#[cfg(feature = "lighting")]
+#[test]
+fn lighting_extension_endpoints_cross_the_full_loopback() {
+    use embassy_futures::select::{Either3, select3};
+    use rmk::host::StandardRynkLightingAdapter;
+    use rmk::lighting::compositor::ExtensionState;
+    use rmk::lighting::{
+        BackgroundState, EmptySource, LayerPolicy, LayerScenes, LightingContext, LightingEngine, LightingMailbox,
+        StandardCommand, StandardError, StandardLightingEngine, StandardReply,
+    };
+
+    let mailbox: &'static RynkLightingMailbox = Box::leak(Box::new(RynkLightingMailbox::new()));
+    let service =
+        lighting_service_with(RynkLightingController::new(mailbox, lighting_descriptor(), 8).with_extension_effects());
+    let core = LightingMailbox::<StandardCommand<2>, StandardReply, StandardError, 1>::new();
+    let mut adapter = StandardRynkLightingAdapter::<2, 1>::new(mailbox, &core, lighting_descriptor().topology);
+    let mut engine: StandardLightingEngine<'static, LoopbackExtensionSource, EmptySource, 1, 2, 0> =
+        StandardLightingEngine::new(
+            BackgroundState::default(),
+            LayerScenes {
+                scenes: &[],
+                policy: LayerPolicy::EffectiveOnly,
+            },
+            LoopbackExtensionSource {
+                state: ExtensionState {
+                    effect: 0,
+                    palette: 2,
+                    value: 200,
+                    speed: 40,
+                },
+            },
+            EmptySource,
+        );
+
+    link_session(&service, async |client| {
+        let script = async {
+            let caps = client
+                .request::<(), LightingCapabilitiesResult>(Cmd::GetLightingCapabilities, 0x74, &())
+                .await
+                .expect("outer capabilities envelope")
+                .expect("lighting capabilities");
+            assert!(caps.features.contains(LightingFeatureFlags::EXTENSION_EFFECTS));
+
+            let extension = client
+                .request::<(), LightingExtensionResult>(Cmd::GetLightingExtension, 0x75, &())
+                .await
+                .expect("outer extension envelope")
+                .expect("extension discovery");
+            assert_eq!(extension.revision, 0);
+            assert_eq!(extension.effect_count, 2);
+            assert_eq!(extension.palette_count, 3);
+            assert_eq!(
+                extension.state,
+                LightingExtensionState {
+                    effect: 0,
+                    palette: 2,
+                    value: 200,
+                    speed: 40,
+                }
+            );
+
+            let palettes = client
+                .request::<_, LightingExtensionNamesPageResult>(
+                    Cmd::GetLightingExtensionNames,
+                    0x76,
+                    &LightingExtensionNamesRequest {
+                        kind: LightingExtensionNameKind::Palettes,
+                        offset: 0,
+                    },
+                )
+                .await
+                .expect("outer names envelope")
+                .expect("palette names page");
+            assert_eq!(palettes.total, 3);
+            assert_eq!(palettes.items.len(), 3);
+            assert_eq!(palettes.items[1].as_str(), "Ocean");
+
+            let selected = LightingExtensionState {
+                effect: 1,
+                palette: 0,
+                value: 9,
+                speed: 8,
+            };
+            let state = client
+                .request::<_, LightingStateResult>(
+                    Cmd::SetLightingExtensionState,
+                    0x77,
+                    &SetLightingExtensionStateRequest {
+                        expected_revision: 0,
+                        state: selected,
+                    },
+                )
+                .await
+                .expect("outer set envelope")
+                .expect("extension selection");
+            assert_eq!(state.revision, 1);
+
+            let extension = client
+                .request::<(), LightingExtensionResult>(Cmd::GetLightingExtension, 0x78, &())
+                .await
+                .expect("outer extension envelope")
+                .expect("extension readback");
+            assert_eq!(extension.revision, 1);
+            assert_eq!(extension.state, selected);
+
+            let stale = client
+                .request::<_, LightingStateResult>(
+                    Cmd::SetLightingExtensionState,
+                    0x79,
+                    &SetLightingExtensionStateRequest {
+                        expected_revision: 0,
+                        state: selected,
+                    },
+                )
+                .await
+                .expect("outer stale envelope");
+            assert_eq!(
+                stale,
+                Err(LightingError::StateRevisionConflict {
+                    expected: 0,
+                    current: 1,
+                })
+            );
+        };
+        let adapter_loop = async {
+            loop {
+                adapter.process_next().await;
+            }
+        };
+        let context = LightingContext::default();
+        let engine_loop = async {
+            loop {
+                let (id, command) = core.receive_request().await;
+                let result = engine.handle_command(0, command, &context).map(|outcome| outcome.reply);
+                core.publish_reply(id, result);
+            }
+        };
+        match select3(script, adapter_loop, engine_loop).await {
+            Either3::First(()) => {}
+            _ => panic!("service loops must not finish"),
+        }
+    });
+
+    // A board that never advertised extension effects rejects the endpoint
+    // before it can reach any mailbox.
+    let plain = lighting_service();
+    link_session(&plain, async |client| {
+        let unsupported = client
+            .request::<(), LightingExtensionResult>(Cmd::GetLightingExtension, 0x7A, &())
+            .await
+            .expect("outer unsupported envelope");
+        assert_eq!(unsupported, Err(LightingError::Unsupported));
     });
 }
 
