@@ -93,7 +93,7 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
             };
             info!("Start connecting, {} peripheral(s) pending", pending.len());
             match with_timeout(
-                Duration::from_millis(super::KNOWN_PEER_CONNECT_TIMEOUT_MS),
+                Duration::from_millis(super::KNOWN_PEER_CONNECT_REARM_MS),
                 central.connect(&config),
             )
             .await
@@ -115,12 +115,9 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                     Timer::after_millis(500).await;
                 }
                 Err(_) => {
-                    // None answered: forget the addresses and rediscover the
-                    // peripherals when they come back.
-                    warn!("Connect timeout, clearing {} address(es)", pending.len());
-                    for &(id, _) in &pending {
-                        peripheral_slots[id] = SlotState::NoAddr;
-                    }
+                    // The peripherals are off or out of range; their FICR-derived
+                    // addresses remain valid, so immediately re-arm the request.
+                    debug!("Connect timeout, re-arming {} address(es)", pending.len());
                 }
             }
         } else if peripheral_slots.iter().any(|s| matches!(s, SlotState::NoAddr)) {
