@@ -357,13 +357,24 @@ pub(crate) async fn run_peripheral_session<
     }
 }
 
+/// Supervision must exceed the longest legal radio silence,
+/// interval * (1 + latency). Keep three such periods of margin, with a 2 s
+/// floor: a powered-off peripheral is only rediscovered after the dead
+/// connection times out, so this bounds reconnect latency for fast
+/// off/on cycles.
+fn awake_supervision_timeout_us(max_latency: u16) -> u64 {
+    let latency_period_us = 7_500 * (1 + max_latency as u64);
+    (3 * latency_period_us).max(2_000_000)
+}
+
 /// Default connection parameters for the central <-> peripheral connection.
 fn default_split_conn_params() -> RequestedConnParams {
+    let max_latency = latency_state().effective;
     RequestedConnParams {
         min_connection_interval: Duration::from_micros(7500),
         max_connection_interval: Duration::from_micros(7500),
-        max_latency: latency_state().effective,
-        supervision_timeout: Duration::from_secs(6),
+        max_latency,
+        supervision_timeout: Duration::from_micros(awake_supervision_timeout_us(max_latency)),
         ..Default::default()
     }
 }
@@ -445,13 +456,14 @@ pub(crate) mod subrating {
 
     /// Default subrating params when the central is awake.
     pub(super) fn default_split_subrating_params(handle: ConnHandle) -> LeSubrateRequestParams {
+        let max_latency = super::latency_state().effective;
         LeSubrateRequestParams {
             handle,
             subrate_min: 1,
             subrate_max: 1,
-            max_latency: super::latency_state().effective,
+            max_latency,
             continuation_number: 0,
-            supervision_timeout: Duration::from_secs(6),
+            supervision_timeout: Duration::from_micros(super::awake_supervision_timeout_us(max_latency)),
         }
     }
 
