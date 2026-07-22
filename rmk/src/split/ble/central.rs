@@ -92,7 +92,12 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                 },
             };
             info!("Start connecting, {} peripheral(s) pending", pending.len());
-            match with_timeout(Duration::from_secs(15), central.connect(&config)).await {
+            match with_timeout(
+                Duration::from_millis(super::KNOWN_PEER_CONNECT_TIMEOUT_MS),
+                central.connect(&config),
+            )
+            .await
+            {
                 Ok(Ok(conn)) => {
                     let peer = conn.peer_address();
                     if let Some(&(id, addr)) = pending.iter().find(|(_, addr)| Address::random(*addr) == peer) {
