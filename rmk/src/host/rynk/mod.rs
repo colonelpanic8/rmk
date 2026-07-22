@@ -14,7 +14,8 @@ use embedded_io_async::{Read, Write};
 #[cfg(feature = "lighting")]
 pub use lighting::{
     RYNK_LIGHTING_TRANSACTION_CAPACITY, RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox,
-    RynkLightingReadback, StandardRynkLightingAdapter, install_lighting_scenes,
+    RynkLightingReadback, StandardRynkLightingAdapter, install_lighting_runtime_conditional_scenes,
+    install_lighting_scenes,
 };
 use rmk_types::constants::RYNK_BUFFER_SIZE;
 use rmk_types::protocol::rynk::{
@@ -169,7 +170,12 @@ impl<'a> RynkService<'a> {
             | Cmd::PutLightingSceneChunk
             | Cmd::CommitLightingSceneReplace
             | Cmd::AbortLightingSceneReplace
-            | Cmd::SetLightingExtensionState => self.lock_config.write_requires_unlock,
+            | Cmd::SetLightingExtensionState
+            | Cmd::SetLightingOutputMode
+            | Cmd::BeginLightingRuntimeConditionalSceneReplace
+            | Cmd::PutLightingRuntimeConditionalSceneChunk
+            | Cmd::CommitLightingRuntimeConditionalSceneReplace
+            | Cmd::AbortLightingRuntimeConditionalSceneReplace => self.lock_config.write_requires_unlock,
             _ => false,
         }
     }
@@ -313,6 +319,31 @@ impl<'a> RynkService<'a> {
             Cmd::GetLightingExtensionNames => Serve::<command::GetLightingExtensionNames, _>::serve(self, msg).await,
             #[cfg(feature = "lighting")]
             Cmd::SetLightingExtensionState => Serve::<command::SetLightingExtensionState, _>::serve(self, msg).await,
+            Cmd::SetLightingOutputMode => Serve::<command::SetLightingOutputMode, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingRuntimeConditionalSceneStatus => {
+                Serve::<command::GetLightingRuntimeConditionalSceneStatus, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingRuntimeConditionalScenes => {
+                Serve::<command::GetLightingRuntimeConditionalScenes, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::BeginLightingRuntimeConditionalSceneReplace => {
+                Serve::<command::BeginLightingRuntimeConditionalSceneReplace, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::PutLightingRuntimeConditionalSceneChunk => {
+                Serve::<command::PutLightingRuntimeConditionalSceneChunk, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::CommitLightingRuntimeConditionalSceneReplace => {
+                Serve::<command::CommitLightingRuntimeConditionalSceneReplace, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::AbortLightingRuntimeConditionalSceneReplace => {
+                Serve::<command::AbortLightingRuntimeConditionalSceneReplace, _>::serve(self, msg).await
+            }
             #[cfg(feature = "lighting")]
             Cmd::SetLightingSceneCell => Serve::<command::SetLightingSceneCell, _>::serve(self, msg).await,
             #[cfg(feature = "lighting")]
