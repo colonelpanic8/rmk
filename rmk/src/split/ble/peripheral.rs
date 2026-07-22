@@ -210,7 +210,12 @@ async fn split_peripheral_advertise<'a, 'b, C: Controller>(
         .advertise(&AdvertisementParameters::default(), advertisement)
         .await?;
 
-    match with_timeout(Duration::from_secs(10), advertiser.accept()).await {
+    match with_timeout(
+        Duration::from_millis(super::DIRECTED_ADVERTISING_GRACE_MS),
+        advertiser.accept(),
+    )
+    .await
+    {
         Ok(conn_res) => {
             let conn = conn_res?.with_attribute_server(server)?;
             info!("[adv] connection established");

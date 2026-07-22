@@ -326,7 +326,7 @@ pub(crate) async fn run_ble_peripheral_manager<
         set_peripheral_connected(peri_id, false);
 
         // Connect to peripheral
-        match with_timeout(Duration::from_secs(5), async {
+        match with_timeout(Duration::from_millis(super::KNOWN_PEER_CONNECT_TIMEOUT_MS), async {
             if let Ok(_guard) = SCANNING_MUTEX.try_lock() {
                 info!("Start connecting to peripheral {}", peri_id);
                 central.connect(&config).await
