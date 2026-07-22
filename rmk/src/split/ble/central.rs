@@ -89,7 +89,7 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
             };
             info!("Start connecting, {} peripheral(s) pending", pending.len());
             let connected = match with_timeout(
-                Duration::from_millis(super::KNOWN_PEER_CONNECT_TIMEOUT_MS),
+                Duration::from_millis(super::KNOWN_PEER_CONNECT_REARM_MS),
                 central.connect(&config),
             )
             .await
@@ -113,14 +113,10 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                     false
                 }
                 Err(_) => {
-                    // None answered.
                     if crate::state::current_sleep_state() {
                         warn!("Connect timeout while asleep, keeping {} address(es)", pending.len());
                     } else {
-                        warn!("Connect timeout, clearing {} address(es)", pending.len());
-                        for &(id, _) in &pending {
-                            peripheral_slots[id] = SlotState::NoAddr;
-                        }
+                        debug!("Connect timeout, re-arming {} address(es)", pending.len());
                     }
                     false
                 }
