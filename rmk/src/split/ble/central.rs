@@ -200,10 +200,14 @@ pub async fn scan_peripherals<
                         ..Default::default()
                     };
                     let _guard = SCANNING_MUTEX.lock().await;
-                    if let Ok(_session) = scanner.scan(&scan_config).await {
-                        info!("Start scanning peripherals");
-                        STOP_SCANNING.wait().await;
-                        info!("Stop scanning");
+                    match scanner.scan(&scan_config).await {
+                        Ok(_session) => {
+                            info!("Start scanning peripherals");
+                            STOP_SCANNING.wait().await;
+                            info!("Stop scanning");
+                        }
+                        // Throttle retries while the controller refuses to scan
+                        Err(_) => embassy_time::Timer::after_millis(500).await,
                     }
                 }
             };
@@ -326,7 +330,7 @@ pub(crate) async fn run_ble_peripheral_manager<
         set_peripheral_connected(peri_id, false);
 
         // Connect to peripheral
-        match with_timeout(Duration::from_millis(super::KNOWN_PEER_CONNECT_TIMEOUT_MS), async {
+        match with_timeout(Duration::from_millis(super::KNOWN_PEER_CONNECT_REARM_MS), async {
             if let Ok(_guard) = SCANNING_MUTEX.try_lock() {
                 info!("Start connecting to peripheral {}", peri_id);
                 central.connect(&config).await
@@ -360,11 +364,11 @@ pub(crate) async fn run_ble_peripheral_manager<
                 error!("Connect to peripheral {} error: {:?}", peri_id, e);
             }
             Err(_) => {
-                // Connect to peripheral timeout
-                warn!("Connect to peripheral {} timeout, clearing", peri_id);
-                if let Some(addr) = addrs.borrow_mut().get_mut(peri_id) {
-                    *addr = None
-                };
+                // The peripheral is off or out of range; its address is still
+                // valid. Re-arm the connection request without a pause so the
+                // peripheral's first advertisement after power-on is caught.
+                debug!("Connect to peripheral {} timed out, re-arming", peri_id);
+                continue;
             }
         }
         // Reconnect after 500ms
@@ -563,14 +567,8 @@ impl<'a, 'b, 'c, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool> Sp
 }
 
 /// Wait for the BLE stack to start.
-///
-/// If the BLE stack has been started, wait 500ms then quit.
 pub(crate) async fn wait_for_stack_started() {
-    loop {
-        if STACK_STARTED.signaled() {
-            embassy_time::Timer::after_millis(500).await;
-            break;
-        }
+    while !STACK_STARTED.signaled() {
         embassy_time::Timer::after_millis(500).await;
     }
 }
