@@ -253,6 +253,8 @@ The `layer.keys` string follows several rules:
 
    For a simple keycode with modifiers held, use `WM(key, modifier)` to create a keypress-with-modifier action. Modifiers can be chained like `LShift | RGui` to hold several at once.
 
+   To hold one or more modifiers without sending a non-modifier key, use `MOD(modifier)`. For example, `MOD(LCtrl | LAlt | LGui)` holds all three modifiers until the bound key is released.
+
    You may use aliases, prefixed with `@`, like `@my_copy` in the example above. Alias names are case sensitive. Defining aliases is covered below.
 
    You may use layer names instead of layer numbers, like `TO(base_layer)` above.
