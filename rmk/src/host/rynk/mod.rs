@@ -14,7 +14,8 @@ use embedded_io_async::{Read, Write};
 #[cfg(feature = "lighting")]
 pub use lighting::{
     RYNK_LIGHTING_TRANSACTION_CAPACITY, RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox,
-    RynkLightingReadback, StandardRynkLightingAdapter, install_lighting_scenes,
+    RynkLightingReadback, StandardRynkLightingAdapter, install_lighting_runtime_conditional_scenes,
+    install_lighting_scenes,
 };
 use rmk_types::constants::RYNK_BUFFER_SIZE;
 use rmk_types::protocol::rynk::{
@@ -169,7 +170,12 @@ impl<'a> RynkService<'a> {
             | Cmd::PutLightingSceneChunk
             | Cmd::CommitLightingSceneReplace
             | Cmd::AbortLightingSceneReplace
-            | Cmd::SetLightingExtensionState => self.lock_config.write_requires_unlock,
+            | Cmd::SetLightingExtensionState
+            | Cmd::SetLightingOutputMode
+            | Cmd::BeginLightingRuntimeConditionalSceneReplace
+            | Cmd::PutLightingRuntimeConditionalSceneChunk
+            | Cmd::CommitLightingRuntimeConditionalSceneReplace
+            | Cmd::AbortLightingRuntimeConditionalSceneReplace => self.lock_config.write_requires_unlock,
             _ => false,
         }
     }
@@ -314,6 +320,32 @@ impl<'a> RynkService<'a> {
             #[cfg(feature = "lighting")]
             Cmd::SetLightingExtensionState => Serve::<command::SetLightingExtensionState, _>::serve(self, msg).await,
             #[cfg(feature = "lighting")]
+            Cmd::SetLightingOutputMode => Serve::<command::SetLightingOutputMode, _>::serve(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingRuntimeConditionalSceneStatus => {
+                Serve::<command::GetLightingRuntimeConditionalSceneStatus, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingRuntimeConditionalScenes => {
+                Serve::<command::GetLightingRuntimeConditionalScenes, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::BeginLightingRuntimeConditionalSceneReplace => {
+                Serve::<command::BeginLightingRuntimeConditionalSceneReplace, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::PutLightingRuntimeConditionalSceneChunk => {
+                Serve::<command::PutLightingRuntimeConditionalSceneChunk, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::CommitLightingRuntimeConditionalSceneReplace => {
+                Serve::<command::CommitLightingRuntimeConditionalSceneReplace, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
+            Cmd::AbortLightingRuntimeConditionalSceneReplace => {
+                Serve::<command::AbortLightingRuntimeConditionalSceneReplace, _>::serve(self, msg).await
+            }
+            #[cfg(feature = "lighting")]
             Cmd::SetLightingSceneCell => Serve::<command::SetLightingSceneCell, _>::serve(self, msg).await,
             #[cfg(feature = "lighting")]
             Cmd::UnsetLightingSceneCell => Serve::<command::UnsetLightingSceneCell, _>::serve(self, msg).await,
@@ -350,6 +382,8 @@ impl<'a> RynkService<'a> {
             lighting: embassy_sync::mutex::Mutex::new(handlers::lighting::LightingTransactionState::new()),
         };
         let mut buf = [0u8; RYNK_BUFFER_SIZE];
+        // Mute topics until the client completes the version handshake.
+        let mut handshaked = false;
 
         loop {
             // Read either a request header or the next outgoing topic.
@@ -364,6 +398,10 @@ impl<'a> RynkService<'a> {
                     Err(_) => return,
                 },
                 Either::Second(event) => {
+                    // Not handshaked yet: drain the event but don't forward it.
+                    if !handshaked {
+                        continue;
+                    }
                     match event.encode(&mut buf) {
                         Ok(msg) => {
                             if tx.write_all(msg.frame()).await.is_err() {
@@ -412,12 +450,15 @@ impl<'a> RynkService<'a> {
                 return;
             }
 
-            // Payload decode errors are handler errors, not session exits.
             let Ok(mut msg) = RynkMessage::try_from(&mut buf[..]) else {
                 return;
             };
 
             self.dispatch(&session, &mut msg).await;
+            // The version has been negotiated, mark handshaked = true.
+            if msg.header().cmd == Cmd::GetCapabilities {
+                handshaked = true;
+            }
             if tx.write_all(msg.frame()).await.is_err() {
                 return;
             }

@@ -33,7 +33,8 @@ pub use rynk::{RMK_VERSION, RMK_VERSION_STRING};
 #[cfg(all(feature = "rynk", feature = "lighting"))]
 pub use rynk::{
     RYNK_LIGHTING_TRANSACTION_CAPACITY, RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox,
-    RynkLightingReadback, StandardRynkLightingAdapter, install_lighting_scenes,
+    RynkLightingReadback, StandardRynkLightingAdapter, install_lighting_runtime_conditional_scenes,
+    install_lighting_scenes,
 };
 #[cfg(feature = "vial")]
 pub use via::VialService as HostService;
