@@ -197,6 +197,8 @@ pub async fn scan_peripherals<
                     let mut scanner = Scanner::new(&mut central);
                     let scan_config = ScanConfig {
                         active: false,
+                        interval: Duration::from_millis(100),
+                        window: Duration::from_millis(30),
                         ..Default::default()
                     };
                     let _guard = SCANNING_MUTEX.lock().await;
@@ -322,6 +324,9 @@ pub(crate) async fn run_ble_peripheral_manager<
             connect_params: defaul_central_conn_param(),
             scan_config: ScanConfig {
                 filter_accept_list: &[address],
+                active: false,
+                interval: Duration::from_millis(100),
+                window: Duration::from_millis(30),
                 ..Default::default()
             },
         };
@@ -409,8 +414,8 @@ async fn run_central_manager_task<
 ) -> Result<(), BleHostError<C::Error>> {
     let client = GattClient::<C, P, 10>::new(stack, conn).await?;
 
-    // Use 2M Phy
-    update_ble_phy(stack, conn).await;
+    // Split link uses 2M PHY always.
+    update_ble_phy(stack, conn, PhyKind::Le2M).await;
 
     info!("Updating connection parameters for peripheral");
     update_conn_params(stack, conn, &defaul_central_conn_param()).await;
