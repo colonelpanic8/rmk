@@ -12,6 +12,7 @@ use {crate::ble::profile::BleProfileAction, rmk_types::led_indicator::LedIndicat
 
 #[cfg(all(feature = "vial", feature = "_ble"))]
 use crate::VIAL_CHANNEL_SIZE;
+use crate::event::KeyboardEvent;
 use crate::hid::{KeyboardReport, Report};
 #[cfg(feature = "storage")]
 use crate::{FLASH_CHANNEL_SIZE, storage::FlashOperationMessage};
@@ -114,3 +115,8 @@ pub(crate) static VIAL_BLE_RX_CHANNEL: Channel<RawMutex, [u8; 32], VIAL_CHANNEL_
 /// Rynk RX from the BLE `output_data` writes. The 512 B ring is ~2× one MTU's maximal payload.
 #[cfg(all(feature = "rynk", feature = "_ble"))]
 pub(crate) static RYNK_BLE_RX_PIPE: embassy_sync::pipe::Pipe<RawMutex, 512> = embassy_sync::pipe::Pipe::new();
+
+/// Macros are triggered on key press but run by the keyboard loop to avoid recursion
+/// (`execute_macro` dispatches a macro's ops back through the action path).
+/// Producer: the `TriggerMacro` action. Consumer: the keyboard loop.
+pub(crate) static MACRO_TRIGGER_CHANNEL: Channel<RawMutex, (u8, KeyboardEvent), 4> = Channel::new();

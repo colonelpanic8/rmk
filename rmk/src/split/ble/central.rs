@@ -82,6 +82,8 @@ pub async fn scan_peripherals<
                     let mut scanner = Scanner::new(&mut central);
                     let scan_config = ScanConfig {
                         active: false,
+                        interval: Duration::from_millis(100),
+                        window: Duration::from_millis(30),
                         ..Default::default()
                     };
                     let _guard = SCANNING_MUTEX.lock().await;
@@ -203,6 +205,9 @@ pub(crate) async fn run_ble_peripheral_manager<
             connect_params: defaul_central_conn_param(),
             scan_config: ScanConfig {
                 filter_accept_list: &[address],
+                active: false,
+                interval: Duration::from_millis(100),
+                window: Duration::from_millis(30),
                 ..Default::default()
             },
         };
@@ -211,7 +216,7 @@ pub(crate) async fn run_ble_peripheral_manager<
         set_peripheral_connected(peri_id, false);
 
         // Connect to peripheral
-        match with_timeout(Duration::from_secs(5), async {
+        match with_timeout(Duration::from_secs(15), async {
             if let Ok(_guard) = SCANNING_MUTEX.try_lock() {
                 info!("Start connecting to peripheral {}", peri_id);
                 central.connect(&config).await
@@ -261,8 +266,8 @@ fn defaul_central_conn_param() -> RequestedConnParams {
     RequestedConnParams {
         min_connection_interval: Duration::from_micros(7500),
         max_connection_interval: Duration::from_micros(7500),
-        max_latency: 30, // 225ms
-        supervision_timeout: Duration::from_secs(5),
+        max_latency: 10, // 75ms
+        supervision_timeout: Duration::from_secs(10),
         ..Default::default()
     }
 }
@@ -283,8 +288,8 @@ async fn run_central_manager_task<
 ) -> Result<(), BleHostError<C::Error>> {
     let client = GattClient::<C, P, 10>::new(stack, conn).await?;
 
-    // Use 2M Phy
-    update_ble_phy(stack, conn).await;
+    // Split link uses 2M PHY always.
+    update_ble_phy(stack, conn, PhyKind::Le2M).await;
 
     info!("Updating connection parameters for peripheral");
     update_conn_params(stack, conn, &defaul_central_conn_param()).await;
