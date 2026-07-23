@@ -382,6 +382,8 @@ impl<'a> RynkService<'a> {
             lighting: embassy_sync::mutex::Mutex::new(handlers::lighting::LightingTransactionState::new()),
         };
         let mut buf = [0u8; RYNK_BUFFER_SIZE];
+        // Mute topics until the client completes the version handshake.
+        let mut handshaked = false;
 
         loop {
             // Read either a request header or the next outgoing topic.
@@ -396,6 +398,10 @@ impl<'a> RynkService<'a> {
                     Err(_) => return,
                 },
                 Either::Second(event) => {
+                    // Not handshaked yet: drain the event but don't forward it.
+                    if !handshaked {
+                        continue;
+                    }
                     match event.encode(&mut buf) {
                         Ok(msg) => {
                             if tx.write_all(msg.frame()).await.is_err() {
@@ -444,12 +450,15 @@ impl<'a> RynkService<'a> {
                 return;
             }
 
-            // Payload decode errors are handler errors, not session exits.
             let Ok(mut msg) = RynkMessage::try_from(&mut buf[..]) else {
                 return;
             };
 
             self.dispatch(&session, &mut msg).await;
+            // The version has been negotiated, mark handshaked = true.
+            if msg.header().cmd == Cmd::GetCapabilities {
+                handshaked = true;
+            }
             if tx.write_all(msg.frame()).await.is_err() {
                 return;
             }

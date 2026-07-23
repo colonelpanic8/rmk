@@ -1727,6 +1727,7 @@ fn oversized_frame_is_rejected_then_stream_resyncs() {
 fn topic_layer_change() {
     let service = service();
     let v = link_session(&service, async |client| {
+        client.handshake().await;
         publish_event(LayerChangeEvent::new(3));
         let frame = client.recv_topic().await;
         assert_eq!(frame.header.cmd, Cmd::LayerChange);
@@ -1739,6 +1740,7 @@ fn topic_layer_change() {
 fn topic_wpm_update() {
     let service = service();
     let v = link_session(&service, async |client| {
+        client.handshake().await;
         publish_event(WpmUpdateEvent::new(42));
         let frame = client.recv_topic().await;
         assert_eq!(frame.header.cmd, Cmd::WpmUpdate);
@@ -1751,6 +1753,7 @@ fn topic_wpm_update() {
 fn topic_sleep_state() {
     let service = service();
     let v = link_session(&service, async |client| {
+        client.handshake().await;
         publish_event(SleepStateEvent::new(true));
         let frame = client.recv_topic().await;
         assert_eq!(frame.header.cmd, Cmd::SleepState);
@@ -1763,6 +1766,7 @@ fn topic_sleep_state() {
 fn topic_led_indicator() {
     let service = service();
     let v = link_session(&service, async |client| {
+        client.handshake().await;
         publish_event(LedIndicatorEvent::new(LedIndicator::from_bits(0b0000_0101)));
         let frame = client.recv_topic().await;
         assert_eq!(frame.header.cmd, Cmd::LedIndicatorChange);
@@ -1787,6 +1791,7 @@ fn topic_lighting_change_is_a_best_effort_readback_invalidation() {
 fn topic_connection_change() {
     let service = service();
     let v = link_session(&service, async |client| {
+        client.handshake().await;
         // Non-default status proves the published value crossed the wire.
         let status = ConnectionStatus {
             preferred: ConnectionType::Ble,
@@ -1809,6 +1814,7 @@ fn topic_battery_status() {
         level: Some(77),
     };
     let v = link_session(&service, async |client| {
+        client.handshake().await;
         publish_event(BatteryStatusEvent(expected));
         let frame = client.recv_topic().await;
         assert_eq!(frame.header.cmd, Cmd::BatteryStatusChange);
