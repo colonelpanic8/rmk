@@ -1780,6 +1780,7 @@ fn topic_led_indicator() {
 fn topic_lighting_change_is_a_best_effort_readback_invalidation() {
     let service = lighting_service();
     link_session(&service, async |client| {
+        client.handshake().await;
         publish_event(LightingChangedEvent::new());
         let frame = client.recv_topic().await;
         assert_eq!(frame.header.cmd, Cmd::LightingChange);
