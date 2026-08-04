@@ -107,6 +107,11 @@ pub(crate) fn set_preferred_connection(t: ConnectionType) {
 }
 
 pub(crate) async fn set_preferred(preferred: ConnectionType) {
+    // Profile-select keys call this on every press; skip the flash write when
+    // the preference is already set to avoid needless wear.
+    if CONNECTION_STATUS.lock(|c| c.borrow().preferred) == preferred {
+        return;
+    }
     set_preferred_connection(preferred);
     info!("Switching preferred transport to: {:?}", preferred);
     #[cfg(feature = "storage")]
