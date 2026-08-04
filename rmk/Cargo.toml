@@ -293,6 +293,13 @@ passkey_entry = ["_ble", "rmk-types/passkey_entry"]
 ## Enable feature if you want to use trouble BLE stack
 _ble = ["dep:trouble-host", "dep:bt-hci", "storage", "rmk-types/_ble"]
 
+## Keep every bonded BLE profile connected at the same time.
+##
+## Switching profiles then only re-routes HID reports instead of dropping the
+## current link and reconnecting, at the cost of one BLE connection slot (and
+## its L2CAP channels) per profile.
+ble_multi_connection = []
+
 [lib]
 # Don't run doctest for lib
 doctest = false

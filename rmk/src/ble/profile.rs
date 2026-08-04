@@ -149,6 +149,25 @@ where
             .cloned()
     }
 
+    /// Bond info for `slot`, cloned to free the caller from borrow conflicts
+    /// with a concurrent `update_profile()`.
+    #[cfg(feature = "ble_multi_connection")]
+    pub(crate) fn bond_info_for(&self, slot: u8) -> Option<ProfileInfo> {
+        self.bonded_devices
+            .iter()
+            .find(|bond_info| !bond_info.removed && bond_info.slot_num == slot)
+            .cloned()
+    }
+
+    /// Which profile a peer belongs to, or `None` for an unrecognised peer.
+    #[cfg(feature = "ble_multi_connection")]
+    pub(crate) fn profile_for_identity(&self, identity: &Identity) -> Option<u8> {
+        self.bonded_devices
+            .iter()
+            .find(|bond_info| !bond_info.removed && bond_info.info.identity.match_identity(identity))
+            .map(|bond_info| bond_info.slot_num)
+    }
+
     /// Update bonding information in the stack according to the current active profile
     pub(crate) fn update_stack_bonds(&self) {
         let identities: heapless::Vec<Identity, NUM_BLE_PROFILE> = self
@@ -160,7 +179,21 @@ where
             }
         }
 
+        // A single connection slot can only serve the selected profile, and
+        // loading every bond would let any bonded host claim that slot and
+        // shadow it.
+        #[cfg(not(feature = "ble_multi_connection"))]
         if let Some(info) = self.active_bond_info() {
+            debug!("Add bond info of profile {}: {:?}", info.slot_num, info);
+            if let Err(e) = self.stack.add_bond_information(info.info) {
+                debug!("Add bond info error: {:?}", e);
+            }
+        }
+
+        // With a slot per profile every bond has to be resolvable, so each host
+        // can reconnect on its own link and be recognised as belonging to it.
+        #[cfg(feature = "ble_multi_connection")]
+        for info in self.bonded_devices.iter().filter(|info| !info.removed).cloned() {
             debug!("Add bond info of profile {}: {:?}", info.slot_num, info);
             if let Err(e) = self.stack.add_bond_information(info.info) {
                 debug!("Add bond info error: {:?}", e);

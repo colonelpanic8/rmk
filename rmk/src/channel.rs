@@ -33,6 +33,16 @@ pub static USB_REPORT_CHANNEL: ReportChannel = Channel::new();
 #[cfg(feature = "_ble")]
 pub static BLE_REPORT_CHANNEL: ReportChannel = Channel::new();
 
+/// Per-profile queues fed by the BLE report dispatcher.
+///
+/// Every bonded host keeps its own link, so a report has to reach only the
+/// profile that currently owns the output. Draining `BLE_REPORT_CHANNEL` from
+/// each connection instead would let whichever writer happened to poll first
+/// swallow keystrokes meant for the selected profile.
+#[cfg(all(feature = "_ble", feature = "ble_multi_connection"))]
+pub(crate) static BLE_PROFILE_REPORT_CHANNELS: [ReportChannel; crate::NUM_BLE_PROFILE] =
+    [const { Channel::new() }; crate::NUM_BLE_PROFILE];
+
 fn report_channel(transport: ConnectionType) -> Option<&'static ReportChannel> {
     match transport {
         #[cfg(not(feature = "_no_usb"))]

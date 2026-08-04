@@ -20,7 +20,9 @@ use crate::ble::led::BleLedReader;
 use crate::ble::passkey::{PasskeyInputState, next_gatt_event};
 use crate::ble::profile::{ProfileInfo, ProfileManager, UPDATED_CCCD_TABLE, UPDATED_PROFILE};
 use crate::ble::sleep::{report_activity, request_sleep};
-use crate::channel::{BLE_REPORT_CHANNEL, LED_SIGNAL};
+#[cfg(not(feature = "ble_multi_connection"))]
+use crate::channel::BLE_REPORT_CHANNEL;
+use crate::channel::LED_SIGNAL;
 use crate::config::{BleBatteryConfig, RmkConfig};
 use crate::core_traits::Runnable;
 use crate::event::SubscribableEvent;
@@ -39,11 +41,32 @@ pub mod passkey;
 pub(crate) mod profile;
 pub(crate) mod sleep;
 
+/// Max number of host (central) connections kept open at once: one per profile,
+/// so a profile switch re-routes reports over links that are already up instead
+/// of tearing one down and waiting out a reconnect.
+#[cfg(feature = "ble_multi_connection")]
+pub(crate) const HOST_CONNECTIONS_MAX: usize = crate::NUM_BLE_PROFILE;
+
 /// Max number of connections
+#[cfg(not(feature = "ble_multi_connection"))]
 pub(crate) const CONNECTIONS_MAX: usize = crate::SPLIT_PERIPHERALS_NUM + 1;
+#[cfg(feature = "ble_multi_connection")]
+pub(crate) const CONNECTIONS_MAX: usize = crate::SPLIT_PERIPHERALS_NUM + HOST_CONNECTIONS_MAX;
 
 /// Max number of L2CAP channels
 pub(crate) const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX * 4; // Signal + att + smp + hid
+
+/// An accepted host connection on its way from the advertiser to a free worker.
+///
+/// The advertiser resolves the profile while it still holds the profile manager,
+/// so workers never need to borrow it.
+#[cfg(feature = "ble_multi_connection")]
+struct HostLink<'a, 'b> {
+    conn: GattConnection<'a, 'b, DefaultPacketPool>,
+    slot: u8,
+    #[cfg(feature = "storage")]
+    bond_info: Option<profile::ProfileInfo>,
+}
 
 /// Build the BLE stack.
 pub async fn build_ble_stack<'a, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool>(
@@ -171,7 +194,12 @@ where
         let server = &self.server;
         let profile_manager = &mut self.profile_manager;
         let product_name = self.product_name;
+        #[cfg(feature = "ble_multi_connection")]
+        let config = &self.config;
+        #[cfg(all(feature = "host", feature = "ble_multi_connection"))]
+        let host_service = self.host_service;
 
+        #[cfg(not(feature = "ble_multi_connection"))]
         let connection_loop = async {
             loop {
                 match select(
@@ -242,6 +270,132 @@ where
                     set_ble_state(BleState::Inactive);
                 }
             }
+        };
+
+        // Every bonded profile keeps its own link, so a profile switch only has
+        // to re-point the report dispatcher instead of tearing a connection down
+        // and waiting out a reconnect.
+        // Advertiser and workers are joined into this one task, so the
+        // unsynchronised cell and noop mutexes never see concurrent access.
+        // They live out here because `connection_loop`'s futures borrow them.
+        #[cfg(feature = "ble_multi_connection")]
+        let live_hosts = core::cell::Cell::new(0usize);
+        #[cfg(feature = "ble_multi_connection")]
+        let host_freed: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::NoopRawMutex, ()> =
+            embassy_sync::signal::Signal::new();
+        #[cfg(feature = "ble_multi_connection")]
+        let handoff: embassy_sync::channel::Channel<
+            embassy_sync::blocking_mutex::raw::NoopRawMutex,
+            HostLink<'_, '_>,
+            HOST_CONNECTIONS_MAX,
+        > = embassy_sync::channel::Channel::new();
+
+        #[cfg(feature = "ble_multi_connection")]
+        let connection_loop = {
+            let advertiser = async {
+                loop {
+                    // A parked link still occupies a controller slot, so stop
+                    // offering connections once every profile is spoken for.
+                    if live_hosts.get() >= HOST_CONNECTIONS_MAX {
+                        host_freed.wait().await;
+                        continue;
+                    }
+
+                    match select(
+                        advertise(product_name, &mut peripheral, server),
+                        profile_manager.update_profile(),
+                    )
+                    .await
+                    {
+                        Either::First(Ok(conn)) => {
+                            // Do NOT emit BleState::Connected here. gatt_events_task emits
+                            // Connected when it sees GattConnectionEvent::Encrypted.
+                            //
+                            // A reconnecting host identifies which profile it belongs to;
+                            // an unrecognised peer is a fresh pairing, which lands on
+                            // whichever profile is selected right now.
+                            let slot = profile_manager
+                                .profile_for_identity(&conn.raw().peer_identity())
+                                .unwrap_or_else(crate::state::current_profile);
+                            #[cfg(feature = "storage")]
+                            let bond_info = profile_manager.bond_info_for(slot);
+
+                            live_hosts.set(live_hosts.get() + 1);
+                            handoff
+                                .send(HostLink {
+                                    conn,
+                                    slot,
+                                    #[cfg(feature = "storage")]
+                                    bond_info,
+                                })
+                                .await;
+                        }
+                        Either::First(Err(BleHostError::BleHost(Error::Timeout))) => {
+                            warn!("Advertising timeout, sleep and wait for any key");
+                            set_ble_state(BleState::Inactive);
+
+                            request_sleep();
+
+                            let mut key_wake = crate::event::KeyboardEvent::subscriber();
+                            let mut pointing_wake = crate::event::PointingEvent::subscriber();
+                            let _ = select(key_wake.next_message_pure(), pointing_wake.next_message_pure()).await;
+
+                            report_activity();
+                        }
+                        Either::First(Err(e)) => {
+                            #[cfg(feature = "defmt")]
+                            let e = defmt::Debug2Format(&e);
+                            error!("Advertise error: {:?}", e);
+                            Timer::after_millis(200).await;
+                        }
+                        Either::Second(()) => {}
+                    };
+
+                    // Skip the Inactive transition if we never moved off Advertising
+                    if crate::state::current_ble_status().state != BleState::Advertising {
+                        set_ble_state(BleState::Inactive);
+                    }
+                }
+            };
+
+            let workers =
+                embassy_futures::join::join_array(core::array::from_fn::<_, HOST_CONNECTIONS_MAX, _>(|_| async {
+                    loop {
+                        let link = handoff.receive().await;
+                        run_ble_keyboard(
+                            server,
+                            &link.conn,
+                            stack,
+                            #[cfg(feature = "storage")]
+                            link.bond_info,
+                            config,
+                            #[cfg(feature = "host")]
+                            host_service,
+                            link.slot,
+                        )
+                        .await;
+                        live_hosts.set(live_hosts.get().saturating_sub(1));
+                        host_freed.signal(());
+                    }
+                }));
+
+            // Reports arrive on one queue but must reach exactly one link, so
+            // hand each to the profile that currently owns the output.
+            let report_dispatcher = async {
+                loop {
+                    let report = crate::channel::BLE_REPORT_CHANNEL.receive().await;
+                    let slot = crate::state::current_profile() as usize;
+                    if let Some(channel) = crate::channel::BLE_PROFILE_REPORT_CHANNELS.get(slot) {
+                        // The selected profile may have no live link; dropping
+                        // keeps a full queue from stalling every other profile.
+                        if channel.try_send(report).is_err() {
+                            debug!("No live link for profile {}, dropping report", slot);
+                        }
+                    }
+                }
+            };
+
+            embassy_futures::join::join3(advertiser, workers, report_dispatcher)
         };
 
         // This function is called only on split central, so use `split` feature here is safe.
@@ -674,6 +828,7 @@ async fn run_ble_keyboard<
     #[cfg(feature = "storage")] active_bond_info: Option<crate::ble::profile::ProfileInfo>,
     config: &BleBatteryConfig<'a>,
     #[cfg(feature = "host")] host_service: Option<&'r crate::host::HostService<'r>>,
+    #[cfg(feature = "ble_multi_connection")] profile_slot: u8,
 ) {
     let mut ble_hid_server = BleHidServer::new(server, conn);
     let mut ble_led_reader = BleLedReader;
@@ -712,8 +867,17 @@ async fn run_ble_keyboard<
     };
 
     let writer_task = async {
+        // With one link at a time every report on the shared queue belongs to it;
+        // with several, the dispatcher has already fanned reports out per profile.
+        #[cfg(feature = "ble_multi_connection")]
+        let reports = crate::channel::BLE_PROFILE_REPORT_CHANNELS
+            .get(profile_slot as usize)
+            .unwrap_or(&crate::channel::BLE_PROFILE_REPORT_CHANNELS[0]);
+        #[cfg(not(feature = "ble_multi_connection"))]
+        let reports = &BLE_REPORT_CHANNEL;
+
         loop {
-            let report = BLE_REPORT_CHANNEL.receive().await;
+            let report = reports.receive().await;
             if let Err(e) = ble_hid_server.write_report(&report).await {
                 error!("Failed to send report: {:?}", e);
             }
