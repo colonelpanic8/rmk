@@ -111,6 +111,13 @@ pub(crate) fn set_preferred_connection(t: ConnectionType) {
     update_status(|c| c.preferred = t);
 }
 
+pub(crate) async fn set_preferred(preferred: ConnectionType) {
+    set_preferred_connection(preferred);
+    info!("Switching preferred transport to: {:?}", preferred);
+    #[cfg(feature = "storage")]
+    crate::storage::store_unchecked(crate::storage::StorageItem::ConnectionType(preferred)).await;
+}
+
 /// Load the preferred connection type at startup.
 ///
 /// With the `storage` feature, reads the persisted `ConnectionType` from flash;
@@ -132,17 +139,11 @@ pub(crate) async fn load_preferred_connection() -> ConnectionType {
 
 #[cfg(all(feature = "_ble", not(feature = "_no_usb")))]
 pub(crate) async fn toggle_preferred() {
-    let mut new = ConnectionType::Usb;
-    update_status(|c| {
-        c.preferred = match c.preferred {
-            ConnectionType::Usb => ConnectionType::Ble,
-            ConnectionType::Ble => ConnectionType::Usb,
-        };
-        new = c.preferred;
+    let preferred = CONNECTION_STATUS.lock(|c| match c.get().preferred {
+        ConnectionType::Usb => ConnectionType::Ble,
+        ConnectionType::Ble => ConnectionType::Usb,
     });
-    info!("Switching preferred transport to: {:?}", new);
-    #[cfg(feature = "storage")]
-    crate::storage::store_unchecked(crate::storage::StorageItem::ConnectionType(new)).await;
+    set_preferred(preferred).await;
 }
 
 #[cfg(feature = "_ble")]
