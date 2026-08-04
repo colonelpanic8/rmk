@@ -15,7 +15,8 @@ keys = "A  MO(1)  No"
 [[keymap.layer]]
 keys = "B  _  No"
 
-# `GetMatrixState` and `ClearBleProfile` are gated unconditionally.
+# `GetMatrixState` is gated unconditionally. BLE slot management is deliberately
+# available to host tooling without completing the physical unlock challenge.
 [host]
 unlock_keys = [[0, 2]]
 
@@ -63,9 +64,9 @@ steps = [
 ]
 
 # Slot bounds come from `num_ble_profiles`; a slot past it is refused rather
-# than queued.
+# than queued. Slot management must work while the session is still locked.
 [[test]]
-name = "ble_profile_switch_checks_the_slot"
+name = "ble_profile_switch_is_ungated_and_checks_the_slot"
 features = ["_ble"]
 steps = [
   { rynk = { cmd = "SwitchBleProfile", payload = 0 } },
@@ -73,13 +74,9 @@ steps = [
 ]
 
 [[test]]
-name = "clearing_a_ble_profile_needs_an_unlock"
+name = "ble_profile_clear_is_ungated"
 features = ["_ble"]
 steps = [
-  { rynk = { cmd = "ClearBleProfile", payload = 0, error = "Locked" } },
-  { press = [0, 2] },
-  { rynk = { cmd = "UnlockPoll", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [[0, 2]] } } },
-  { release = [0, 2] },
   { rynk = { cmd = "ClearBleProfile", payload = 0 } },
 ]
 

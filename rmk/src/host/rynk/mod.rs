@@ -151,9 +151,10 @@ impl<'a> RynkService<'a> {
         match cmd {
             Cmd::BootloaderJump | Cmd::PeripheralBootloaderJump => self.lock_config.bootloader_requires_unlock,
             Cmd::StorageReset | Cmd::GetMatrixState => true,
-            // Deleting a bond opens a re-pair hijack window; BLE-only command.
+            // Deliberately allow host tooling to manage BLE slots while locked:
+            // the keyboard's own keys can switch slots, but cannot clear bonds.
             #[cfg(feature = "_ble")]
-            Cmd::ClearBleProfile => true,
+            Cmd::SwitchBleProfile | Cmd::ClearBleProfile => false,
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::SetSplitCentralLatency => self.lock_config.write_requires_unlock,
             Cmd::SetKeyAction
@@ -646,6 +647,11 @@ mod tests {
         assert!(!deployment_service.requires_unlock(Cmd::PeripheralBootloaderJump));
         assert!(deployment_service.requires_unlock(Cmd::StorageReset));
         assert!(deployment_service.requires_unlock(Cmd::GetMatrixState));
+        #[cfg(feature = "_ble")]
+        {
+            assert!(!deployment_service.requires_unlock(Cmd::SwitchBleProfile));
+            assert!(!deployment_service.requires_unlock(Cmd::ClearBleProfile));
+        }
 
         // Hold the challenge key throughout, so only the session boundary can
         // account for the second session being locked.
