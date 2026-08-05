@@ -386,6 +386,7 @@ where
         );
         Ok(PointingEvent {
             device_id: self.pointing_device_id,
+            buttons: 0,
             axes: [
                 AxisEvent {
                     typ: crate::event::AxisValType::Rel,

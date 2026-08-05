@@ -123,7 +123,11 @@ impl<'a, const PIN_NUM: usize, const EVENT_NUM: usize> NrfAdc<'a, PIN_NUM, EVENT
                     }
                     let device_id = self.event_device_ids[self.event_index as usize];
                     self.event_index += 1;
-                    return NrfAdcEvent::Pointing(PointingEvent { device_id, axes });
+                    return NrfAdcEvent::Pointing(PointingEvent {
+                        device_id,
+                        axes,
+                        buttons: 0,
+                    });
                 }
                 AnalogEventType::Battery => {
                     // Convert to millivolts using Embassy's default SAADC settings.
