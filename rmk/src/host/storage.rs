@@ -46,6 +46,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 (StorageKey::DefaultLayer, StorageValue::DefaultLayer(layer)) => behavior.default_layer = layer,
                 // Restore the VIA/Vial layout options selection
                 (StorageKey::LayoutOption, StorageValue::LayoutOption(option)) => data.layout_option = option,
+                (StorageKey::UnicodeMode, StorageValue::UnicodeMode(mode)) => behavior.unicode.mode = mode,
                 (StorageKey::MacroChunk(idx), StorageValue::MacroChunk(bytes)) => {
                     if let Some(chunk) = data.macros.as_chunks_mut::<MACRO_CHUNK_SIZE>().0.get_mut(idx as usize) {
                         *chunk = bytes;
