@@ -99,6 +99,7 @@ pub struct MorseProfile {
     pub hold_timeout_ms: Option<u64>,
     pub gap_timeout_ms: Option<u64>,
     pub quick_tap_timeout_ms: Option<u64>,
+    pub prior_idle_time_ms: Option<u64>,
 }
 
 pub struct MorseKey {
@@ -193,6 +194,7 @@ impl crate::KeyboardTomlConfig {
                 hold_timeout_ms: Some(m.hold_timeout.as_ref().map(|t| t.0).unwrap_or(250)),
                 gap_timeout_ms: Some(m.gap_timeout.as_ref().map(|t| t.0).unwrap_or(250)),
                 quick_tap_timeout_ms: m.quick_tap_timeout.as_ref().map(|t| t.0),
+                prior_idle_time_ms: None,
             };
 
             let morses = m
@@ -291,6 +293,7 @@ fn resolve_morse_profile(p: &crate::MorseProfile) -> MorseProfile {
         hold_timeout_ms: p.hold_timeout.as_ref().map(|t| t.0),
         gap_timeout_ms: p.gap_timeout.as_ref().map(|t| t.0),
         quick_tap_timeout_ms: p.quick_tap_timeout.as_ref().map(|t| t.0),
+        prior_idle_time_ms: p.prior_idle_time.as_ref().map(|t| t.0),
     }
 }
 
