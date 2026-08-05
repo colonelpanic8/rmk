@@ -1,3 +1,4 @@
+use embassy_futures::yield_now;
 use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::constants::MACRO_CHUNK_SIZE;
@@ -20,7 +21,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             .await
             .map_err(|e| print_storage_error::<F>(e))?;
 
-        // Read all keymap keys and encoder configs
+        let mut records_read = 0u32;
         while let Some((key, value)) = key_iterator
             .next::<StorageValue>(&mut self.buffer)
             .await
@@ -75,7 +76,13 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         *slot = morse;
                     }
                 }
-                _ => continue,
+                _ => {}
+            }
+
+            records_read += 1;
+            if records_read.is_multiple_of(32) {
+                // Memory-mapped flash can keep every read ready, so let other tasks run.
+                yield_now().await;
             }
         }
 
