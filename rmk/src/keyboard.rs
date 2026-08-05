@@ -679,7 +679,7 @@ impl<'a> Keyboard<'a> {
         if event.pressed
             && key_action.is_morse()
             && Self::is_flow_tap_enabled(self.keymap, key_action)
-            && self.last_press_time.elapsed() < self.keymap.morse_prior_idle_time()
+            && self.last_press_time.elapsed() < Self::prior_idle_time(self.keymap, key_action)
         {
             // It's in key streak, trigger the first tap action
             debug!("Flow tap detected, trigger tap action for current morse key");

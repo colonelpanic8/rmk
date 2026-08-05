@@ -117,11 +117,13 @@ pub(crate) fn expand_profile(profile: &MorseProfile) -> proc_macro2::TokenStream
     let gap_timeout_ms = expand_timeout("gap_timeout", &profile.gap_timeout_ms, 13);
     let quick_tap_timeout_ms =
         expand_timeout("quick_tap_timeout", &profile.quick_tap_timeout_ms, 13);
+    let prior_idle_time_ms = expand_timeout("prior_idle_time", &profile.prior_idle_time_ms, 13);
 
     quote! {
         rmk::types::morse::MorseProfile::new(#unilateral_tap, #mode, #hold_timeout_ms, #gap_timeout_ms)
             .with_enable_flow_tap(#enable_flow_tap)
             .with_quick_tap_timeout_ms(#quick_tap_timeout_ms)
+            .with_prior_idle_time_ms(#prior_idle_time_ms)
     }
 }
 
@@ -538,6 +540,7 @@ mod tests {
             hold_timeout_ms: Some(250),
             gap_timeout_ms: Some(250),
             quick_tap_timeout_ms: None,
+            prior_idle_time_ms: None,
         }
     }
 
