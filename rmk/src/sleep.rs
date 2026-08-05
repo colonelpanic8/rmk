@@ -215,6 +215,7 @@ mod tests {
 
         let roll = || PointingEvent {
             device_id: 0,
+            buttons: 0,
             axes: [
                 AxisEvent {
                     typ: AxisValType::Rel,
@@ -276,6 +277,7 @@ mod tests {
             let mut processor = JoystickProcessor::new(7, [[1, 0], [0, 1]], [-100, 0], 10, &keymap);
             let sample = |device_id, x| PointingEvent {
                 device_id,
+                buttons: 0,
                 axes: [Axis::X, Axis::Y, Axis::Z].map(|axis| AxisEvent {
                     typ: AxisValType::Abs,
                     axis,
