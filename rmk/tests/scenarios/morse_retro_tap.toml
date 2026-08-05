@@ -1,0 +1,56 @@
+# Retro tap: a hold resolved by timeout alone falls back to the tap action when the key is
+# released without anything else having been pressed.
+#
+# The fixture sits on the shared split board's home row: A@(1,0), MT(B, LShift)@(1,1),
+# LT(1, D)@(1,8), plus the profile-carrying keys MT(B, LShift, p0)@(3,6) and
+# MT(B, LShift, p1)@(3,7). Defaults otherwise apply: Normal mode, 250 ms hold/gap timeouts.
+
+keyboard = "boards/split.toml"
+
+[behavior.morse]
+retro_tap = true
+
+# The hold is reported when the timeout lands and retracted on release, so the host sees
+# the modifier before the tap that replaces it.
+[[test]]
+name = "retro_tap_after_lone_hold"
+steps = [
+  { tap = { pos = [1, 1], duration = 300 } },
+]
+expect = [["LShift"], [], ["B"], []]
+
+[[test]]
+name = "retro_tap_suppressed_by_other_key"
+steps = [
+  { press = [1, 1] },  # Press MT(B, LShift)
+  { delay = 260 },
+  { tap = { pos = [1, 0], duration = 10 } },
+  { release = [1, 1] },
+]
+expect = [["LShift"], ["LShift", "A"], ["LShift"], []]
+
+# A layer hold reports nothing, so the tap on release is the only thing the host sees.
+[[test]]
+name = "retro_tap_on_layer_tap"
+steps = [
+  { tap = { pos = [1, 8], duration = 300 } },
+]
+expect = [["D"], []]
+
+[[test]]
+name = "retro_tap_off_keeps_hold"
+behavior.morse = { retro_tap = false }
+steps = [
+  { tap = { pos = [1, 1], duration = 300 } },
+]
+expect = [["LShift"], []]
+
+[[test]]
+name = "retro_tap_per_profile"
+behavior.morse = { retro_tap = false, profiles = { p1 = { retro_tap = true } } }
+steps = [
+  { tap = { pos = [3, 6], duration = 300 } },  # MT(B, LShift, p0) -- inherits retro_tap = false
+  { delay = 300 },
+  { tap = { pos = [3, 7], duration = 300 } },  # MT(B, LShift, p1) -- retro_tap = true
+]
+expect = [["LShift"], [], ["LShift"], [], ["B"], []]
