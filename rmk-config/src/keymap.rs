@@ -629,6 +629,21 @@ mod tests {
     }
 
     #[test]
+    fn test_unicode_grammar() {
+        let aliases = HashMap::new();
+        let layer_names = HashMap::new();
+
+        // `UNICODE(n)` is a single-action form, so it also fits the tap/hold
+        // slots and is forwarded verbatim for the proc-macro to expand.
+        let keymap = "UNICODE(0) unicode(1023) TH(UNICODE(2), MO(1))";
+        let result = KeyboardTomlConfig::keymap_parser(keymap, &aliases, &layer_names, 8);
+        assert_eq!(
+            result.unwrap(),
+            vec!["UNICODE(0)", "unicode(1023)", "TH(UNICODE(2), MO(1))"]
+        );
+    }
+
+    #[test]
     fn test_nested_actions_in_tap_hold_slots() {
         let aliases = HashMap::new();
         let layer_names = HashMap::new();

@@ -8,6 +8,7 @@ use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
+use rmk_types::unicode::UnicodeMode;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
@@ -156,6 +157,8 @@ pub(crate) enum FlashOperationMessage {
     // The whole behavior config in one message (Rynk's SetBehaviorConfig carries
     // every field, so one store beats six read-modify-write cycles)
     BehaviorConfig(BehaviorConfig),
+    // Input method `Action::Unicode` types codepoints through
+    UnicodeMode(UnicodeMode),
     #[cfg(feature = "_ble")]
     // Read bond info for the given slot; storage task replies via `BOND_INFO_RESPONSE`.
     ReadBleBondInfo(u8),
@@ -202,6 +205,7 @@ pub(crate) enum StorageKey {
     ActiveBleProfile,
     #[cfg(feature = "_ble")]
     BondInfo(u8),
+    UnicodeMode,
 }
 
 impl StorageKey {
@@ -283,6 +287,7 @@ pub(crate) enum StorageData {
     BondInfo(ProfileInfo),
     #[cfg(feature = "_ble")]
     ActiveBleProfile(u8),
+    UnicodeMode(UnicodeMode),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -526,6 +531,12 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             behavior_config.one_shot.timeout = Duration::from_millis(c.one_shot_timeout as u64);
             behavior_config.tap.tap_interval = c.tap_interval;
             behavior_config.tap.tap_capslock_interval = c.tap_capslock_interval;
+        }
+
+        // Stored under its own key rather than in `BehaviorConfig`, so a build
+        // that predates the mode keeps the one `keyboard.toml` configured.
+        if let Some(StorageData::UnicodeMode(mode)) = self.fetch_data(StorageKey::UnicodeMode).await {
+            behavior_config.unicode.mode = mode;
         }
 
         Ok(())
@@ -819,6 +830,10 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     )
                     .await
                 }
+                FlashOperationMessage::UnicodeMode(mode) => {
+                    self.store_data(StorageKey::UnicodeMode, &StorageData::UnicodeMode(mode))
+                        .await
+                }
             };
 
             match write_result {
@@ -998,6 +1013,7 @@ mod tests {
             StorageKey::ActiveBleProfile,
             #[cfg(feature = "_ble")]
             StorageKey::BondInfo(0),
+            StorageKey::UnicodeMode,
         ];
 
         let mut buffer = [0u8; 64];

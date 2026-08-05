@@ -787,6 +787,17 @@ pub(crate) struct BehaviorConfig {
     pub fork: Option<ForksConfig>,
     pub morse: Option<MorsesConfig>,
     pub auto_mouse_layer: Option<Vec<AutoMouseLayerConfig>>,
+    pub unicode: Option<UnicodeConfig>,
+}
+
+/// Configurations for unicode codepoint input
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UnicodeConfig {
+    /// Input method used until a `UnicodeModeCycle` key changes it.
+    pub default_mode: Option<crate::resolved::behavior::UnicodeMode>,
+    /// Codepoints addressed by `UNICODE(n)`, as hex without a `U+` prefix.
+    pub codepoints: Vec<String>,
 }
 
 /// Configurations for auto mouse layer

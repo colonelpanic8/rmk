@@ -3,6 +3,7 @@ use heapless::Vec;
 use rmk_types::fork::Fork;
 use rmk_types::keycode::KeyCode;
 use rmk_types::morse::{Morse, MorseMode, MorseProfile};
+use rmk_types::unicode::UnicodeMode;
 
 use crate::keyboard::combo::Combo;
 use crate::{
@@ -25,6 +26,18 @@ pub struct BehaviorConfig {
     pub keyboard_macros: KeyboardMacrosConfig,
     pub mouse_key: MouseKeyConfig,
     pub auto_mouse_layer: Vec<AutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>,
+    pub unicode: UnicodeConfig,
+}
+
+/// Config for unicode codepoint input
+#[derive(Debug, Default)]
+pub struct UnicodeConfig {
+    /// Codepoints addressed by `Action::Unicode(n)`. A `&'static` slice, so the
+    /// table lives in flash at 4 bytes per codepoint.
+    pub codepoints: &'static [u32],
+    /// Input method the codepoints are typed through; restored from flash on
+    /// boot, changed at runtime by `KeyboardAction::UnicodeModeCycle`.
+    pub mode: UnicodeMode,
 }
 
 /// Config for auto mouse layer behavior

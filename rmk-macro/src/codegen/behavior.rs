@@ -6,7 +6,7 @@ use quote::{format_ident, quote};
 use rmk_config::resolved::Behavior;
 use rmk_config::resolved::behavior::{
     AutoMouseLayer, Combos, Forks, MacroOperation, Macros, Morse, MorseActionPair, MorseKey,
-    MorseProfile, OneShot,
+    MorseProfile, OneShot, Unicode, UnicodeMode,
 };
 
 use super::action_parser::{
@@ -572,6 +572,26 @@ fn expand_auto_mouse_layer(auto_mouse_layer: &[AutoMouseLayer]) -> proc_macro2::
     }
 }
 
+/// The codepoint table is a `&'static [u32]`, so it lands in flash rather than
+/// taking 4 bytes of RAM per entry the way a macro sequence would.
+fn expand_unicode(unicode: &Option<Unicode>) -> proc_macro2::TokenStream {
+    let Some(unicode) = unicode else {
+        return quote! { ::rmk::config::UnicodeConfig::default() };
+    };
+    let codepoints = unicode.codepoints.iter();
+    let mode = match unicode.default_mode {
+        UnicodeMode::Linux => quote! { Linux },
+        UnicodeMode::Macos => quote! { MacOs },
+        UnicodeMode::Windows => quote! { Windows },
+    };
+    quote! {
+        ::rmk::config::UnicodeConfig {
+            codepoints: &[#(#codepoints),*],
+            mode: ::rmk::types::unicode::UnicodeMode::#mode,
+        }
+    }
+}
+
 pub(crate) fn expand_behavior_config(behavior: &Behavior) -> proc_macro2::TokenStream {
     let profiles = behavior
         .morse
@@ -587,6 +607,7 @@ pub(crate) fn expand_behavior_config(behavior: &Behavior) -> proc_macro2::TokenS
     let forks = expand_forks(&behavior.forks, &profiles);
     let morse = expand_morse(&behavior.morse);
     let auto_mouse_layer = expand_auto_mouse_layer(&behavior.auto_mouse_layer);
+    let unicode = expand_unicode(&behavior.unicode);
 
     quote! {
         #[allow(clippy::needless_update)]
@@ -601,6 +622,7 @@ pub(crate) fn expand_behavior_config(behavior: &Behavior) -> proc_macro2::TokenS
             mouse_key: ::rmk::config::MouseKeyConfig::default(),
             tap: ::rmk::config::TapConfig::default(),
             auto_mouse_layer: #auto_mouse_layer,
+            unicode: #unicode,
             ..Default::default()
         };
     }
