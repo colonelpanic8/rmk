@@ -107,7 +107,8 @@ pub(crate) enum SplitMessage {
     #[cfg(feature = "dfu_split")]
     SystemReset,
 
-    /// Opaque application payload, appended after upstream messages.
+    /// Opaque application payload, either direction (see `crate::split_app`).
+    /// Appended after upstream messages to preserve their discriminants.
     Application(crate::split_app::SplitAppData),
 }
 
