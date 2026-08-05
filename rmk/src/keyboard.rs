@@ -849,6 +849,20 @@ impl<'a> Keyboard<'a> {
                     self.process_key_action_normal(action, event).await;
                 }
                 KeyAction::Tap(action) => self.process_key_action_tap(action, event).await,
+                KeyAction::LayerModTap(layer, modifier, tap) => {
+                    let modifiers = ModifierCombination::from_bits(1 << modifier as u8);
+                    self.process_key_action_normal(Action::LayerOnWithModifier(layer, modifiers), event)
+                        .await;
+                    if event.pressed {
+                        // Under the macro identity, so the tap doesn't replace the held modifier.
+                        let tap_event = KeyboardEvent {
+                            pos: KeyboardEventPos::Macro,
+                            pressed: true,
+                        };
+                        self.process_key_action_tap(Action::Key(KeyCode::Hid(tap)), tap_event)
+                            .await;
+                    }
+                }
                 _ => unreachable!(),
             }
         } else {
