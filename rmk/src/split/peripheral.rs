@@ -294,7 +294,8 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                                 crate::boot::reboot_keyboard();
                             }
                             SplitMessage::Application(data) => {
-                                if crate::split_app::SPLIT_APP_RX.try_send(data).is_err() {
+                                let queued = crate::split_app::SPLIT_APP_RX.try_send(data);
+                                if queued.is_err() {
                                     warn!("split app message dropped (inbox full)");
                                 }
                             }
