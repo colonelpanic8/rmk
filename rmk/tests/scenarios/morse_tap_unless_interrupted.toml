@@ -1,0 +1,40 @@
+# The `tap_unless_interrupted` mode, ZMK's `tap-unless-interrupted` flavor. It is the mirror
+# of `hold_on_other_press`: any other key pressed while the decision is pending settles the
+# morse key as a tap, so the hold is reachable only by holding to the timeout alone.
+#
+# The fixture sits on the shared split board's home row: A@(1,0) and MT(B, LShift)@(1,1),
+# with the default 250 ms hold timeout.
+
+keyboard = "boards/split.toml"
+
+[behavior.morse]
+tap_unless_interrupted = true
+
+[[test]]
+name = "hold_alone_reaches_the_hold"
+steps = [
+  { tap = { pos = [1, 1], duration = 300 } },
+]
+expect = [["LShift"], []]
+
+[[test]]
+name = "other_key_press_settles_as_tap"
+steps = [
+  { press = [1, 1] },  # Press MT(B, LShift)
+  { tap = { pos = [1, 0], duration = 10 } },
+  { release = [1, 1] },
+]
+expect = [["B"], ["B", "A"], ["B"], []]
+
+# Holding past the timeout does not rescue the hold once another key has interrupted it.
+[[test]]
+name = "interrupted_hold_stays_a_tap_past_the_timeout"
+steps = [
+  { press = [1, 1] },  # Press MT(B, LShift)
+  { delay = 100 },
+  { press = [1, 0] },  # Press A -> settles MT as a tap
+  { delay = 300 },
+  { release = [1, 1] },
+  { release = [1, 0] },
+]
+expect = [["B"], ["B", "A"], ["A"], []]
