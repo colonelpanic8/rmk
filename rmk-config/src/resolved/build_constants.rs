@@ -49,6 +49,7 @@ pub struct BuildConstants {
     pub split_central_sleep_timeout_seconds: u32,
     pub protocol_macro_chunk_size: usize,
     pub auto_mouse_layer_max_num: usize,
+    pub mouse_layer_scale_max_num: usize,
     /// Rynk RX/TX buffer size (bytes).
     pub rynk_buffer_size: usize,
     pub events: Vec<EventChannel>,
@@ -171,6 +172,18 @@ impl crate::KeyboardTomlConfig {
                 );
             }
         }
+        let mouse_layer_scale_max_num = rmk
+            .mouse_layer_scale_max_num
+            .unwrap_or(crate::resolved::behavior::DEFAULT_MOUSE_LAYER_SCALE_MAX_NUM);
+        if let Some(entries) = self.behavior.as_ref().and_then(|b| b.mouse_layer_scale.as_ref())
+            && entries.len() > mouse_layer_scale_max_num
+        {
+            return Err(format!(
+                "number of [[behavior.mouse_layer_scale]] entries ({}) exceeds mouse_layer_scale_max_num ({})",
+                entries.len(),
+                mouse_layer_scale_max_num
+            ));
+        }
 
         // Host capability fields are u8/u16 on the wire; check the values no deserializer bound
         // covers (morse_max_num and split_peripherals_num can also be auto-raised past 255).
@@ -198,6 +211,7 @@ impl crate::KeyboardTomlConfig {
             split_central_sleep_timeout_seconds: rmk.split_central_sleep_timeout_seconds,
             protocol_macro_chunk_size: rmk.protocol_macro_chunk_size,
             auto_mouse_layer_max_num,
+            mouse_layer_scale_max_num,
             rynk_buffer_size: rmk.rynk_buffer_size,
             events,
             passkey,
