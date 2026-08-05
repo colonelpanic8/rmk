@@ -231,7 +231,7 @@ The `profile` of a morse key contains all tunable configurations of this morse k
 ::: tip
 
 - `enable_flow_tap`: Enables HRM (Home Row Mod) mode. When enabled, the global `prior_idle_time` setting becomes functional. Defaults to `false`. Profiles may set this to override the global `[behavior.morse]` value; omitting it inherits the global value.
-- `prior_idle_time`: _(global only)_ If the previous non-modifier key was pressed within this period before pressing the current tap-hold key, the tap action for the tap-hold behavior will be triggered. This parameter lives in `[behavior.morse]` (not in a per-key profile) and is effective only when `enable_flow_tap` is enabled for the key. Defaults to 120ms.
+- `prior_idle_time`: If the previous non-modifier key was pressed within this period before pressing the current tap-hold key, the tap action for the tap-hold behavior will be triggered. Effective only when `enable_flow_tap` is enabled for the key. Defaults to 120ms. Profiles may set this to override the global `[behavior.morse]` value; omitting it inherits the global value.
   :::
 
 A profile contains the following fields:
@@ -248,6 +248,7 @@ A profile contains the following fields:
 - `quick_tap_timeout`: If the same morse/tap-hold key is pressed again within this window after its last release, the tap action fires immediately on press and stays held while the key is held. This lets the OS auto-repeat the tap action instead of triggering the hold action. Disabled by default. Maximum 8191ms (13-bit field).
   - Setting `quick_tap_timeout = "0ms"` explicitly disables quick-tap for that profile, even if a non-zero global default is configured. This lets you opt out on a per-profile basis. Omitting the field entirely causes the profile to inherit the global default.
   - A re-press within the window resolves as a tap even if a `double_tap` action is configured, so double-tapping faster than `quick_tap_timeout` produces two taps instead of the `double_tap` action.
+- `prior_idle_time`: Overrides the global flow-tap idle window for keys using this profile, so home row mods and thumb keys can run different windows. Omitting it inherits the global value. Maximum 8191ms (13-bit field).
 
 #### Default profile for Morse/TapDance/TapHold
 

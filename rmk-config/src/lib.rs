@@ -842,6 +842,9 @@ pub(crate) struct MorseProfile {
     pub gap_timeout: Option<DurationMillis>,
 
     pub quick_tap_timeout: Option<DurationMillis>,
+
+    /// overrides the global `[behavior.morse] prior_idle_time` for keys using this profile
+    pub prior_idle_time: Option<DurationMillis>,
 }
 
 /// Configurations for tri layer
