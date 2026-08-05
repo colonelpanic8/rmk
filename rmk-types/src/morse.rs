@@ -31,6 +31,12 @@ pub enum MorseMode {
     HoldOnOtherPress,
     /// Normal mode, the decision is made when timeout
     Normal,
+    /// Same as ZMK's `tap-unless-interrupted` flavor: pressing any other key while the
+    /// decision is pending resolves this key as a tap immediately. The hold is reachable
+    /// only by holding to the timeout with nothing else pressed.
+    ///
+    /// Declared last so the postcard discriminants of the existing variants do not shift.
+    TapUnlessInterrupted,
 }
 
 /// Configuration for morse, tap dance and tap-hold.
@@ -38,16 +44,19 @@ pub enum MorseMode {
 ///
 /// Bit layout of the inner `u64`:
 /// ```text
-/// 63        46 | 45      | 44           32 | 31  30 | 29       17 | 16  15 | 14  13   | 12       0
-/// reserved     | qt_set  | quick_tap_tm    | mode   | gap_timeout | uni_tap| flow_tap | hold_timeout
-///   (18b)      |  (1b)   |   (13b ms)      |  (2b)  |   (13b ms)  |  (2b)  |   (2b)   |  (13b ms)
+/// 63    62 | 61      | 60     46 | 45      | 44           32 | 31  30  | 29       17 | 16  15 | 14  13   | 12       0
+/// reserved | mode_hi | reserved  | qt_set  | quick_tap_tm    | mode_lo | gap_timeout | uni_tap| flow_tap | hold_timeout
+///   (2b)   |  (1b)   |   (15b)   |  (1b)   |   (13b ms)      |   (2b)  |   (13b ms)  |  (2b)  |   (2b)   |  (13b ms)
 /// ```
 ///
 /// - `qt_set` (bit 45): when set, `quick_tap_timeout` is explicitly configured
 ///   (even if 0, which means "disabled"). When clear, the field is unset and
 ///   callers should fall back to the global default.
 /// - `quick_tap_timeout` (bits 44-32): quick-tap timeout in ms (max 8191).
-/// - `mode` (bits 31-30): `00` = None, `01` = PermissiveHold, `10` = HoldOnOtherPress, `11` = Normal
+/// - `mode` (bit 61 as the high bit, bits 31-30 as the low bits): `000` = None,
+///   `001` = PermissiveHold, `010` = HoldOnOtherPress, `011` = Normal,
+///   `100` = TapUnlessInterrupted. The high bit sits apart from the low bits because the
+///   two low bits were already full when the fourth mode was added.
 /// - `flow_tap` (bits 14, 13): `00`/`01` = None, `10` = Some(false), `11` = Some(true)
 /// - `gap_timeout` (bits 29-17): gap timeout in ms (0 = None, max 8191)
 /// - `uni_tap` (bits 16-15): `00`/`01` = None, `10` = Some(false), `11` = Some(true)
@@ -67,7 +76,10 @@ const UNI_TAP_MASK: u64 = UNI_TAP_LOW_BIT | UNI_TAP_HIGH_BIT;
 const FLOW_TAP_LOW_BIT: u64 = 0x0000_2000;
 const FLOW_TAP_HIGH_BIT: u64 = 0x0000_4000;
 const FLOW_TAP_MASK: u64 = FLOW_TAP_LOW_BIT | FLOW_TAP_HIGH_BIT;
-const MODE_MASK: u64 = 0xC000_0000;
+const MODE_LOW_MASK: u64 = 0xC000_0000;
+const MODE_LOW_SHIFT: u32 = 30;
+const MODE_HIGH_BIT: u64 = 1 << 61;
+const MODE_MASK: u64 = MODE_LOW_MASK | MODE_HIGH_BIT;
 const QT_VALUE_MASK: u64 = TIMEOUT_MASK << 32;
 const QT_SET_BIT: u64 = 1 << 45;
 
@@ -127,24 +139,25 @@ impl MorseProfile {
 
     /// The decision mode of the morse/tap-hold key
     pub fn mode(self) -> Option<MorseMode> {
-        match self.0 & MODE_MASK {
-            MODE_MASK => Some(MorseMode::Normal),
-            0x8000_0000 => Some(MorseMode::HoldOnOtherPress),
-            0x4000_0000 => Some(MorseMode::PermissiveHold),
+        let high = ((self.0 & MODE_HIGH_BIT) != 0) as u64;
+        match (high << 2) | ((self.0 & MODE_LOW_MASK) >> MODE_LOW_SHIFT) {
+            0b001 => Some(MorseMode::PermissiveHold),
+            0b010 => Some(MorseMode::HoldOnOtherPress),
+            0b011 => Some(MorseMode::Normal),
+            0b100 => Some(MorseMode::TapUnlessInterrupted),
             _ => None,
         }
     }
 
     pub const fn with_mode(self, m: Option<MorseMode>) -> Self {
-        Self(
-            (self.0 & !MODE_MASK)
-                | match m {
-                    Some(MorseMode::Normal) => MODE_MASK,
-                    Some(MorseMode::HoldOnOtherPress) => 0x8000_0000,
-                    Some(MorseMode::PermissiveHold) => 0x4000_0000,
-                    None => 0,
-                },
-        )
+        let bits: u64 = match m {
+            Some(MorseMode::PermissiveHold) => 0b001,
+            Some(MorseMode::HoldOnOtherPress) => 0b010,
+            Some(MorseMode::Normal) => 0b011,
+            Some(MorseMode::TapUnlessInterrupted) => 0b100,
+            None => 0,
+        };
+        Self((self.0 & !MODE_MASK) | ((bits & 0b11) << MODE_LOW_SHIFT) | (((bits >> 2) & 1) * MODE_HIGH_BIT))
     }
 
     /// If the key is pressed longer than this, it is accepted as `hold` (in milliseconds)
@@ -219,14 +232,7 @@ impl MorseProfile {
         if let Some(b) = unilateral_tap {
             v |= if b { UNI_TAP_MASK } else { UNI_TAP_HIGH_BIT };
         }
-        if let Some(m) = mode {
-            v |= match m {
-                MorseMode::Normal => MODE_MASK,
-                MorseMode::HoldOnOtherPress => 0x8000_0000,
-                MorseMode::PermissiveHold => 0x4000_0000,
-            };
-        }
-        MorseProfile(v)
+        MorseProfile(v).with_mode(mode)
     }
 }
 
@@ -849,6 +855,40 @@ mod tests {
         assert_eq!(profile.mode(), Some(MorseMode::PermissiveHold));
     }
 
+    #[test]
+    fn mode_round_trips_across_the_split_bit_field() {
+        // The mode's high bit lives apart from its low bits, so every mode has to survive a
+        // round trip without disturbing the fields packed between them.
+        let base = MorseProfile::new(Some(true), None, Some(1000), Some(2000))
+            .with_enable_flow_tap(Some(true))
+            .with_quick_tap_timeout_ms(Some(150));
+
+        for mode in [
+            Some(MorseMode::PermissiveHold),
+            Some(MorseMode::HoldOnOtherPress),
+            Some(MorseMode::Normal),
+            Some(MorseMode::TapUnlessInterrupted),
+            None,
+        ] {
+            let p = base.with_mode(mode);
+            assert_eq!(p.mode(), mode);
+            assert_eq!(p.hold_timeout_ms(), Some(1000));
+            assert_eq!(p.gap_timeout_ms(), Some(2000));
+            assert_eq!(p.unilateral_tap(), Some(true));
+            assert_eq!(p.enable_flow_tap(), Some(true));
+            assert_eq!(p.quick_tap_timeout_ms(), Some(150));
+
+            // `new()` and `with_mode()` have to agree on the encoding.
+            assert_eq!(MorseProfile::new(None, mode, None, None).mode(), mode);
+        }
+
+        assert_eq!(
+            u64::from(base.with_mode(Some(MorseMode::TapUnlessInterrupted))) >> 61 & 1,
+            1
+        );
+        assert_eq!(core::mem::size_of::<MorseProfile>(), 8);
+    }
+
     /// The human-readable serde goes `MorseProfile` -> decoded parts -> `new()`.
     /// All 32 bits are covered by the five fields, so that path must be lossless.
     #[test]
@@ -861,7 +901,7 @@ mod tests {
                 Some(1),
             )
             .with_enable_flow_tap(Some(false)),
-            MorseProfile::new(Some(true), Some(MorseMode::Normal), Some(200), Some(150))
+            MorseProfile::new(Some(true), Some(MorseMode::TapUnlessInterrupted), Some(200), Some(150))
                 .with_enable_flow_tap(Some(true)),
             MorseProfile::const_default(),
         ] {
