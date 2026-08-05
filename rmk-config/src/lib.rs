@@ -275,8 +275,12 @@ impl KeyboardTomlConfig {
 
             let auto_mouse_layers = behavior.auto_mouse_layer.as_deref().unwrap_or_default();
             self.rmk.max_auto_mouse_layers.get_or_insert(auto_mouse_layers.len());
+
+            let mouse_layer_scales = behavior.mouse_layer_scale.as_deref().unwrap_or_default();
+            self.rmk.max_mouse_layer_scales.get_or_insert(mouse_layer_scales.len());
         } else {
             self.rmk.max_auto_mouse_layers.get_or_insert(0);
+            self.rmk.max_mouse_layer_scales.get_or_insert(0);
         }
     }
 }
@@ -350,6 +354,9 @@ pub(crate) struct RmkConstantsConfig {
     /// Maximum number of auto mouse layer entries; auto-derived from `[[behavior.auto_mouse_layer]]` if unset.
     #[serde(default)]
     pub max_auto_mouse_layers: Option<usize>,
+    /// Maximum number of per-layer mouse scaling entries; auto-derived from `[[behavior.mouse_layer_scale]]` if unset.
+    #[serde(default)]
+    pub max_mouse_layer_scales: Option<usize>,
     /// Exact RAM of each Rynk RX/TX frame buffer (bytes), payload capacity and bulk counts derive from it.
     /// Default 488 fills exactly two BLE notifications.
     #[serde_inline_default(488)]
@@ -476,6 +483,7 @@ impl Default for RmkConstantsConfig {
             num_ble_profiles: 3,
             split_central_sleep_timeout_seconds: 0,
             max_auto_mouse_layers: None,
+            max_mouse_layer_scales: None,
             rynk_buffer_size: 488,
             dongle_pairing_window_secs: 30,
         }
@@ -867,6 +875,16 @@ pub(crate) struct BehaviorConfig {
     pub fork: Option<ForksConfig>,
     pub morse: Option<MorsesConfig>,
     pub auto_mouse_layer: Option<Vec<AutoMouseLayerConfig>>,
+    pub mouse_layer_scale: Option<Vec<MouseLayerScaleConfig>>,
+}
+
+/// Per-layer mouse movement and scroll scaling.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MouseLayerScaleConfig {
+    pub layer: u8,
+    pub r#move: Option<[u16; 2]>,
+    pub scroll: Option<[u16; 2]>,
 }
 
 /// Configurations for auto mouse layer

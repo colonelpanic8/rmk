@@ -1,0 +1,71 @@
+# MO(1)@(0,0), MO(2)@(0,1), and MO(3)@(0,2) select slow, fast,
+# and unconfigured layers. MouseRight@(0,3) and MouseWheelDown@(0,4) stay
+# transparent on those layers.
+
+[layout]
+rows = 1
+cols = 5
+map = "(0,0)  (0,1)  (0,2)  (0,3)  (0,4)"
+
+[[keymap.layer]]
+keys = "MO(1)  MO(2)  MO(3)  MouseRight  MouseWheelDown"
+
+[[keymap.layer]]
+keys = "_  _  _  _  _"
+
+[[keymap.layer]]
+keys = "_  _  _  _  _"
+
+[[keymap.layer]]
+keys = "_  _  _  _  _"
+
+[[behavior.mouse_layer_scale]]
+layer = 1
+move = [1, 9]
+scroll = [1, 9]
+
+[[behavior.mouse_layer_scale]]
+layer = 2
+move = [3, 1]
+scroll = [3, 1]
+
+[[test]]
+name = "one_ninth_mouse_movement_accumulates_fractional_steps"
+steps = [
+  { press = [0, 0] },
+  { press = [0, 3] },
+  { delay = 110 },
+  { release = [0, 3] },
+  { release = [0, 0] },
+]
+expect = [{ mouse = {} }, { mouse = { x = 1 } }, { mouse = {} }]
+
+[[test]]
+name = "triple_mouse_movement_is_faster"
+steps = [
+  { press = [0, 1] },
+  { press = [0, 3] },
+  { release = [0, 3] },
+  { release = [0, 1] },
+]
+expect = [{ mouse = { x = 15 } }, { mouse = {} }]
+
+[[test]]
+name = "unconfigured_layer_keeps_mouse_movement_unscaled"
+steps = [
+  { press = [0, 2] },
+  { press = [0, 3] },
+  { release = [0, 3] },
+  { release = [0, 2] },
+]
+expect = [{ mouse = { x = 5 } }, { mouse = {} }]
+
+[[test]]
+name = "triple_scroll_is_faster"
+steps = [
+  { press = [0, 1] },
+  { press = [0, 4] },
+  { release = [0, 4] },
+  { release = [0, 1] },
+]
+expect = [{ mouse = { wheel = 3 } }, { mouse = {} }]
