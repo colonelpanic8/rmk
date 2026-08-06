@@ -23,9 +23,9 @@ use rmk_types::morse::Morse;
 use rmk_types::protocol::rynk::{
     BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
-    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
+    KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, PointingConfig, ProtocolVersion,
+    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
+    SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -315,6 +315,19 @@ impl Client {
     /// Write the global behavior config.
     pub async fn set_behavior(&self, config: BehaviorConfig) -> Result<(), RynkHostError> {
         self.request::<command::SetBehaviorConfig>(&config).await
+    }
+
+    /// Read every pointing device's configuration, layer overrides included.
+    pub async fn get_pointing_config(&self) -> Result<PointingConfig, RynkHostError> {
+        self.request::<command::GetPointingConfig>(&()).await
+    }
+
+    /// Replace the pointing configuration and return what the device now
+    /// holds. The write is rejected unless `config.revision` still matches
+    /// the device's, so read before writing and retry on rejection.
+    pub async fn set_pointing_config(&self, config: PointingConfig) -> Result<PointingConfig, RynkHostError> {
+        self.request::<command::SetPointingConfig>(&SetPointingConfigRequest { config })
+            .await
     }
 
     /// Read the currently active layer.
