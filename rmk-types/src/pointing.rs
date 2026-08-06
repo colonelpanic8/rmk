@@ -12,6 +12,8 @@ use crate::keycode::HidKeyCode;
 /// Pointing mode determines how raw XY motion is interpreted
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub enum PointingMode {
     /// Default cursor mode - XY maps to mouse XY movement
     Cursor(CursorConfig),
@@ -35,6 +37,8 @@ impl Default for PointingMode {
 /// Configuration for cursor mode
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct CursorConfig {
     /// Multiplier for X axis. Higher = more output per unit of motion. 0 disables X.
     pub multiplier_x: u8,
@@ -60,6 +64,8 @@ impl Default for CursorConfig {
 /// Configuration for caret mode
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct CaretConfig {
     /// Disable X axis in caret mode.
     pub disable_x: bool,
@@ -100,6 +106,8 @@ impl Default for CaretConfig {
 /// Configuration for scroll mode
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct ScrollConfig {
     /// Multiplier for X axis (→ pan). Higher = more output per unit of motion. 0 disables horizontal pan.
     pub multiplier_x: u8,
@@ -130,6 +138,8 @@ impl Default for ScrollConfig {
 /// Configuration for sniper (precision) mode
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct SniperConfig {
     /// Multiplier for both axes. Higher = more output per unit of motion.
     pub multiplier: u8,
@@ -159,6 +169,8 @@ impl Default for SniperConfig {
 /// whatever the tap grabbed. A second tap drops it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct DragConfig {
     /// Motion behaves exactly as it does in cursor mode.
     pub cursor: CursorConfig,
