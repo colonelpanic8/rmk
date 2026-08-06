@@ -8,6 +8,7 @@ mod keymap;
 mod layout;
 mod macro_data;
 mod morse;
+mod pointing;
 mod status;
 mod system;
 
@@ -19,5 +20,6 @@ pub use self::keymap::*;
 pub use self::layout::*;
 pub use self::macro_data::*;
 pub use self::morse::*;
+pub use self::pointing::*;
 pub use self::status::*;
 pub use self::system::*;
