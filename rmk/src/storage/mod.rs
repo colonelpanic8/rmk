@@ -9,6 +9,8 @@ use embedded_storage::nor_flash::NorFlash;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::PointingConfig;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::Cache;
 use sequential_storage::cache::key_pointers::ArrayKeyPointers;
@@ -157,6 +159,8 @@ pub(crate) enum StorageKey {
     BondInfo(u8),
     /// A slot the board defines, see [`store_user_data`].
     UserData(u8),
+    #[cfg(feature = "rynk")]
+    PointingConfig,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -211,6 +215,9 @@ pub(crate) enum StorageItem {
         slot: u8,
         data: heapless::Vec<u8, USER_DATA_MAX_SIZE>,
     },
+    /// Every pointing device's behavior, replaced as one unit.
+    #[cfg(feature = "rynk")]
+    PointingConfig(PointingConfig),
 }
 
 impl StorageItem {
@@ -247,6 +254,8 @@ impl StorageItem {
             #[cfg(feature = "_ble")]
             Self::ActiveBleProfile(v) => (StorageKey::ActiveBleProfile, StorageValue::ActiveBleProfile(v)),
             Self::UserData { slot, data } => (StorageKey::UserData(slot), StorageValue::UserData(data)),
+            #[cfg(feature = "rynk")]
+            Self::PointingConfig(v) => (StorageKey::PointingConfig, StorageValue::PointingConfig(v)),
         }
     }
 }
@@ -296,6 +305,8 @@ pub(crate) enum StorageValue {
     #[cfg(feature = "_ble")]
     ActiveBleProfile(u8),
     UserData(heapless::Vec<u8, USER_DATA_MAX_SIZE>),
+    #[cfg(feature = "rynk")]
+    PointingConfig(PointingConfig),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -1025,6 +1036,9 @@ mod tests {
             StorageKey::ActiveBleProfile,
             #[cfg(feature = "_ble")]
             StorageKey::BondInfo(10),
+            StorageKey::UserData(11),
+            #[cfg(feature = "rynk")]
+            StorageKey::PointingConfig,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1057,6 +1071,9 @@ mod tests {
             StorageValue::BondInfo(ProfileInfo::default()),
             #[cfg(feature = "_ble")]
             StorageValue::ActiveBleProfile(0),
+            StorageValue::UserData(heapless::Vec::new()),
+            #[cfg(feature = "rynk")]
+            StorageValue::PointingConfig(PointingConfig::default()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
