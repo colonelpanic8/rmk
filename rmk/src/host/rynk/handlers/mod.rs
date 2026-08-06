@@ -12,6 +12,7 @@ mod keymap;
 mod layout;
 mod macro_data;
 mod morse;
+mod pointing;
 mod status;
 mod system;
 
