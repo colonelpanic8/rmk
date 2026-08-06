@@ -52,6 +52,7 @@ pub mod led_indicator;
 pub mod modifier;
 pub mod morse;
 pub mod mouse_button;
+pub mod pointing;
 pub mod protocol;
 #[cfg(feature = "steno")]
 pub mod steno;
