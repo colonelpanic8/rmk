@@ -18,6 +18,7 @@ pub const POINTING_LAYER_OVERRIDE_CAPACITY: usize = 16;
 
 /// What a device does when no layer override applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct PointingDeviceConfig {
@@ -37,6 +38,7 @@ impl Default for PointingDeviceConfig {
 
 /// While `layer` is the topmost active layer, `device_id` uses `mode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct PointingLayerOverride {
@@ -60,6 +62,7 @@ impl Default for PointingLayerOverride {
 /// Entries past their counts are padding, so the encoding stays a fixed
 /// shape rather than a length-prefixed list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct PointingConfig {
@@ -112,6 +115,7 @@ impl PointingConfig {
 
 /// A write that only lands if the host's `revision` still matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct SetPointingConfigRequest {
