@@ -141,6 +141,27 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         *item = morse;
                     }
                 }
+                (StorageKey::MorseProfile(idx), StorageData::MorseProfile(profile)) => {
+                    let idx = idx as usize;
+                    if idx < MORSE_PROFILE_MAX_NUM {
+                        if idx >= behavior.morse.profiles.len() {
+                            behavior.morse.profiles.resize(idx + 1, MorseProfile::default()).ok();
+                        }
+                        behavior.morse.profiles[idx] = profile;
+                    }
+                }
+                (StorageKey::BehaviorOptions, StorageData::BehaviorOptions(options)) => {
+                    behavior.tri_layer = options.tri_layer;
+                    behavior.combo.prior_idle_time = options
+                        .combo_prior_idle_ms
+                        .map(|ms| embassy_time::Duration::from_millis(ms as u64));
+                    behavior.one_shot_modifiers.activate_on_keypress = options.oneshot_activate_on_keypress;
+                    behavior.one_shot_modifiers.quick_release = options.oneshot_quick_release;
+                    behavior.morse.enable_flow_tap = options.morse_enable_flow_tap;
+                }
+                (StorageKey::AutoMouseLayerConfigs, StorageData::AutoMouseLayerConfigs(configs)) => {
+                    behavior.runtime_auto_mouse_layer = Some(configs);
+                }
                 _ => {}
             }
 
