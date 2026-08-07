@@ -1,8 +1,9 @@
 //! Rynk host service — RMK-native protocol server.
 //!
 //! `RynkService` owns the global keyboard state and dispatch policy. Each
-//! [`run_session`](RynkService::run_session) creates its own authorization gate
-//! ([`HostLock`]) and topic subscriptions, so transports never share either.
+//! [`run_session`](RynkService::run_session) creates its own legacy lock
+//! endpoint and topic subscriptions; command authorization is controlled by
+//! the keyboard's global maintenance mode.
 
 mod handlers;
 mod topics;
@@ -36,6 +37,7 @@ pub struct RynkService<'a> {
 
 impl<'a> RynkService<'a> {
     pub fn new(keymap: &'a KeyMap<'a>, config: &RmkConfig<'static>) -> Self {
+        crate::state::initialize_maintenance_mode(config.lock_config.maintenance_mode_default);
         let mut ctx = KeyboardContext::new(keymap);
         // Layout is fixed at macro expansion time, like Vial's keyboard-def.
         ctx.layout_blob = config.layout_blob;
@@ -46,8 +48,8 @@ impl<'a> RynkService<'a> {
         }
     }
 
-    /// Whether `cmd` needs an unlocked device.
-    fn requires_unlock(&self, cmd: Cmd) -> bool {
+    /// Whether `cmd` is available only while maintenance mode is enabled.
+    fn requires_maintenance_mode(cmd: Cmd) -> bool {
         match cmd {
             Cmd::BootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => true,
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
@@ -63,7 +65,7 @@ impl<'a> RynkService<'a> {
             | Cmd::SetBehaviorConfig
             | Cmd::SetKeymapBulk
             | Cmd::SetComboBulk
-            | Cmd::SetMorseBulk => self.lock_config.write_requires_unlock,
+            | Cmd::SetMorseBulk => true,
             _ => false,
         }
     }
@@ -73,8 +75,8 @@ impl<'a> RynkService<'a> {
     async fn dispatch(&self, locker: &HostLock<'_>, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
         let cmd = msg.header().cmd;
 
-        if self.requires_unlock(cmd) && !locker.is_unlocked() {
-            return Err(RynkError::Locked);
+        if Self::requires_maintenance_mode(cmd) && !crate::state::maintenance_mode_enabled() {
+            return Err(RynkError::NotReady);
         }
 
         match cmd {
@@ -87,6 +89,7 @@ impl<'a> RynkService<'a> {
             Cmd::UnlockPoll => serve::<command::UnlockPoll, _>(locker, msg).await,
             Cmd::Lock => serve::<command::Lock, _>(locker, msg).await,
             Cmd::GetDeviceInfo => serve::<command::GetDeviceInfo, _>(self, msg).await,
+            Cmd::GetMaintenanceMode => serve::<command::GetMaintenanceMode, _>(self, msg).await,
 
             Cmd::GetKeyAction => serve::<command::GetKeyAction, _>(self, msg).await,
             Cmd::SetKeyAction => serve::<command::SetKeyAction, _>(self, msg).await,
@@ -353,6 +356,7 @@ mod tests {
                 unlock_keys: UNLOCK_KEYS,
                 insecure: false,
                 write_requires_unlock: false,
+                ..Default::default()
             },
             ..Default::default()
         };

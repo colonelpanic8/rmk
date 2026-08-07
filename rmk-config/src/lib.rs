@@ -504,6 +504,7 @@ define_event_config!(
     wpm_update,
     led_indicator,
     sleep_state,
+    maintenance_mode,
     // Power events
     battery_status,
     battery_adc,
@@ -1121,10 +1122,14 @@ pub(crate) struct HostConfig {
     #[serde(alias = "vial_insecure")]
     #[serde_inline_default(false)]
     pub insecure: bool,
-    /// Move the Rynk config-write tier (`SetKeyAction`, `SetMacro`, …) into the
-    /// locked set, so writes also require unlock (default: false).
+    /// Legacy Rynk physical-lock policy, retained for configuration
+    /// compatibility. Maintenance mode now gates all writes unconditionally.
     #[serde_inline_default(false)]
     pub write_requires_unlock: bool,
+    /// Whether host maintenance operations start enabled. The live value can
+    /// be toggled by `MaintenanceModeToggle` until reboot.
+    #[serde_inline_default(true)]
+    pub maintenance_mode_default: bool,
 }
 
 impl Default for HostConfig {
@@ -1135,6 +1140,7 @@ impl Default for HostConfig {
             unlock_keys: None,
             insecure: false,
             write_requires_unlock: false,
+            maintenance_mode_default: true,
         }
     }
 }

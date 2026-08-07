@@ -21,11 +21,11 @@ use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::morse::Morse;
 use rmk_types::protocol::rynk::{
-    BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
-    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
-    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
+    BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, MaintenanceMode,
+    GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest,
+    GetMorseBulkResponse, KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion,
+    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
+    SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -90,6 +90,11 @@ impl Client {
     /// [`reboot`](Self::reboot).
     pub async fn bootloader_jump(&self) -> Result<(), RynkHostError> {
         self.send_no_reply::<command::BootloaderJump>(&()).await
+    }
+
+    /// Read the live maintenance gate and the value restored at boot.
+    pub async fn get_maintenance_mode(&self) -> Result<MaintenanceMode, RynkHostError> {
+        self.request::<command::GetMaintenanceMode>(&()).await
     }
 
     /// Reset persistent storage. Requires [`DeviceCapabilities::storage_enabled`]:

@@ -47,6 +47,8 @@ GetLockStatus reply Ok(LockStatus{true,false,2,[(1,2),(3,4)]})                  
 GetLockStatus request ()                                                        02 06 02 01 00
 GetMacro reply Ok(MacroData{[0x01,0x02,0x03]})                                  04 01 02 01 05 03 01 02 03 00
 GetMacro request GetMacroRequest{256}                                           06 01 02 01 80 02 00
+GetMaintenanceMode reply Ok(MaintenanceMode{true,false})                        02 0d 02 01 02 01 01 00
+GetMaintenanceMode request ()                                                   02 0d 02 01 00
 GetMatrixState reply Ok(MatrixState{[0x05,0x00,0x20]})                          04 02 08 01 03 03 05 02 20 00
 GetMatrixState request ()                                                       04 02 08 01 00
 GetMorse reply Ok(Morse{TAP->Key(A)})                                           04 01 04 01 01 04 01 02 01 02 04 00

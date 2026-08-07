@@ -238,9 +238,9 @@ fn expand_test(
 
     let behavior_stmt = expand_behavior_config(&behavior);
     let features: Vec<&String> = file_features.iter().chain(&test.features).collect();
-    // `[host]`'s lock gate and the layout blob are rynk types, so only a rynk
-    // scenario can name them. Others keep the default `RmkConfig`, which is what
-    // a `[host]`-less board gets anyway.
+    // `[host]`'s maintenance/legacy-lock policy and the layout blob are Rynk
+    // types, so only a Rynk scenario can name them. Others keep the default
+    // `RmkConfig`, which is what a `[host]`-less board gets anyway.
     let rmk_config = features
         .iter()
         .any(|f| f.as_str() == "rynk")
@@ -308,15 +308,15 @@ fn expand_builder(
     }
 }
 
-/// The rynk half of `RmkConfig`: `[host]`'s lock gate, whose unlock keys are
-/// `(row, col)` pairs the scenario can then press, plus the compressed layout
-/// blob `GetLayout` pages out.
+/// The Rynk half of `RmkConfig`: `[host]`'s maintenance and legacy-lock policy,
+/// plus the compressed layout blob `GetLayout` pages out.
 fn expand_rmk_config(host: &Host, layout_blob: &[u8]) -> TokenStream2 {
     let keys = host.unlock_keys.iter().map(|k| {
         let (row, col) = (k[0], k[1]);
         quote! { (#row, #col) }
     });
     let (insecure, write_requires_unlock) = (host.insecure, host.write_requires_unlock);
+    let maintenance_mode_default = host.maintenance_mode_default;
     let blob = proc_macro2::Literal::byte_string(layout_blob);
     quote! {
         .rmk_config(::rmk::config::RmkConfig {
@@ -324,6 +324,7 @@ fn expand_rmk_config(host: &Host, layout_blob: &[u8]) -> TokenStream2 {
                 unlock_keys: &[#(#keys),*],
                 insecure: #insecure,
                 write_requires_unlock: #write_requires_unlock,
+                maintenance_mode_default: #maintenance_mode_default,
             },
             layout_blob: #blob,
             ..Default::default()

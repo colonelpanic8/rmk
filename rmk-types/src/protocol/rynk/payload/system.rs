@@ -137,6 +137,16 @@ impl MaxSize for LockStatus {
         2 * bool::POSTCARD_MAX_SIZE + u8::POSTCARD_MAX_SIZE + crate::heapless_vec_max_size::<(u8, u8), 4>();
 }
 
+/// Live and compiled-default host maintenance policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct MaintenanceMode {
+    pub enabled: bool,
+    pub default_enabled: bool,
+}
+
 /// Storage reset mode for the `StorageReset` endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
