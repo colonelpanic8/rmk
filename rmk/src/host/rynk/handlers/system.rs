@@ -12,7 +12,6 @@ use rmk_types::protocol::rynk::{
 
 use super::super::RynkService;
 use super::Handle;
-use crate::host::lock::HostLock;
 
 /// The `rmk` crate version baked into the firmware, so hosts can key
 /// version-specific behavior off the library release, not the user's app.
@@ -115,24 +114,29 @@ impl Handle<StorageReset> for RynkService<'_> {
     }
 }
 
-// Lock endpoints are served by the session's own gate, and stay dispatchable
-// while locked.
-
-impl Handle<GetLockStatus> for HostLock<'_> {
-    async fn handle(&self, _: ()) -> Result<LockStatus, RynkError> {
-        Ok(self.status())
+fn disabled_lock_status() -> LockStatus {
+    LockStatus {
+        locked: false,
+        unlocking: false,
+        remaining_keys: 0,
+        key_positions: heapless::Vec::new(),
     }
 }
 
-impl Handle<UnlockPoll> for HostLock<'_> {
+impl Handle<GetLockStatus> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<LockStatus, RynkError> {
-        Ok(self.poll())
+        Ok(disabled_lock_status())
     }
 }
 
-impl Handle<Lock> for HostLock<'_> {
+impl Handle<UnlockPoll> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<LockStatus, RynkError> {
+        Ok(disabled_lock_status())
+    }
+}
+
+impl Handle<Lock> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<(), RynkError> {
-        self.lock();
         Ok(())
     }
 }
