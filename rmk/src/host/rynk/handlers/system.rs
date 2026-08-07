@@ -1,11 +1,12 @@
 //! System handlers — handshake, device identity, reboot, bootloader jump, storage reset.
 
 use rmk_types::protocol::rynk::command::{
-    BootloaderJump, GetCapabilities, GetDeviceInfo, GetLockStatus, GetVersion, Lock, Reboot, StorageReset, UnlockPoll,
+    BootloaderJump, GetCapabilities, GetDeviceInfo, GetLockStatus, GetMaintenanceMode, GetVersion, Lock, Reboot,
+    StorageReset, UnlockPoll,
 };
 use rmk_types::protocol::rynk::{
-    DeviceCapabilities, DeviceInfo, FirmwareVersion, LockStatus, MAX_BULK_ITEMS, MAX_BULK_KEYS, ProtocolVersion,
-    RYNK_MAX_PAYLOAD_SIZE, RynkError, StorageResetMode,
+    DeviceCapabilities, DeviceInfo, FirmwareVersion, LockStatus, MAX_BULK_ITEMS, MAX_BULK_KEYS, MaintenanceMode,
+    ProtocolVersion, RYNK_MAX_PAYLOAD_SIZE, RynkError, StorageResetMode,
 };
 use rmk_types::{DEVICE_INFO_STRING_MAX_LEN, constants};
 
@@ -101,6 +102,15 @@ impl Handle<BootloaderJump> for RynkService<'_> {
         // Fire-and-forget, same reasoning as `Reboot`.
         crate::boot::jump_to_bootloader();
         Ok(())
+    }
+}
+
+impl Handle<GetMaintenanceMode> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<MaintenanceMode, RynkError> {
+        Ok(MaintenanceMode {
+            enabled: crate::state::maintenance_mode_enabled(),
+            default_enabled: crate::state::maintenance_mode_default(),
+        })
     }
 }
 
