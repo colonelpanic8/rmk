@@ -17,6 +17,7 @@ pub type AutoMouseLayerExtraKeys = alloc::vec::Vec<KeyCode>;
 
 /// One auto mouse layer entry in a transport- and storage-friendly form.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct AutoMouseLayerConfig {
