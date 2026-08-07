@@ -61,6 +61,9 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     behavior.tap.tap_interval = c.tap_interval;
                     behavior.tap.tap_capslock_interval = c.tap_capslock_interval;
                 }
+                (StorageKey::AutoMouseLayerConfigs, StorageValue::AutoMouseLayerConfigs(configs)) => {
+                    behavior.runtime_auto_mouse_layer = Some(configs);
+                }
                 (StorageKey::BehaviorOptions, StorageValue::BehaviorOptions(options)) => {
                     behavior.tri_layer = options.tri_layer;
                     behavior.combo.prior_idle_time =

@@ -2,9 +2,12 @@
 //! default morse profile, flow-tap window).
 
 use rmk_types::protocol::rynk::command::{
-    GetBehaviorConfig, GetBehaviorOptions, SetBehaviorConfig, SetBehaviorOptions,
+    GetAutoMouseLayerConfigs, GetBehaviorConfig, GetBehaviorOptions, SetAutoMouseLayerConfigs, SetBehaviorConfig,
+    SetBehaviorOptions,
 };
-use rmk_types::protocol::rynk::{BehaviorConfig, BehaviorOptions, RynkError};
+use rmk_types::protocol::rynk::{
+    AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, RynkError, SetAutoMouseLayerConfigsRequest,
+};
 
 use super::super::RynkService;
 use super::Handle;
@@ -37,6 +40,25 @@ impl Handle<GetBehaviorOptions> for RynkService<'_> {
 impl Handle<SetBehaviorOptions> for RynkService<'_> {
     async fn handle(&self, options: BehaviorOptions) -> Result<(), RynkError> {
         match self.ctx.set_behavior_options(options).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(RynkError::Invalid),
+            Err(()) => Err(RynkError::StorageFault),
+        }
+    }
+}
+
+impl Handle<GetAutoMouseLayerConfigs> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<AutoMouseLayerConfigState, RynkError> {
+        Ok(AutoMouseLayerConfigState {
+            capacity: crate::AUTO_MOUSE_LAYER_MAX_NUM as u8,
+            configs: self.ctx.auto_mouse_layer_configs(),
+        })
+    }
+}
+
+impl Handle<SetAutoMouseLayerConfigs> for RynkService<'_> {
+    async fn handle(&self, request: SetAutoMouseLayerConfigsRequest) -> Result<(), RynkError> {
+        match self.ctx.set_auto_mouse_layer_configs(request.configs).await {
             Ok(true) => Ok(()),
             Ok(false) => Err(RynkError::Invalid),
             Err(()) => Err(RynkError::StorageFault),

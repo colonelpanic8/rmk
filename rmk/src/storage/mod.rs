@@ -7,6 +7,8 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embedded_storage::nor_flash::NorFlash;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
+#[cfg(feature = "host")]
+use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
 #[cfg(feature = "host")]
@@ -163,6 +165,8 @@ pub(crate) enum StorageKey {
     MorseProfile(u8),
     #[cfg(feature = "host")]
     BehaviorOptions,
+    #[cfg(feature = "host")]
+    AutoMouseLayerConfigs,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -224,6 +228,8 @@ pub(crate) enum StorageItem {
     },
     #[cfg(feature = "host")]
     BehaviorOptions(StoredBehaviorOptions),
+    #[cfg(feature = "host")]
+    AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
 }
 
 impl StorageItem {
@@ -264,6 +270,8 @@ impl StorageItem {
             Self::MorseProfile { idx, profile } => (StorageKey::MorseProfile(idx), StorageValue::MorseProfile(profile)),
             #[cfg(feature = "host")]
             Self::BehaviorOptions(v) => (StorageKey::BehaviorOptions, StorageValue::BehaviorOptions(v)),
+            #[cfg(feature = "host")]
+            Self::AutoMouseLayerConfigs(v) => (StorageKey::AutoMouseLayerConfigs, StorageValue::AutoMouseLayerConfigs(v)),
         }
     }
 }
@@ -317,6 +325,8 @@ pub(crate) enum StorageValue {
     MorseProfile(MorseProfile),
     #[cfg(feature = "host")]
     BehaviorOptions(StoredBehaviorOptions),
+    #[cfg(feature = "host")]
+    AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -388,6 +398,29 @@ impl From<&config::BehaviorConfig> for StoredBehaviorOptions {
             morse_enable_flow_tap: behavior.morse.enable_flow_tap,
         }
     }
+}
+
+/// The auto mouse layer table a host last wrote, or the compiled one until then.
+#[cfg(feature = "host")]
+fn auto_mouse_layer_configs(
+    behavior: &config::BehaviorConfig,
+) -> heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> {
+    if let Some(configs) = &behavior.runtime_auto_mouse_layer {
+        return configs.clone();
+    }
+    behavior
+        .auto_mouse_layer
+        .iter()
+        .map(|config| RuntimeAutoMouseLayerConfig {
+            device_id: config.device_id,
+            target_layer: config.target_layer,
+            timeout_ms: config.timeout.as_millis() as u32,
+            threshold: config.threshold,
+            deactivate_on_key: config.deactivate_on_key,
+            extra_mouse_keys: config.extra_mouse_keys.iter().copied().collect(),
+            reset_timeout_on_key: config.reset_timeout_on_key,
+        })
+        .collect()
 }
 
 pub fn async_flash_wrapper<F: NorFlash>(flash: F) -> BlockingAsync<F> {
@@ -557,6 +590,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         };
         put(StorageItem::BehaviorConfig(behavior.into())).await;
         put(StorageItem::BehaviorOptions(behavior.into())).await;
+        put(StorageItem::AutoMouseLayerConfigs(auto_mouse_layer_configs(behavior))).await;
         put(StorageItem::DefaultLayer(0)).await;
         put(StorageItem::LayoutOption(0)).await;
 
@@ -1103,6 +1137,8 @@ mod tests {
             StorageKey::MorseProfile(9),
             #[cfg(feature = "host")]
             StorageKey::BehaviorOptions,
+            #[cfg(feature = "host")]
+            StorageKey::AutoMouseLayerConfigs,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1140,6 +1176,8 @@ mod tests {
             StorageValue::MorseProfile(MorseProfile::default()),
             #[cfg(feature = "host")]
             StorageValue::BehaviorOptions((&RuntimeBehaviorConfig::default()).into()),
+            #[cfg(feature = "host")]
+            StorageValue::AutoMouseLayerConfigs(heapless::Vec::new()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
