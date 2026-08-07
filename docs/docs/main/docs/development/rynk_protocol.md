@@ -127,6 +127,8 @@ The lock belongs to the connection and starts locked; `Lock` or disconnection re
 | `0x0704` | `SwitchBleProfile`     | `u8`                   | `()`                    | `_ble`  | Select a profile.                                                            |
 | `0x0705` | `ClearBleProfile`      | `u8`                   | `()`                    | `_ble`  | Disconnect a profile and forget its bond.                                    |
 | `0x0706` | `DisconnectBleProfile` | `u8`                   | `()`                    | `_ble`  | Disconnect a profile and keep its bond until a new host pairs with it.       |
+| `0x0708` | `GetBleName`           | `()`                   | `BleName`               | `_ble`  | Read the persistent BLE advertising-name template.                           |
+| `0x0709` | `SetBleName`           | `BleName`              | `()`                    | `_ble`  | Replace the persistent BLE advertising-name template.                        |
 | `0x0801` | `GetCurrentLayer`      | `()`                   | `u8`                    |         |                                                                              |
 | `0x0802` | `GetMatrixState`       | `()`                   | `MatrixState`           |         |                                                                              |
 | `0x0803` | `GetBatteryStatus`     | `()`                   | `BatteryStatus`         |         |                                                                              |
