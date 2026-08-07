@@ -192,6 +192,27 @@ impl<'a> KeyboardContext<'a> {
         self.keymap.morse_default_profile()
     }
 
+    pub fn morse_profiles_capacity(&self) -> usize {
+        self.keymap.morse_profiles_capacity()
+    }
+
+    /// Profile a key bound to `idx` resolves to. `None` if `idx` is past the
+    /// table's capacity.
+    pub fn get_morse_profile(&self, idx: u8) -> Option<MorseProfile> {
+        ((idx as usize) < self.keymap.morse_profiles_capacity()).then(|| self.keymap.morse_profile(idx))
+    }
+
+    /// Replace the profile at `idx` and persist it. `Ok(false)` for an index
+    /// past the table's capacity, which changes nothing.
+    pub async fn set_morse_profile(&self, idx: u8, profile: MorseProfile) -> Result<bool, ()> {
+        if !self.keymap.set_morse_profile(idx, profile) {
+            return Ok(false);
+        }
+        #[cfg(feature = "storage")]
+        store(StorageItem::MorseProfile { idx, profile }).await?;
+        Ok(true)
+    }
+
     pub fn morse_prior_idle_time(&self) -> Duration {
         self.keymap.morse_prior_idle_time()
     }

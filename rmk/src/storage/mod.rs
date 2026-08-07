@@ -157,6 +157,8 @@ pub(crate) enum StorageKey {
     BondInfo(u8),
     /// A slot the board defines, see [`store_user_data`].
     UserData(u8),
+    #[cfg(feature = "host")]
+    MorseProfile(u8),
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -211,6 +213,11 @@ pub(crate) enum StorageItem {
         slot: u8,
         data: heapless::Vec<u8, USER_DATA_MAX_SIZE>,
     },
+    #[cfg(feature = "host")]
+    MorseProfile {
+        idx: u8,
+        profile: MorseProfile,
+    },
 }
 
 impl StorageItem {
@@ -247,6 +254,8 @@ impl StorageItem {
             #[cfg(feature = "_ble")]
             Self::ActiveBleProfile(v) => (StorageKey::ActiveBleProfile, StorageValue::ActiveBleProfile(v)),
             Self::UserData { slot, data } => (StorageKey::UserData(slot), StorageValue::UserData(data)),
+            #[cfg(feature = "host")]
+            Self::MorseProfile { idx, profile } => (StorageKey::MorseProfile(idx), StorageValue::MorseProfile(profile)),
         }
     }
 }
@@ -296,6 +305,8 @@ pub(crate) enum StorageValue {
     #[cfg(feature = "_ble")]
     ActiveBleProfile(u8),
     UserData(heapless::Vec<u8, USER_DATA_MAX_SIZE>),
+    #[cfg(feature = "host")]
+    MorseProfile(MorseProfile),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -538,6 +549,15 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             put(StorageItem::Morse {
                 idx: idx as u8,
                 morse: morse.clone(),
+            })
+            .await;
+        }
+        // Every slot, so a profile the host wrote past the compiled table is cleared too.
+        for idx in 0..crate::MORSE_PROFILE_MAX_NUM {
+            let profile = behavior.morse.profiles.get(idx).copied().unwrap_or_default();
+            put(StorageItem::MorseProfile {
+                idx: idx as u8,
+                profile,
             })
             .await;
         }
@@ -1025,6 +1045,9 @@ mod tests {
             StorageKey::ActiveBleProfile,
             #[cfg(feature = "_ble")]
             StorageKey::BondInfo(10),
+            StorageKey::UserData(11),
+            #[cfg(feature = "host")]
+            StorageKey::MorseProfile(9),
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1057,6 +1080,9 @@ mod tests {
             StorageValue::BondInfo(ProfileInfo::default()),
             #[cfg(feature = "_ble")]
             StorageValue::ActiveBleProfile(0),
+            StorageValue::UserData(heapless::Vec::new()),
+            #[cfg(feature = "host")]
+            StorageValue::MorseProfile(MorseProfile::default()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {

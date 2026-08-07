@@ -214,6 +214,7 @@ struct Exemplars {
     combo: Combo,
     fork: Fork,
     morse: Morse,
+    profile: MorseProfile,
     macro_ops: Macro,
     encoder: EncoderAction,
     battery: BatteryStatus,
@@ -312,6 +313,7 @@ fn exemplars() -> Exemplars {
         profile: MorseProfile::const_default(),
         actions: morse_actions,
     };
+    let profile = MorseProfile::new(None, Some(MorseMode::Normal), Some(200), Some(150));
     // One op of each shape, so a variant renumber or a field swap shows.
     let macro_ops = Macro::from_slice(&[
         MacroOp::Tap(Action::Key(KeyCode::Hid(HidKeyCode::A))),
@@ -340,6 +342,7 @@ fn exemplars() -> Exemplars {
         combo,
         fork,
         morse,
+        profile,
         macro_ops,
         encoder,
         battery: BatteryStatus::Available {
@@ -377,7 +380,6 @@ fn wire_values_locked() {
         remaining_keys: 2,
         key_positions: unlock_keys,
     };
-    let profile = MorseProfile::new(None, Some(MorseMode::Normal), Some(200), Some(150));
 
     let entries: alloc::vec::Vec<(&str, alloc::vec::Vec<u8>)> = alloc::vec![
         // --- Response envelope + connection ---
@@ -476,7 +478,7 @@ fn wire_values_locked() {
             "MouseButtons(B1|B8)",
             encode(&(MouseButtons::BUTTON1 | MouseButtons::BUTTON8))
         ),
-        ("MorseProfile(Normal,200,150)", encode(&profile)),
+        ("MorseProfile(Normal,200,150)", encode(&ex.profile)),
         // --- Keymap / encoder / behavior config payloads ---
         (
             "KeyPosition{layer:0,row:5,col:13}",
@@ -589,6 +591,13 @@ fn wire_values_locked() {
             encode(&SetMorseRequest {
                 index: 0,
                 config: ex.morse.clone()
+            })
+        ),
+        (
+            "SetMorseProfileRequest{3,profile}",
+            encode(&SetMorseProfileRequest {
+                index: 3,
+                profile: ex.profile
             })
         ),
         (
@@ -860,6 +869,37 @@ fn wire_frames_locked() {
         (
             "SetMorse reply Ok(())",
             encode_frame(Cmd::SetMorse, SEQ, &Ok::<(), RynkError>(()))
+        ),
+        (
+            "GetMorseProfileCount request ()",
+            encode_frame(Cmd::GetMorseProfileCount, SEQ, &())
+        ),
+        (
+            "GetMorseProfileCount reply Ok(16)",
+            encode_frame(Cmd::GetMorseProfileCount, SEQ, &Ok::<u8, RynkError>(16)),
+        ),
+        (
+            "GetMorseProfile request 3",
+            encode_frame(Cmd::GetMorseProfile, SEQ, &3u8)
+        ),
+        (
+            "GetMorseProfile reply Ok(MorseProfile(Normal,200,150))",
+            encode_frame(Cmd::GetMorseProfile, SEQ, &Ok::<MorseProfile, RynkError>(ex.profile)),
+        ),
+        (
+            "SetMorseProfile request SetMorseProfileRequest{3,profile}",
+            encode_frame(
+                Cmd::SetMorseProfile,
+                SEQ,
+                &SetMorseProfileRequest {
+                    index: 3,
+                    profile: ex.profile
+                }
+            ),
+        ),
+        (
+            "SetMorseProfile reply Ok(())",
+            encode_frame(Cmd::SetMorseProfile, SEQ, &Ok::<(), RynkError>(()))
         ),
         // Fork (0x05xx).
         ("GetFork request 2", encode_frame(Cmd::GetFork, SEQ, &2u8)),

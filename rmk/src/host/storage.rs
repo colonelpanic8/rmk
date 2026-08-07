@@ -1,6 +1,7 @@
 use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::constants::MACRO_CHUNK_SIZE;
+use rmk_types::morse::MorseProfile;
 
 use crate::keyboard::combo::Combo;
 use crate::storage::{Storage, StorageKey, StorageValue, print_storage_error};
@@ -73,6 +74,18 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 (StorageKey::Morse(idx), StorageValue::Morse(morse)) => {
                     if let Some(slot) = behavior.morse.morses.get_mut(idx as usize) {
                         *slot = morse;
+                    }
+                }
+                // The table is only as long as `keyboard.toml` made it, so a stored slot beyond
+                // its end grows it, the same growth the setter does at runtime.
+                (StorageKey::MorseProfile(idx), StorageValue::MorseProfile(profile)) => {
+                    let idx = idx as usize;
+                    let profiles = &mut behavior.morse.profiles;
+                    if idx < profiles.capacity() {
+                        if idx >= profiles.len() {
+                            profiles.resize(idx + 1, MorseProfile::default()).ok();
+                        }
+                        profiles[idx] = profile;
                     }
                 }
                 _ => continue,

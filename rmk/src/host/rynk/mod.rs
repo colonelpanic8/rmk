@@ -61,6 +61,8 @@ impl<'a> RynkService<'a> {
                 | Cmd::SetKeymapBulk
                 | Cmd::SetComboBulk
                 | Cmd::SetMorseBulk
+                | Cmd::SetMorseProfile
+                | Cmd::SetMorseProfileBulk
         )
     }
 
@@ -115,6 +117,11 @@ impl<'a> RynkService<'a> {
             Cmd::SetMorse => serve::<command::SetMorse, _>(self, msg).await,
             Cmd::GetMorseBulk => serve_bulk::<command::GetMorseBulk, _>(self, msg).await,
             Cmd::SetMorseBulk => serve_bulk::<command::SetMorseBulk, _>(self, msg).await,
+            Cmd::GetMorseProfileCount => serve::<command::GetMorseProfileCount, _>(self, msg).await,
+            Cmd::GetMorseProfile => serve::<command::GetMorseProfile, _>(self, msg).await,
+            Cmd::SetMorseProfile => serve::<command::SetMorseProfile, _>(self, msg).await,
+            Cmd::GetMorseProfileBulk => serve_bulk::<command::GetMorseProfileBulk, _>(self, msg).await,
+            Cmd::SetMorseProfileBulk => serve_bulk::<command::SetMorseProfileBulk, _>(self, msg).await,
 
             Cmd::GetFork => serve::<command::GetFork, _>(self, msg).await,
             Cmd::SetFork => serve::<command::SetFork, _>(self, msg).await,
