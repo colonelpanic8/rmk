@@ -36,6 +36,8 @@ pub struct RynkService<'a> {
 
 impl<'a> RynkService<'a> {
     pub fn new(keymap: &'a KeyMap<'a>, config: &RmkConfig<'static>) -> Self {
+        #[cfg(feature = "_ble")]
+        crate::ble::name::initialize(config.ble_name.unwrap_or(config.device_config.product_name));
         let mut ctx = KeyboardContext::new(keymap);
         // Layout is fixed at macro expansion time, like Vial's keyboard-def.
         ctx.layout_blob = config.layout_blob;
@@ -48,6 +50,10 @@ impl<'a> RynkService<'a> {
 
     /// Whether `cmd` needs a storage write to persist its effect.
     fn needs_storage_write(cmd: Cmd) -> bool {
+        #[cfg(feature = "_ble")]
+        if cmd == Cmd::SetBleName {
+            return true;
+        }
         matches!(
             cmd,
             Cmd::SetKeyAction
@@ -130,6 +136,10 @@ impl<'a> RynkService<'a> {
             Cmd::SwitchBleProfile => serve::<command::SwitchBleProfile, _>(self, msg).await,
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => serve::<command::ClearBleProfile, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::GetBleName => serve::<command::GetBleName, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::SetBleName => serve::<command::SetBleName, _>(self, msg).await,
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,

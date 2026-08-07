@@ -318,6 +318,14 @@ fn expand_main(
         quote! {}
     };
 
+    let ble_name_field = match hardware.communication.get_ble_config() {
+        Some(ble) => match ble.name {
+            Some(name) => quote! { ble_name: Some(#name), },
+            None => quote! {},
+        },
+        None => quote! {},
+    };
+
     let rmk_config = if hardware.storage.is_some() {
         quote! {
             #[allow(clippy::needless_update)]
@@ -326,6 +334,7 @@ fn expand_main(
                 #vial_config
                 #lock_config
                 #rynk_layout_field
+                #ble_name_field
                 storage_config,
                 ..Default::default()
             };
@@ -338,6 +347,7 @@ fn expand_main(
                 #vial_config
                 #lock_config
                 #rynk_layout_field
+                #ble_name_field
                 ..Default::default()
             };
         }
