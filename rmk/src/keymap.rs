@@ -510,8 +510,36 @@ impl<'a> KeyMap<'a> {
 
     pub(crate) fn auto_mouse_layer_configs(
         &self,
-    ) -> heapless::Vec<crate::config::AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> {
-        self.inner.borrow().behavior.auto_mouse_layer.clone()
+    ) -> heapless::Vec<rmk_types::auto_mouse::AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> {
+        let inner = self.inner.borrow();
+        if let Some(configs) = &inner.behavior.runtime_auto_mouse_layer {
+            return configs.clone();
+        }
+
+        inner
+            .behavior
+            .auto_mouse_layer
+            .iter()
+            .map(|config| {
+                let extra_mouse_keys = config.extra_mouse_keys.iter().copied().collect();
+                rmk_types::auto_mouse::AutoMouseLayerConfig {
+                    device_id: config.device_id,
+                    target_layer: config.target_layer,
+                    timeout_ms: config.timeout.as_millis() as u32,
+                    threshold: config.threshold,
+                    deactivate_on_key: config.deactivate_on_key,
+                    extra_mouse_keys,
+                    reset_timeout_on_key: config.reset_timeout_on_key,
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn set_auto_mouse_layer_configs(
+        &self,
+        configs: heapless::Vec<rmk_types::auto_mouse::AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>,
+    ) {
+        self.inner.borrow_mut().behavior.runtime_auto_mouse_layer = Some(configs);
     }
 
     /// Whether `layer_num` is set in the layer mask.

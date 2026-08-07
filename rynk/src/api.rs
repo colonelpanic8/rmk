@@ -21,12 +21,13 @@ use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::morse::{Morse, MorseProfile};
 use rmk_types::protocol::rynk::{
-    BehaviorConfig, BehaviorOptions, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
-    GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest,
-    GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, KeyPosition, LockStatus, MacroData,
-    MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetComboRequest, SetEncoderRequest,
-    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
-    SetMorseProfileBulkRequest, SetMorseProfileRequest, SetMorseRequest, StorageResetMode, command,
+    AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, Cmd, DeviceCapabilities, DeviceInfo,
+    GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse,
+    GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest,
+    GetMorseProfileBulkResponse, KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion,
+    SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
+    SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest,
+    SetMorseProfileRequest, SetMorseRequest, StorageResetMode, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -367,6 +368,19 @@ impl Client {
     /// Replace the global behavior settings added after [`BehaviorConfig`].
     pub async fn set_behavior_options(&self, options: BehaviorOptions) -> Result<(), RynkHostError> {
         self.request::<command::SetBehaviorOptions>(&options).await
+    }
+
+    /// Read the complete auto mouse layer table and the firmware's capacity.
+    pub async fn get_auto_mouse_layer_configs(&self) -> Result<AutoMouseLayerConfigState, RynkHostError> {
+        self.request::<command::GetAutoMouseLayerConfigs>(&()).await
+    }
+
+    /// Atomically replace the complete auto mouse layer table.
+    pub async fn set_auto_mouse_layer_configs(
+        &self,
+        request: SetAutoMouseLayerConfigsRequest,
+    ) -> Result<(), RynkHostError> {
+        self.request::<command::SetAutoMouseLayerConfigs>(&request).await
     }
 
     /// Read the currently active layer.

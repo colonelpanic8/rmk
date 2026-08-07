@@ -2,6 +2,7 @@
 
 use embassy_time::Duration;
 use rmk_types::action::{EncoderAction, KeyAction};
+use rmk_types::auto_mouse::AutoMouseLayerConfig;
 #[cfg(feature = "_ble")]
 use rmk_types::battery::BatteryStatus;
 use rmk_types::combo::Combo as ComboConfig;
@@ -14,7 +15,7 @@ use rmk_types::protocol::rynk::{BehaviorConfig, BehaviorOptions};
 
 #[cfg(feature = "rynk")]
 use crate::config::OneShotModifiersConfig;
-use crate::event::KeyboardEventPos;
+use crate::event::{AutoMouseLayerConfigChangeEvent, KeyboardEventPos, publish_event};
 use crate::keyboard::combo::Combo;
 use crate::keymap::KeyMap;
 #[cfg(feature = "storage")]
@@ -323,6 +324,41 @@ impl<'a> KeyboardContext<'a> {
                 ))
                 .await;
         }
+        true
+    }
+
+    pub fn auto_mouse_layer_configs(&self) -> heapless::Vec<AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> {
+        self.keymap.auto_mouse_layer_configs()
+    }
+
+    /// Atomically replace the auto mouse layer table after validating every
+    /// entry against this firmware's compiled resources.
+    pub async fn set_auto_mouse_layer_configs(
+        &self,
+        configs: heapless::Vec<AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>,
+    ) -> bool {
+        let (_, _, layers) = self.keymap.get_keymap_config();
+        for (index, config) in configs.iter().enumerate() {
+            if config.target_layer as usize >= layers || config.timeout_ms == 0 || config.threshold == 0 {
+                return false;
+            }
+            if (config.deactivate_on_key || config.reset_timeout_on_key) && crate::ACTION_EVENT_SUB_SIZE == 0 {
+                return false;
+            }
+            if configs[..index]
+                .iter()
+                .any(|existing| existing.device_id == config.device_id)
+            {
+                return false;
+            }
+        }
+
+        self.keymap.set_auto_mouse_layer_configs(configs.clone());
+        publish_event(AutoMouseLayerConfigChangeEvent);
+        #[cfg(feature = "storage")]
+        FLASH_CHANNEL
+            .send(FlashOperationMessage::AutoMouseLayerConfigs(configs))
+            .await;
         true
     }
 

@@ -6,7 +6,15 @@ use heapless::{String, Vec};
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
 
+use crate::auto_mouse::AutoMouseLayerConfig;
+#[cfg(not(feature = "host"))]
+use crate::constants::AUTO_MOUSE_LAYER_MAX_NUM;
 use crate::morse::MorseProfile;
+
+#[cfg(not(feature = "host"))]
+pub type AutoMouseLayerConfigs = Vec<AutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>;
+#[cfg(feature = "host")]
+pub type AutoMouseLayerConfigs = alloc::vec::Vec<AutoMouseLayerConfig>;
 
 /// Maximum byte length of each `DeviceInfo` string field.
 pub const DEVICE_INFO_STRING_SIZE: usize = 32;
@@ -181,6 +189,36 @@ pub struct BehaviorOptions {
     pub morse_enable_flow_tap: bool,
     pub morse_prior_idle_ms: u16,
     pub morse_default_profile: MorseProfile,
+}
+
+/// The complete auto mouse layer table and the firmware's compiled capacity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct AutoMouseLayerConfigState {
+    pub capacity: u8,
+    #[cfg_attr(feature = "wasm", tsify(type = "AutoMouseLayerConfig[]"))]
+    pub configs: AutoMouseLayerConfigs,
+}
+
+#[cfg(not(feature = "host"))]
+impl MaxSize for AutoMouseLayerConfigState {
+    const POSTCARD_MAX_SIZE: usize =
+        u8::POSTCARD_MAX_SIZE + crate::heapless_vec_max_size::<AutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>();
+}
+
+/// Atomic replacement payload for the complete auto mouse layer table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct SetAutoMouseLayerConfigsRequest {
+    #[cfg_attr(feature = "wasm", tsify(type = "AutoMouseLayerConfig[]"))]
+    pub configs: AutoMouseLayerConfigs,
+}
+
+#[cfg(not(feature = "host"))]
+impl MaxSize for SetAutoMouseLayerConfigsRequest {
+    const POSTCARD_MAX_SIZE: usize = crate::heapless_vec_max_size::<AutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>();
 }
 
 #[cfg(test)]

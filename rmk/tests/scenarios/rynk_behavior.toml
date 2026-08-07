@@ -143,6 +143,34 @@ steps = [
   { rynk = { cmd = "GetBehaviorOptions", reply = { tri_layer = [0, 1, 2], combo_prior_idle_ms = 75, oneshot_activate_on_keypress = true, oneshot_quick_release = true, morse_enable_flow_tap = true, morse_prior_idle_ms = 125, morse_default_profile = { mode = "Normal", hold_timeout_ms = 225, gap_timeout_ms = 175 } } } },
 ]
 
+[[test]]
+name = "auto_mouse_layer_configs_read_returns_what_was_written"
+steps = [
+  { rynk = { cmd = "SetAutoMouseLayerConfigs", payload = { configs = [
+    { device_id = 1, target_layer = 2, timeout_ms = 500, threshold = 3, deactivate_on_key = false, extra_mouse_keys = [], reset_timeout_on_key = false },
+    { target_layer = 1, timeout_ms = 750, threshold = 2, deactivate_on_key = false, extra_mouse_keys = [], reset_timeout_on_key = false },
+  ] } } },
+  { rynk = { cmd = "GetAutoMouseLayerConfigs", reply = { capacity = 2, configs = [
+    { device_id = 1, target_layer = 2, timeout_ms = 500, threshold = 3, deactivate_on_key = false, extra_mouse_keys = [], reset_timeout_on_key = false },
+    { target_layer = 1, timeout_ms = 750, threshold = 2, deactivate_on_key = false, extra_mouse_keys = [], reset_timeout_on_key = false },
+  ] } } },
+]
+
+[[test]]
+name = "invalid_auto_mouse_layer_table_is_rejected_whole"
+steps = [
+  { rynk = { cmd = "SetAutoMouseLayerConfigs", payload = { configs = [
+    { device_id = 1, target_layer = 2, timeout_ms = 500, threshold = 3, deactivate_on_key = false, extra_mouse_keys = [], reset_timeout_on_key = false },
+  ] } } },
+  { rynk = { cmd = "SetAutoMouseLayerConfigs", payload = { configs = [
+    { device_id = 1, target_layer = 0, timeout_ms = 0, threshold = 0, deactivate_on_key = false, extra_mouse_keys = [], reset_timeout_on_key = false },
+    { device_id = 1, target_layer = 3, timeout_ms = 1, threshold = 1, deactivate_on_key = false, extra_mouse_keys = [], reset_timeout_on_key = false },
+  ] }, error = "Invalid" } },
+  { rynk = { cmd = "GetAutoMouseLayerConfigs", reply = { capacity = 2, configs = [
+    { device_id = 1, target_layer = 2, timeout_ms = 500, threshold = 3, deactivate_on_key = false, extra_mouse_keys = [], reset_timeout_on_key = false },
+  ] } } },
+]
+
 # `actions` is a pattern-to-action map: 2 = tap, 3 = hold, 4 = double tap,
 # 5 = hold after tap.
 [[test]]

@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::action::{Action, EncoderAction, KeyAction, KeyboardAction, LightAction};
+use crate::auto_mouse::AutoMouseLayerConfig;
 use crate::battery::{BatteryStatus, ChargeState};
 use crate::ble::{BleState, BleStatus};
 use crate::combo::Combo;
@@ -209,6 +210,7 @@ struct Exemplars {
     device_info: DeviceInfo,
     behavior: BehaviorConfig,
     behavior_options: BehaviorOptions,
+    auto_mouse: AutoMouseLayerConfigState,
     connection: ConnectionStatus,
     state_bits: StateBits,
     combo: Combo,
@@ -283,6 +285,19 @@ fn exemplars() -> Exemplars {
         morse_prior_idle_ms: 60,
         morse_default_profile: MorseProfile::new(None, Some(MorseMode::Normal), Some(70), Some(80)),
     };
+    let auto_mouse_config = AutoMouseLayerConfig {
+        device_id: Some(1),
+        target_layer: 2,
+        timeout_ms: 500,
+        threshold: 3,
+        deactivate_on_key: true,
+        extra_mouse_keys: [KeyCode::Hid(HidKeyCode::LCtrl)].into_iter().collect(),
+        reset_timeout_on_key: false,
+    };
+    let auto_mouse = AutoMouseLayerConfigState {
+        capacity: 4,
+        configs: [auto_mouse_config].into_iter().collect(),
+    };
     let connection = ConnectionStatus {
         usb: UsbState::Configured,
         ble: BleStatus {
@@ -340,6 +355,7 @@ fn exemplars() -> Exemplars {
         device_info,
         behavior,
         behavior_options,
+        auto_mouse,
         connection,
         state_bits,
         combo,
@@ -506,6 +522,7 @@ fn wire_values_locked() {
             "BehaviorOptions{[1,2,3],40,true,false,true,60,profile}",
             encode(&ex.behavior_options),
         ),
+        ("AutoMouseLayerConfigState{4,[device1->layer2]}", encode(&ex.auto_mouse)),
         ("ConnectionStatus{Configured,{1,Adv},Ble}", encode(&ex.connection)),
         ("ProtocolVersion{1,0}", encode(&ProtocolVersion { major: 1, minor: 0 })),
         ("ProtocolVersion::CURRENT", encode(&ProtocolVersion::CURRENT)),
@@ -594,6 +611,12 @@ fn wire_values_locked() {
                 index: 2,
                 config: ex.fork
             })
+        ),
+        (
+            "SetAutoMouseLayerConfigsRequest{[device1->layer2]}",
+            encode(&SetAutoMouseLayerConfigsRequest {
+                configs: ex.auto_mouse.configs.clone(),
+            }),
         ),
     ];
     let view: alloc::vec::Vec<(&str, &[u8])> = entries.iter().map(|(l, b)| (*l, b.as_slice())).collect();
@@ -953,6 +976,32 @@ fn wire_frames_locked() {
         (
             "SetBehaviorOptions reply Ok(())",
             encode_frame(Cmd::SetBehaviorOptions, SEQ, &Ok::<(), RynkError>(())),
+        ),
+        (
+            "GetAutoMouseLayerConfigs request ()",
+            encode_frame(Cmd::GetAutoMouseLayerConfigs, SEQ, &()),
+        ),
+        (
+            "GetAutoMouseLayerConfigs reply Ok(state)",
+            encode_frame(
+                Cmd::GetAutoMouseLayerConfigs,
+                SEQ,
+                &Ok::<AutoMouseLayerConfigState, RynkError>(ex.auto_mouse.clone()),
+            ),
+        ),
+        (
+            "SetAutoMouseLayerConfigs request configs",
+            encode_frame(
+                Cmd::SetAutoMouseLayerConfigs,
+                SEQ,
+                &SetAutoMouseLayerConfigsRequest {
+                    configs: ex.auto_mouse.configs.clone(),
+                },
+            ),
+        ),
+        (
+            "SetAutoMouseLayerConfigs reply Ok(())",
+            encode_frame(Cmd::SetAutoMouseLayerConfigs, SEQ, &Ok::<(), RynkError>(())),
         ),
         // Connection (0x07xx).
         (

@@ -220,11 +220,23 @@ impl crate::KeyboardTomlConfig {
                     "[[behavior.auto_mouse_layer]].deactivate_on_key / reset_timeout_on_key require [event.action] subs to be at least 1".to_string(),
                 );
             }
+            if entries.iter().any(|entry| {
+                entry
+                    .extra_mouse_keys
+                    .as_ref()
+                    .is_some_and(|keys| keys.len() > crate::resolved::behavior::AUTO_MOUSE_LAYER_EXTRA_KEY_MAX_NUM)
+            }) {
+                return Err(format!(
+                    "[[behavior.auto_mouse_layer]].extra_mouse_keys supports at most {} entries",
+                    crate::resolved::behavior::AUTO_MOUSE_LAYER_EXTRA_KEY_MAX_NUM
+                ));
+            }
         }
 
         // Host capability fields are u8/u16 on the wire; check the values no deserializer bound
         // covers (morse_max_num and split_peripherals_num can also be auto-raised past 255).
         validate_u8_capability("morse_max_num", rmk.morse_max_num)?;
+        validate_u8_capability("auto_mouse_layer_max_num", auto_mouse_layer_max_num)?;
         validate_u8_capability("split_peripherals_num", split_peripherals_num)?;
         validate_u8_capability("ble_profiles_num", rmk.ble_profiles_num)?;
         validate_u16_capability("macro_space_size", rmk.macro_space_size)?;
@@ -567,6 +579,24 @@ mod tests {
     fn auto_mouse_layer_within_capacity_is_accepted() {
         let toml = "[rmk]\nauto_mouse_layer_max_num = 1\n\n[[behavior.auto_mouse_layer]]\ntarget_layer = 1\nextra_mouse_keys = [\"LCtrl\"]\n";
         assert!(parse(toml).build_constants(&[]).is_ok());
+    }
+
+    #[test]
+    fn auto_mouse_layer_extra_keys_over_wire_capacity_is_rejected() {
+        let keys = core::iter::repeat_n(
+            "\"LCtrl\"",
+            crate::resolved::behavior::AUTO_MOUSE_LAYER_EXTRA_KEY_MAX_NUM + 1,
+        )
+        .collect::<Vec<_>>()
+        .join(",");
+        let toml = format!(
+            "[rmk]\nauto_mouse_layer_max_num = 1\n\n[[behavior.auto_mouse_layer]]\ntarget_layer = 1\nextra_mouse_keys = [{keys}]\n"
+        );
+        let err = match parse(&toml).build_constants(&[]) {
+            Ok(_) => panic!("expected extra_mouse_keys capacity failure"),
+            Err(err) => err,
+        };
+        assert!(err.contains("extra_mouse_keys"));
     }
 
     #[test]
