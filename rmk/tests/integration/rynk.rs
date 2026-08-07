@@ -171,3 +171,28 @@ fn morse_profile_write_survives_restart() {
             .await;
     });
 }
+
+/// Global behavior options are durable just like the older timeout payload.
+#[cfg(feature = "storage")]
+#[test]
+fn behavior_options_write_survives_restart() {
+    const SET_OPTIONS: &str = r#"{"tri_layer":[0,1,2],"combo_prior_idle_ms":75,"oneshot_activate_on_keypress":true,"oneshot_quick_release":true,"morse_enable_flow_tap":true,"morse_prior_idle_ms":125,"morse_default_profile":{"mode":"PermissiveHold","hold_timeout_ms":225,"gap_timeout_ms":175}}"#;
+
+    test_block_on(async {
+        let flash = crate::simulator::flash::InMemoryFlash::new();
+        let keymap = [[[k!(A)]], [[k!(A)]], [[k!(A)]]];
+        {
+            let mut keyboard = SimKeyboard::builder(keymap).build_with_flash(flash.clone()).await;
+            keyboard
+                .rynk::<command::SetBehaviorOptions>(SET_OPTIONS, RynkReply::Ok("null"))
+                .wait_storage()
+                .run()
+                .await;
+        }
+        let mut keyboard = SimKeyboard::builder(keymap).build_with_flash(flash).await;
+        keyboard
+            .rynk::<command::GetBehaviorOptions>("null", RynkReply::Ok(SET_OPTIONS))
+            .run()
+            .await;
+    });
+}

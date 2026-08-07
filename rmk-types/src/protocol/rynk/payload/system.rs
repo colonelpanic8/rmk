@@ -6,6 +6,8 @@ use heapless::{String, Vec};
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
 
+use crate::morse::MorseProfile;
+
 /// Maximum byte length of each `DeviceInfo` string field.
 pub const DEVICE_INFO_STRING_SIZE: usize = 32;
 
@@ -157,6 +159,23 @@ pub struct BehaviorConfig {
     pub tap_capslock_interval_ms: u16,
 }
 
+/// Protocol-facing behavior settings added after [`BehaviorConfig`].
+///
+/// This is a separate payload rather than an extension of `BehaviorConfig` so
+/// older clients and firmware keep their existing postcard layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct BehaviorOptions {
+    pub tri_layer: Option<[u8; 3]>,
+    pub combo_prior_idle_ms: Option<u16>,
+    pub oneshot_activate_on_keypress: bool,
+    pub oneshot_quick_release: bool,
+    pub morse_enable_flow_tap: bool,
+    pub morse_prior_idle_ms: u16,
+    pub morse_default_profile: MorseProfile,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,6 +306,19 @@ mod tests {
             oneshot_timeout_ms: 500,
             tap_interval_ms: 200,
             tap_capslock_interval_ms: 20,
+        });
+    }
+
+    #[test]
+    fn round_trip_behavior_options() {
+        round_trip(&BehaviorOptions {
+            tri_layer: Some([1, 2, 3]),
+            combo_prior_idle_ms: Some(u16::MAX),
+            oneshot_activate_on_keypress: true,
+            oneshot_quick_release: true,
+            morse_enable_flow_tap: true,
+            morse_prior_idle_ms: u16::MAX,
+            morse_default_profile: MorseProfile::default(),
         });
     }
 }
