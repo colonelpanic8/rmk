@@ -1126,10 +1126,10 @@ pub(crate) struct HostConfig {
     /// compatibility. Maintenance mode now gates all writes unconditionally.
     #[serde_inline_default(false)]
     pub write_requires_unlock: bool,
-    /// Whether host maintenance operations start enabled. The live value can
-    /// be toggled by `MaintenanceModeToggle` until reboot.
-    #[serde_inline_default(true)]
-    pub maintenance_mode_default: bool,
+    /// Whether the maintenance lock starts engaged. The live value can be
+    /// toggled by `MaintenanceModeToggle` until reboot.
+    #[serde_inline_default(false)]
+    pub maintenance_lock_default: bool,
 }
 
 impl Default for HostConfig {
@@ -1140,7 +1140,7 @@ impl Default for HostConfig {
             unlock_keys: None,
             insecure: false,
             write_requires_unlock: false,
-            maintenance_mode_default: true,
+            maintenance_lock_default: false,
         }
     }
 }
