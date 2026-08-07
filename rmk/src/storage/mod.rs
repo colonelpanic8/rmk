@@ -15,6 +15,8 @@ use rmk_types::protocol::rynk::{
     LightingExtendedConditionalSceneCell, LightingLayerPolicy, LightingSceneCell,
 };
 use rmk_types::unicode::UnicodeMode;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::PointingConfig;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
@@ -199,6 +201,9 @@ pub(crate) enum FlashOperationMessage {
     ReadActiveBleProfile,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingExtensionOverlay(LightingExtensionOverlayRecord),
+    #[cfg(feature = "rynk")]
+    // Every pointing device's behavior, replaced as one unit.
+    PointingConfig(PointingConfig),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -250,6 +255,8 @@ pub(crate) enum StorageKey {
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuntimeConditionalSceneShardV2(u8),
     UnicodeMode,
+    #[cfg(feature = "rynk")]
+    PointingConfig,
 }
 
 impl StorageKey {
@@ -352,6 +359,8 @@ pub(crate) enum StorageData {
         heapless::Vec<LightingExtendedConditionalSceneCell, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE>,
     ),
     UnicodeMode(UnicodeMode),
+    #[cfg(feature = "rynk")]
+    PointingConfig(PointingConfig),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -946,6 +955,16 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
     /// suitable for sharing with `scan_peripherals` and `run_peripheral_manager`.
     ///
     /// Must be called before the storage task starts; once it is running it owns
+    /// The stored pointing configuration, or `None` when nothing was ever
+    /// written — which means no pointing policy, not a default one.
+    #[cfg(feature = "rynk")]
+    pub async fn read_pointing_config(&mut self) -> Option<PointingConfig> {
+        match self.fetch_data(StorageKey::PointingConfig).await {
+            Some(StorageData::PointingConfig(config)) => Some(config),
+            _ => None,
+        }
+    }
+
     /// `&mut Storage` and no other reader can hold it.
     #[cfg(all(feature = "_ble", feature = "split"))]
     pub async fn read_peripheral_addresses<const PERI_NUM: usize>(
@@ -1094,6 +1113,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         cccd_table: heapless::Vec::new(),
                     };
                     self.store_data(StorageKey::bond_info(slot_num), &StorageData::BondInfo(empty))
+                        .await
+                }
+                #[cfg(feature = "rynk")]
+                FlashOperationMessage::PointingConfig(config) => {
+                    self.store_data(StorageKey::PointingConfig, &StorageData::PointingConfig(config))
                         .await
                 }
                 #[cfg(feature = "_ble")]
