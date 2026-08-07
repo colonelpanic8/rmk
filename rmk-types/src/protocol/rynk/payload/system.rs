@@ -179,6 +179,7 @@ pub struct BehaviorConfig {
 /// This is a separate payload rather than an extension of `BehaviorConfig` so
 /// older clients and firmware keep their existing postcard layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct BehaviorOptions {
