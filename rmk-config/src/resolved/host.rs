@@ -7,6 +7,7 @@ pub struct Host {
     pub unlock_keys: Vec<[u8; 2]>,
     pub insecure: bool,
     pub write_requires_unlock: bool,
+    pub maintenance_mode_default: bool,
 }
 
 impl crate::KeyboardTomlConfig {
@@ -24,6 +25,7 @@ impl crate::KeyboardTomlConfig {
             unlock_keys,
             insecure: host_toml.insecure,
             write_requires_unlock: host_toml.write_requires_unlock,
+            maintenance_mode_default: host_toml.maintenance_mode_default,
         }
     }
 }

@@ -58,3 +58,11 @@ impl SleepStateEvent {
 }
 
 impl_payload_wrapper!(SleepStateEvent, bool);
+
+/// Live maintenance policy changed.
+#[event(channel_size = crate::MAINTENANCE_MODE_EVENT_CHANNEL_SIZE, pubs = crate::MAINTENANCE_MODE_EVENT_PUB_SIZE, subs = crate::MAINTENANCE_MODE_EVENT_SUB_SIZE)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct MaintenanceModeEvent(pub bool);
+
+impl_payload_wrapper!(MaintenanceModeEvent, bool);

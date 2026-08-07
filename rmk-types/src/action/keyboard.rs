@@ -22,4 +22,6 @@ pub enum KeyboardAction {
     ComboOff,
     ComboToggle,
     CapsWordToggle,
+    /// Toggle whether the host may run maintenance operations.
+    MaintenanceModeToggle,
 }
