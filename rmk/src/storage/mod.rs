@@ -9,6 +9,8 @@ use embedded_storage::nor_flash::NorFlash;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
+#[cfg(feature = "host")]
+use rmk_types::protocol::rynk::BehaviorOptions;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::Cache;
 use sequential_storage::cache::key_pointers::ArrayKeyPointers;
@@ -159,6 +161,8 @@ pub(crate) enum StorageKey {
     UserData(u8),
     #[cfg(feature = "host")]
     MorseProfile(u8),
+    #[cfg(feature = "host")]
+    BehaviorOptions,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -218,6 +222,8 @@ pub(crate) enum StorageItem {
         idx: u8,
         profile: MorseProfile,
     },
+    #[cfg(feature = "host")]
+    BehaviorOptions(StoredBehaviorOptions),
 }
 
 impl StorageItem {
@@ -256,6 +262,8 @@ impl StorageItem {
             Self::UserData { slot, data } => (StorageKey::UserData(slot), StorageValue::UserData(data)),
             #[cfg(feature = "host")]
             Self::MorseProfile { idx, profile } => (StorageKey::MorseProfile(idx), StorageValue::MorseProfile(profile)),
+            #[cfg(feature = "host")]
+            Self::BehaviorOptions(v) => (StorageKey::BehaviorOptions, StorageValue::BehaviorOptions(v)),
         }
     }
 }
@@ -307,6 +315,8 @@ pub(crate) enum StorageValue {
     UserData(heapless::Vec<u8, USER_DATA_MAX_SIZE>),
     #[cfg(feature = "host")]
     MorseProfile(MorseProfile),
+    #[cfg(feature = "host")]
+    BehaviorOptions(StoredBehaviorOptions),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -334,6 +344,48 @@ impl From<&config::BehaviorConfig> for BehaviorConfig {
             one_shot_timeout: behavior.one_shot.timeout.as_millis() as u16,
             tap_interval: behavior.tap.tap_interval,
             tap_capslock_interval: behavior.tap.tap_capslock_interval,
+        }
+    }
+}
+
+/// The behavior settings added after [`BehaviorConfig`], kept as their own item so that
+/// one keeps its postcard layout.
+#[cfg(feature = "host")]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub(crate) struct StoredBehaviorOptions {
+    pub(crate) tri_layer: Option<[u8; 3]>,
+    pub(crate) combo_prior_idle_ms: Option<u16>,
+    pub(crate) oneshot_activate_on_keypress: bool,
+    pub(crate) oneshot_quick_release: bool,
+    pub(crate) morse_enable_flow_tap: bool,
+}
+
+#[cfg(feature = "host")]
+impl From<BehaviorOptions> for StoredBehaviorOptions {
+    fn from(options: BehaviorOptions) -> Self {
+        Self {
+            tri_layer: options.tri_layer,
+            combo_prior_idle_ms: options.combo_prior_idle_ms,
+            oneshot_activate_on_keypress: options.oneshot_activate_on_keypress,
+            oneshot_quick_release: options.oneshot_quick_release,
+            morse_enable_flow_tap: options.morse_enable_flow_tap,
+        }
+    }
+}
+
+#[cfg(feature = "host")]
+impl From<&config::BehaviorConfig> for StoredBehaviorOptions {
+    fn from(behavior: &config::BehaviorConfig) -> Self {
+        Self {
+            tri_layer: behavior.tri_layer,
+            combo_prior_idle_ms: behavior
+                .combo
+                .prior_idle_time
+                .map(|duration| duration.as_millis() as u16),
+            oneshot_activate_on_keypress: behavior.one_shot_modifiers.activate_on_keypress,
+            oneshot_quick_release: behavior.one_shot_modifiers.quick_release,
+            morse_enable_flow_tap: behavior.morse.enable_flow_tap,
         }
     }
 }
@@ -504,6 +556,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             }
         };
         put(StorageItem::BehaviorConfig(behavior.into())).await;
+        put(StorageItem::BehaviorOptions(behavior.into())).await;
         put(StorageItem::DefaultLayer(0)).await;
         put(StorageItem::LayoutOption(0)).await;
 
@@ -1048,6 +1101,8 @@ mod tests {
             StorageKey::UserData(11),
             #[cfg(feature = "host")]
             StorageKey::MorseProfile(9),
+            #[cfg(feature = "host")]
+            StorageKey::BehaviorOptions,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1083,6 +1138,8 @@ mod tests {
             StorageValue::UserData(heapless::Vec::new()),
             #[cfg(feature = "host")]
             StorageValue::MorseProfile(MorseProfile::default()),
+            #[cfg(feature = "host")]
+            StorageValue::BehaviorOptions((&RuntimeBehaviorConfig::default()).into()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {

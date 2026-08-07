@@ -209,6 +209,7 @@ struct Exemplars {
     capabilities: DeviceCapabilities,
     device_info: DeviceInfo,
     behavior: BehaviorConfig,
+    behavior_options: BehaviorOptions,
     connection: ConnectionStatus,
     state_bits: StateBits,
     combo: Combo,
@@ -275,6 +276,15 @@ fn exemplars() -> Exemplars {
             .with_quick_tap_timeout_ms(Some(110)),
         morse_prior_idle_time_ms: 120,
     };
+    let behavior_options = BehaviorOptions {
+        tri_layer: Some([1, 2, 3]),
+        combo_prior_idle_ms: Some(40),
+        oneshot_activate_on_keypress: true,
+        oneshot_quick_release: false,
+        morse_enable_flow_tap: true,
+        morse_prior_idle_ms: 60,
+        morse_default_profile: MorseProfile::new(None, Some(MorseMode::Normal), Some(70), Some(80)),
+    };
     let connection = ConnectionStatus {
         usb: UsbState::Configured,
         ble: BleStatus {
@@ -337,6 +347,7 @@ fn exemplars() -> Exemplars {
         capabilities,
         device_info,
         behavior,
+        behavior_options,
         connection,
         state_bits,
         combo,
@@ -515,6 +526,10 @@ fn wire_values_locked() {
         ("DeviceCapabilities{1..16}", encode(&ex.capabilities)),
         ("DeviceInfo{1.2.3,4,5,RMK,..}", encode(&ex.device_info)),
         ("BehaviorConfig{50..120}", encode(&ex.behavior)),
+        (
+            "BehaviorOptions{[1,2,3],40,true,false,true,60,profile}",
+            encode(&ex.behavior_options),
+        ),
         (
             "ConnectionStatus{Configured,{1,Adv,bonded},Ble}",
             encode(&ex.connection)
@@ -942,6 +957,26 @@ fn wire_frames_locked() {
         (
             "SetBehaviorConfig reply Ok(())",
             encode_frame(Cmd::SetBehaviorConfig, SEQ, &Ok::<(), RynkError>(())),
+        ),
+        (
+            "GetBehaviorOptions request ()",
+            encode_frame(Cmd::GetBehaviorOptions, SEQ, &()),
+        ),
+        (
+            "GetBehaviorOptions reply Ok(BehaviorOptions)",
+            encode_frame(
+                Cmd::GetBehaviorOptions,
+                SEQ,
+                &Ok::<BehaviorOptions, RynkError>(ex.behavior_options),
+            ),
+        ),
+        (
+            "SetBehaviorOptions request BehaviorOptions",
+            encode_frame(Cmd::SetBehaviorOptions, SEQ, &ex.behavior_options),
+        ),
+        (
+            "SetBehaviorOptions reply Ok(())",
+            encode_frame(Cmd::SetBehaviorOptions, SEQ, &Ok::<(), RynkError>(())),
         ),
         // Connection (0x07xx).
         (

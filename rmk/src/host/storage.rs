@@ -61,6 +61,14 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     behavior.tap.tap_interval = c.tap_interval;
                     behavior.tap.tap_capslock_interval = c.tap_capslock_interval;
                 }
+                (StorageKey::BehaviorOptions, StorageValue::BehaviorOptions(options)) => {
+                    behavior.tri_layer = options.tri_layer;
+                    behavior.combo.prior_idle_time =
+                        options.combo_prior_idle_ms.map(|ms| Duration::from_millis(ms as u64));
+                    behavior.one_shot_modifiers.activate_on_keypress = options.oneshot_activate_on_keypress;
+                    behavior.one_shot_modifiers.quick_release = options.oneshot_quick_release;
+                    behavior.morse.enable_flow_tap = options.morse_enable_flow_tap;
+                }
                 (StorageKey::Combo(idx), StorageValue::Combo(config)) => {
                     if let Some(slot) = behavior.combo.combos.get_mut(idx as usize) {
                         *slot = Some(Combo::new(config));
