@@ -109,8 +109,8 @@ impl MaxSize for DeviceInfo {
         + 3 * crate::heapless_vec_max_size::<u8, DEVICE_INFO_STRING_SIZE>();
 }
 
-/// Current lock/unlock state of this Rynk session, returned by `GetLockStatus`
-/// and `UnlockPoll`. The `Lock` endpoint returns `()`.
+/// Legacy lock status retained for wire compatibility. Current Rynk firmware
+/// reports an inert unlocked value; maintenance mode owns authorization.
 ///
 /// Loses `Copy` and derived `MaxSize` (both forbidden by the `heapless::Vec`
 /// field): handlers return it by value, and the bound is hand-written below.
@@ -119,13 +119,11 @@ impl MaxSize for DeviceInfo {
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct LockStatus {
     pub locked: bool,
-    /// An unlock attempt is armed (host is polling; window not yet lapsed).
+    /// Whether a legacy unlock attempt is armed.
     pub unlocking: bool,
-    /// Challenge keys not currently held; `== key_positions.len()` when no
-    /// attempt is armed.
+    /// Legacy challenge keys not currently held.
     pub remaining_keys: u8,
-    /// The challenge itself: physical `(row, col)` the user must hold. Empty
-    /// while `locked` ⇒ permanently locked (no `unlock_keys` configured).
+    /// Legacy challenge positions; empty on current Rynk firmware.
     #[cfg_attr(feature = "wasm", tsify(type = "[number, number][]"))]
     pub key_positions: Vec<(u8, u8), 4>,
 }

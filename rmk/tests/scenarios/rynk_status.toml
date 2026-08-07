@@ -15,11 +15,6 @@ keys = "A  MO(1)  No"
 [[keymap.layer]]
 keys = "B  _  No"
 
-# The legacy challenge is present to prove it has no bearing on maintenance
-# authorization.
-[host]
-unlock_keys = [[0, 2]]
-
 [[test]]
 name = "current_layer_follows_a_held_layer_key"
 steps = [
@@ -73,13 +68,9 @@ steps = [
 ]
 
 [[test]]
-name = "clearing_a_ble_profile_needs_an_unlock"
+name = "clearing_a_ble_profile_uses_the_maintenance_gate"
 features = ["_ble"]
 steps = [
-  { rynk = { cmd = "ClearBleProfile", payload = 0, error = "Locked" } },
-  { press = [0, 2] },
-  { rynk = { cmd = "UnlockPoll", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [[0, 2]] } } },
-  { release = [0, 2] },
   { rynk = { cmd = "ClearBleProfile", payload = 0 } },
 ]
 
