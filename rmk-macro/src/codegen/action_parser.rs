@@ -309,6 +309,13 @@ pub(crate) fn parse_action(key: &str) -> TokenStream2 {
     } else if lower.starts_with("macro(") {
         let index = strip_call(key).trim().parse::<u8>().unwrap();
         return quote! { ::rmk::types::action::Action::TriggerMacro(#index) };
+    } else if lower.starts_with("unicode(") {
+        let index = strip_call(key).trim().parse::<u16>().unwrap_or_else(|_| {
+            panic!(
+                "\n\u{274c} keyboard.toml: UNICODE(n) takes an index into [behavior.unicode].codepoints, got `{key}`"
+            )
+        });
+        return quote! { ::rmk::types::action::Action::Unicode(#index) };
     } else if lower.starts_with("shifted(") {
         let internal = strip_call(key);
         if internal.is_empty() {

@@ -14,6 +14,7 @@ use rmk_types::protocol::rynk::{
     LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_SCENE_CHUNK_SIZE, LightingConditionalSceneCell,
     LightingExtendedConditionalSceneCell, LightingLayerPolicy, LightingSceneCell,
 };
+use rmk_types::unicode::UnicodeMode;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
@@ -182,6 +183,8 @@ pub(crate) enum FlashOperationMessage {
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     // Animated extension-band selection and the selected effect's parameters
     LightingExtensionState(LightingExtensionRecord),
+    // Input method `Action::Unicode` types codepoints through
+    UnicodeMode(UnicodeMode),
     #[cfg(feature = "_ble")]
     // Read bond info for the given slot; storage task replies via `BOND_INFO_RESPONSE`.
     ReadBleBondInfo(u8),
@@ -246,6 +249,7 @@ pub(crate) enum StorageKey {
     LightingRuntimeConditionalSceneTableV2,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuntimeConditionalSceneShardV2(u8),
+    UnicodeMode,
 }
 
 impl StorageKey {
@@ -347,6 +351,7 @@ pub(crate) enum StorageData {
     LightingRuntimeConditionalSceneShardV2(
         heapless::Vec<LightingExtendedConditionalSceneCell, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE>,
     ),
+    UnicodeMode(UnicodeMode),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -646,6 +651,12 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             behavior_config.one_shot.timeout = Duration::from_millis(c.one_shot_timeout as u64);
             behavior_config.tap.tap_interval = c.tap_interval;
             behavior_config.tap.tap_capslock_interval = c.tap_capslock_interval;
+        }
+
+        // Stored under its own key rather than in `BehaviorConfig`, so a build
+        // that predates the mode keeps the one `keyboard.toml` configured.
+        if let Some(StorageData::UnicodeMode(mode)) = self.fetch_data(StorageKey::UnicodeMode).await {
+            behavior_config.unicode.mode = mode;
         }
 
         Ok(())
@@ -1185,6 +1196,10 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         }
                     }
                 }
+                FlashOperationMessage::UnicodeMode(mode) => {
+                    self.store_data(StorageKey::UnicodeMode, &StorageData::UnicodeMode(mode))
+                        .await
+                }
             };
 
             match write_result {
@@ -1390,6 +1405,7 @@ mod tests {
             StorageKey::LightingRuntimeConditionalSceneTableV2,
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageKey::LightingRuntimeConditionalSceneShardV2(0),
+            StorageKey::UnicodeMode,
         ];
 
         let mut buffer = [0u8; 64];
