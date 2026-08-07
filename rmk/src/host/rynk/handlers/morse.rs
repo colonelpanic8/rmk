@@ -1,8 +1,14 @@
 //! Morse handlers.
 
-use rmk_types::morse::Morse;
-use rmk_types::protocol::rynk::command::{GetMorse, GetMorseBulk, SetMorse, SetMorseBulk};
-use rmk_types::protocol::rynk::{GetMorseBulkRequest, RynkError, RynkMessage, SetMorseRequest, bulk_item_capacity};
+use rmk_types::morse::{Morse, MorseProfile};
+use rmk_types::protocol::rynk::command::{
+    GetMorse, GetMorseBulk, GetMorseProfile, GetMorseProfileBulk, GetMorseProfileCount, SetMorse, SetMorseBulk,
+    SetMorseProfile, SetMorseProfileBulk,
+};
+use rmk_types::protocol::rynk::{
+    GetMorseBulkRequest, GetMorseProfileBulkRequest, RynkError, RynkMessage, SetMorseProfileRequest, SetMorseRequest,
+    bulk_item_capacity,
+};
 
 use super::super::RynkService;
 use super::bulk::{bulk_page, take_bulk, take_element};
@@ -43,6 +49,49 @@ impl HandleBulk<SetMorseBulk> for RynkService<'_> {
         let start_index = take_element::<u8>(&mut cursor)? as usize;
         for (idx, config) in take_bulk::<Morse>(&mut cursor, start_index, self.ctx.morses_len())? {
             self.ctx.update_morse(idx as u8, |m| *m = config).await;
+        }
+        msg.encode_response(&())
+    }
+}
+
+impl Handle<GetMorseProfileCount> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<u8, RynkError> {
+        Ok(self.ctx.morse_profiles_capacity() as u8)
+    }
+}
+
+impl Handle<GetMorseProfile> for RynkService<'_> {
+    async fn handle(&self, idx: u8) -> Result<MorseProfile, RynkError> {
+        self.ctx.get_morse_profile(idx).ok_or(RynkError::Invalid)
+    }
+}
+
+impl Handle<SetMorseProfile> for RynkService<'_> {
+    async fn handle(&self, r: SetMorseProfileRequest) -> Result<(), RynkError> {
+        if self.ctx.set_morse_profile(r.index, r.profile).await {
+            Ok(())
+        } else {
+            Err(RynkError::Invalid)
+        }
+    }
+}
+
+impl HandleBulk<GetMorseProfileBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+        let req = msg.decode_request::<GetMorseProfileBulkRequest>()?;
+        let cap = bulk_item_capacity(msg.capacity());
+        let page = bulk_page(req.start_index as usize, cap, self.ctx.morse_profiles_capacity())?;
+        msg.encode_bulk(page.map(|idx| self.ctx.get_morse_profile(idx as u8).unwrap_or_default()))
+    }
+}
+
+impl HandleBulk<SetMorseProfileBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+        let mut cursor = msg.payload();
+        let start_index = take_element::<u8>(&mut cursor)? as usize;
+        let total = self.ctx.morse_profiles_capacity();
+        for (idx, profile) in take_bulk::<MorseProfile>(&mut cursor, start_index, total)? {
+            self.ctx.set_morse_profile(idx as u8, profile).await;
         }
         msg.encode_response(&())
     }
