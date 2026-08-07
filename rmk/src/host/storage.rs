@@ -1,12 +1,12 @@
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::fork::Fork;
-use rmk_types::morse::Morse;
+use rmk_types::morse::{Morse, MorseProfile};
 use serde::de::{Error as DeError, SeqAccess, Visitor};
 use serde::{Deserializer, Serializer};
 
 use crate::keyboard::combo::Combo;
 use crate::storage::{Storage, StorageData, StorageKey, print_storage_error};
-use crate::{COMBO_MAX_NUM, FORK_MAX_NUM, MACRO_SPACE_SIZE, MORSE_MAX_NUM};
+use crate::{COMBO_MAX_NUM, FORK_MAX_NUM, MACRO_SPACE_SIZE, MORSE_MAX_NUM, MORSE_PROFILE_MAX_NUM};
 
 pub(crate) mod macro_bytes_serde {
     use super::*;
@@ -179,6 +179,32 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
 
             if let Some(StorageData::Morse(morse)) = read_data {
                 *item = morse;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Restore profiles written over the host protocol. The table is only as
+    /// long as `keyboard.toml` made it, so a stored slot beyond its end grows
+    /// it — the same growth the setter does at runtime.
+    pub(crate) async fn read_morse_profiles(
+        &mut self,
+        profiles: &mut heapless::Vec<MorseProfile, MORSE_PROFILE_MAX_NUM>,
+    ) -> Result<(), ()> {
+        for i in 0..MORSE_PROFILE_MAX_NUM {
+            let key = StorageKey::morse_profile(i as u8);
+            let read_data = self
+                .flash
+                .fetch_item(&mut self.buffer, &key)
+                .await
+                .map_err(|e| print_storage_error::<F>(e))?;
+
+            if let Some(StorageData::MorseProfile(profile)) = read_data {
+                if i >= profiles.len() {
+                    profiles.resize(i + 1, MorseProfile::default()).ok();
+                }
+                profiles[i] = profile;
             }
         }
 

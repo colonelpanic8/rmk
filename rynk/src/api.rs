@@ -19,13 +19,14 @@ use rmk_types::combo::Combo;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
-use rmk_types::morse::Morse;
+use rmk_types::morse::{Morse, MorseProfile};
 use rmk_types::protocol::rynk::{
     BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
-    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
+    GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, KeyPosition, LockStatus, MacroData, MatrixState,
+    PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
+    SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest,
+    SetMorseProfileRequest, SetMorseRequest, StorageResetMode, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -293,6 +294,46 @@ impl Client {
         self.request::<command::SetMorseBulk>(&request).await
     }
 
+    /// Read how many morse profile slots the device has.
+    ///
+    /// Doubles as the feature probe: firmware built before the profile
+    /// endpoints answers [`RynkHostError::Rejected`] with
+    /// [`RynkError::UnknownCmd`](rmk_types::protocol::rynk::RynkError::UnknownCmd),
+    /// and none of the calls below will work against it.
+    pub async fn get_morse_profile_count(&self) -> Result<u8, RynkHostError> {
+        self.request::<command::GetMorseProfileCount>(&()).await
+    }
+
+    /// Read the profile a tap-hold key bound to `index` resolves to. A slot
+    /// nothing has written reads as the device's default profile.
+    pub async fn get_morse_profile(&self, index: u8) -> Result<MorseProfile, RynkHostError> {
+        self.request::<command::GetMorseProfile>(&index).await
+    }
+
+    /// Write one morse profile by index. Every tap-hold key bound to that index
+    /// picks the new timings up on its next press.
+    pub async fn set_morse_profile(&self, index: u8, profile: MorseProfile) -> Result<(), RynkHostError> {
+        self.request::<command::SetMorseProfile>(&SetMorseProfileRequest { index, profile })
+            .await
+    }
+
+    /// Read one page of morse profiles starting at slot `start_index`, with the
+    /// same paging rules as [`get_morse_bulk`](Self::get_morse_bulk).
+    /// Requires [`DeviceCapabilities::bulk_transfer_supported`]; nothing is sent otherwise.
+    pub async fn get_morse_profile_bulk(&self, start_index: u8) -> Result<GetMorseProfileBulkResponse, RynkHostError> {
+        self.require_bulk_transfer(Cmd::GetMorseProfileBulk)?;
+        self.request::<command::GetMorseProfileBulk>(&GetMorseProfileBulkRequest { start_index })
+            .await
+    }
+
+    /// Write `request.profiles` into consecutive profile slots starting at
+    /// `request.start_index`.
+    /// Requires [`DeviceCapabilities::bulk_transfer_supported`]; nothing is sent otherwise.
+    pub async fn set_morse_profile_bulk(&self, request: SetMorseProfileBulkRequest) -> Result<(), RynkHostError> {
+        self.require_bulk_transfer(Cmd::SetMorseProfileBulk)?;
+        self.request::<command::SetMorseProfileBulk>(&request).await
+    }
+
     /// Read one chunk of macro data starting at byte `offset`. Chunks are always full
     /// size, zero-filled past the end of macro space, so find the end by parsing the
     /// macro encoding rather than waiting for a short chunk.
@@ -428,6 +469,16 @@ impl Client {
         .await
     }
 
+    /// Read every morse profile slot with concurrent paged reads. The slot count
+    /// is not in [`DeviceCapabilities`], so this asks the device for it first.
+    pub async fn read_all_morse_profiles(&self) -> Result<Vec<MorseProfile>, RynkHostError> {
+        let total = self.get_morse_profile_count().await? as usize;
+        self.read_all(total, self.capabilities.max_bulk_items, async |c, start| {
+            c.get_morse_profile_bulk(start as u8).await.map(|r| r.profiles)
+        })
+        .await
+    }
+
     /// Write the whole keymap with concurrent paged writes, each page filled up to the
     /// device's payload limit. A failure leaves the earlier pages applied.
     pub async fn write_all_keymap(&self, actions: Vec<KeyAction>) -> Result<(), RynkHostError> {
@@ -469,6 +520,20 @@ impl Client {
             c.set_morse_bulk(SetMorseBulkRequest {
                 start_index: start as u8,
                 configs,
+            })
+            .await
+        })
+        .await
+    }
+
+    /// Write every morse profile with concurrent paged writes, each page filled
+    /// up to the device's payload limit. A failure leaves the earlier pages applied.
+    pub async fn write_all_morse_profiles(&self, profiles: Vec<MorseProfile>) -> Result<(), RynkHostError> {
+        // 1 fixed byte before the items: start_index.
+        self.write_all(Cmd::SetMorseProfileBulk, 1, profiles, async |c, start, profiles| {
+            c.set_morse_profile_bulk(SetMorseProfileBulkRequest {
+                start_index: start as u8,
+                profiles,
             })
             .await
         })
