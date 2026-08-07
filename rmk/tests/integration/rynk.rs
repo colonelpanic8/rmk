@@ -120,3 +120,54 @@ fn keymap_write_survives_restart() {
             .await;
     });
 }
+
+/// A retuned profile has to outlive the session that set it, or dialing timings
+/// in by feel would reset on every unplug. The restarted keyboard compiles a
+/// 300 ms hold, so a 150 ms press resolving as a hold can only come from the
+/// 100 ms that was persisted.
+#[cfg(feature = "storage")]
+#[test]
+fn morse_profile_write_survives_restart() {
+    use rmk::config::BehaviorConfig;
+    use rmk::mtp;
+    use rmk::types::modifier::ModifierCombination;
+    use rmk::types::morse::{MorseMode, MorseProfile};
+
+    const SET_PROFILE: &str = r#"{"index":0,"profile":{"mode":"Normal","hold_timeout_ms":100,"gap_timeout_ms":100}}"#;
+
+    fn compiled_behavior() -> BehaviorConfig {
+        let mut behavior = BehaviorConfig::default();
+        behavior
+            .morse
+            .profiles
+            .push(MorseProfile::new(None, Some(MorseMode::Normal), Some(300), Some(300)))
+            .unwrap();
+        behavior
+    }
+
+    test_block_on(async {
+        let flash = crate::simulator::flash::InMemoryFlash::new();
+        let keymap = [[[mtp!(A, ModifierCombination::LSHIFT, 0)]]];
+        {
+            let mut keyboard = SimKeyboard::builder(keymap)
+                .behavior_config(compiled_behavior())
+                .build_with_flash(flash.clone())
+                .await;
+            keyboard
+                .rynk::<command::SetMorseProfile>(SET_PROFILE, RynkReply::Ok("null"))
+                .wait_storage()
+                .run()
+                .await;
+        }
+        let mut keyboard = SimKeyboard::builder(keymap)
+            .behavior_config(compiled_behavior())
+            .build_with_flash(flash)
+            .await;
+        keyboard
+            .tap(0, 0, 150)
+            .expect_keys_with_mods(ModifierCombination::LSHIFT.into_bits(), [])
+            .expect_keys([])
+            .run()
+            .await;
+    });
+}
