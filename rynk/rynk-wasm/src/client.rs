@@ -20,7 +20,7 @@ use rynk::rmk_types::combo::Combo;
 use rynk::rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rynk::rmk_types::fork::Fork;
 use rynk::rmk_types::led_indicator::LedIndicator;
-use rynk::rmk_types::morse::{Morse, MorseProfile};
+use rynk::rmk_types::morse::Morse;
 use rynk::rmk_types::protocol::rynk::{
     AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, DeviceCapabilities, DeviceInfo, GetComboBulkResponse,
     GetKeymapBulkResponse, GetMorseBulkResponse, GetMorseProfileBulkResponse, LockStatus, MacroData, MatrixState,
@@ -85,6 +85,36 @@ impl RynkClient {
     pub async fn next_topic(&self) -> Result<TopicEvent, JsValue> {
         self.drive(async { Ok(self.client.next_topic().await) }).await
     }
+
+    #[wasm_bindgen(unchecked_return_type = "MorseProfile[]")]
+    pub async fn read_all_morse_profiles(&self) -> Result<JsValue, JsValue> {
+        let profiles = self.drive(self.client.read_all_morse_profiles()).await?;
+        serde_wasm_bindgen::to_value(&profiles).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    pub async fn write_all_morse_profiles(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "MorseProfile[]")] profiles: JsValue,
+    ) -> Result<(), JsValue> {
+        let profiles =
+            serde_wasm_bindgen::from_value(profiles).map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.drive(self.client.write_all_morse_profiles(profiles)).await
+    }
+
+    #[wasm_bindgen(unchecked_return_type = "MorseProfile")]
+    pub async fn get_morse_profile(&self, index: u8) -> Result<JsValue, JsValue> {
+        let profile = self.drive(self.client.get_morse_profile(index)).await?;
+        serde_wasm_bindgen::to_value(&profile).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    pub async fn set_morse_profile(
+        &self,
+        index: u8,
+        #[wasm_bindgen(unchecked_param_type = "MorseProfile")] profile: JsValue,
+    ) -> Result<(), JsValue> {
+        let profile = serde_wasm_bindgen::from_value(profile).map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.drive(self.client.set_morse_profile(index, profile)).await
+    }
 }
 
 /// Generate the typed wasm request methods from the native client shape.
@@ -133,8 +163,6 @@ endpoints! {
     write_all_combos(configs: Vec<Combo>) -> (),
     read_all_morses() -> Vec<Morse>,
     write_all_morses(configs: Vec<Morse>) -> (),
-    read_all_morse_profiles() -> Vec<MorseProfile>,
-    write_all_morse_profiles(profiles: Vec<MorseProfile>) -> (),
     get_layout() -> LayoutInfo,
     // combos / forks / morse / macros
     get_combo(index: u8) -> Combo,
@@ -148,8 +176,6 @@ endpoints! {
     get_morse_bulk(start_index: u8) -> GetMorseBulkResponse,
     set_morse_bulk(request: SetMorseBulkRequest) -> (),
     get_morse_profile_count() -> u8,
-    get_morse_profile(index: u8) -> MorseProfile,
-    set_morse_profile(index: u8, profile: MorseProfile) -> (),
     get_morse_profile_bulk(start_index: u8) -> GetMorseProfileBulkResponse,
     set_morse_profile_bulk(request: SetMorseProfileBulkRequest) -> (),
     get_macro(offset: u16) -> MacroData,
