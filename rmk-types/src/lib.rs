@@ -37,6 +37,7 @@
 extern crate alloc;
 
 pub mod action;
+pub mod auto_mouse;
 pub mod battery;
 pub mod ble;
 pub mod combo;

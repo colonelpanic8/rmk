@@ -10,6 +10,7 @@ pub struct Behavior {
     pub forks: Option<Forks>,
     pub morse: Option<Morse>,
     pub auto_mouse_layer: Vec<AutoMouseLayer>,
+    pub max_auto_mouse_layers: usize,
 }
 
 pub struct AutoMouseLayer {
@@ -27,6 +28,9 @@ pub const DEFAULT_AUTO_MOUSE_LAYER_TIMEOUT_MS: u64 = 500;
 
 /// Default motion threshold for [`AutoMouseLayer`] when not specified.
 pub const DEFAULT_AUTO_MOUSE_LAYER_THRESHOLD: u16 = 1;
+
+/// Protocol/storage capacity for `extra_mouse_keys` in one auto mouse layer entry.
+pub const MAX_AUTO_MOUSE_LAYER_EXTRA_KEYS: usize = 16;
 
 /// Fallback for `max_auto_mouse_layers` when no `keyboard.toml` is loaded.
 pub const DEFAULT_MAX_AUTO_MOUSE_LAYERS: usize = 2;
@@ -271,6 +275,7 @@ impl crate::KeyboardTomlConfig {
             forks,
             morse,
             auto_mouse_layer,
+            max_auto_mouse_layers: self.rmk.max_auto_mouse_layers.unwrap_or(DEFAULT_MAX_AUTO_MOUSE_LAYERS),
         })
     }
 }
