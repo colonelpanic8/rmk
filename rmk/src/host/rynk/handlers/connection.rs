@@ -3,9 +3,11 @@
 #[cfg(feature = "_ble")]
 use rmk_types::ble::BleStatus;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
+#[cfg(feature = "_ble")]
+use rmk_types::protocol::rynk::BleName;
 use rmk_types::protocol::rynk::RynkError;
 #[cfg(feature = "_ble")]
-use rmk_types::protocol::rynk::command::{ClearBleProfile, GetBleStatus, SwitchBleProfile};
+use rmk_types::protocol::rynk::command::{ClearBleProfile, GetBleName, GetBleStatus, SetBleName, SwitchBleProfile};
 use rmk_types::protocol::rynk::command::{GetConnectionStatus, GetConnectionType};
 
 use super::super::RynkService;
@@ -55,6 +57,24 @@ impl Handle<ClearBleProfile> for RynkService<'_> {
         crate::channel::BLE_PROFILE_CHANNEL
             .try_send(crate::ble::profile::BleProfileAction::ClearSlot(slot))
             .map_err(|_| RynkError::NotReady)
+    }
+}
+
+#[cfg(feature = "_ble")]
+impl Handle<GetBleName> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<BleName, RynkError> {
+        Ok(crate::ble::name::current())
+    }
+}
+
+#[cfg(feature = "_ble")]
+impl Handle<SetBleName> for RynkService<'_> {
+    async fn handle(&self, value: BleName) -> Result<(), RynkError> {
+        crate::ble::name::set(value.clone()).map_err(|_| RynkError::Invalid)?;
+        crate::channel::FLASH_CHANNEL
+            .send(crate::storage::FlashOperationMessage::BleName(value))
+            .await;
+        Ok(())
     }
 }
 
