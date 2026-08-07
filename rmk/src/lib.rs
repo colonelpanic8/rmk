@@ -108,7 +108,6 @@ pub mod physical_layout;
 pub mod processor;
 #[cfg(feature = "split")]
 pub mod split;
-// Bounded application-message hook for the split protocol.
 #[cfg(feature = "split")]
 pub mod split_app;
 pub mod state;
