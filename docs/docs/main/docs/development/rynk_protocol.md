@@ -107,6 +107,8 @@ The lock is per session and starts locked; `Lock` or the end of the session (unp
 | `0x0703` | `GetBleStatus`        | `()`                   | `BleStatus`             | `_ble`  |                                                                              |
 | `0x0704` | `SwitchBleProfile`    | `u8`                   | `()`                    | `_ble`  |                                                                              |
 | `0x0705` | `ClearBleProfile`     | `u8`                   | `()`                    | `_ble`  |                                                                              |
+| `0x0708` | `GetBleName`          | `()`                   | `BleName`               | `_ble`  | Read the persistent BLE advertising-name template.                           |
+| `0x0709` | `SetBleName`          | `BleName`              | `()`                    | `_ble`  | Replace the persistent BLE advertising-name template.                        |
 | `0x0801` | `GetCurrentLayer`     | `()`                   | `u8`                    |         |                                                                              |
 | `0x0802` | `GetMatrixState`      | `()`                   | `MatrixState`           |         |                                                                              |
 | `0x0803` | `GetBatteryStatus`    | `()`                   | `BatteryStatus`         | `_ble`  |                                                                              |

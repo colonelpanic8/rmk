@@ -21,7 +21,7 @@ use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::morse::Morse;
 use rmk_types::protocol::rynk::{
-    BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
+    BehaviorConfig, BleName, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
     KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
     SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
@@ -392,6 +392,18 @@ impl Client {
     pub async fn clear_ble_profile(&self, slot: u8) -> Result<(), RynkHostError> {
         self.require_ble(Cmd::ClearBleProfile)?;
         self.request::<command::ClearBleProfile>(&slot).await
+    }
+
+    /// Read the persistent BLE advertising-name template.
+    pub async fn get_ble_name(&self) -> Result<BleName, RynkHostError> {
+        self.require_ble(Cmd::GetBleName)?;
+        self.request::<command::GetBleName>(&()).await
+    }
+
+    /// Replace the persistent BLE advertising-name template.
+    pub async fn set_ble_name(&self, value: &BleName) -> Result<(), RynkHostError> {
+        self.require_ble(Cmd::SetBleName)?;
+        self.request::<command::SetBleName>(value).await
     }
 }
 

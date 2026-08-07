@@ -370,11 +370,15 @@ fn wire_values_locked() {
         key_positions: unlock_keys,
     };
     let profile = MorseProfile::new(None, Some(MorseMode::Normal), Some(200), Some(150));
+    let ble_name = BleName {
+        template: heapless::String::try_from("Glove80 {slot}").unwrap(),
+    };
 
     let entries: alloc::vec::Vec<(&str, alloc::vec::Vec<u8>)> = alloc::vec![
         // --- Response envelope + connection ---
         ("ConnectionType::Ble", encode(&ConnectionType::Ble)),
         ("ConnectionType::Usb", encode(&ConnectionType::Usb)),
+        ("BleName{Glove80 {slot}}", encode(&ble_name)),
         (
             "Result<(),RynkError>::Err(StorageFault)",
             encode::<Result<(), RynkError>>(&Err(RynkError::StorageFault)),

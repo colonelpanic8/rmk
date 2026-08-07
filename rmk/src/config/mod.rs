@@ -37,6 +37,10 @@ pub struct RmkConfig<'a> {
     pub storage_config: StorageConfig,
     #[cfg(feature = "_ble")]
     pub ble_battery_config: BleBatteryConfig<'a>,
+    /// Compiled fallback for the persistent BLE advertising-name template.
+    /// `None` uses `device_config.product_name`.
+    #[cfg(feature = "_ble")]
+    pub ble_name: Option<&'a str>,
 }
 
 #[cfg(feature = "rynk")]
@@ -52,6 +56,8 @@ impl Default for RmkConfig<'_> {
             storage_config: StorageConfig::default(),
             #[cfg(feature = "_ble")]
             ble_battery_config: BleBatteryConfig::default(),
+            #[cfg(feature = "_ble")]
+            ble_name: None,
         }
     }
 }

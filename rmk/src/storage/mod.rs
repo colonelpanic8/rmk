@@ -8,6 +8,8 @@ use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
+#[cfg(feature = "_ble")]
+use rmk_types::protocol::rynk::BleName;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
@@ -42,6 +44,8 @@ static PEER_ADDRESS_RESPONSE: Signal<crate::RawMutex, Option<PeerAddress>> = Sig
 static CONNECTION_TYPE_RESPONSE: Signal<crate::RawMutex, Option<ConnectionType>> = Signal::new();
 #[cfg(feature = "_ble")]
 static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();
+#[cfg(feature = "_ble")]
+static BLE_NAME_RESPONSE: Signal<crate::RawMutex, Option<BleName>> = Signal::new();
 
 #[cfg(feature = "_ble")]
 async fn request_read<T: Send>(msg: FlashOperationMessage, response: &Signal<crate::RawMutex, T>) -> T {
@@ -72,6 +76,11 @@ pub(crate) async fn read_active_ble_profile() -> Option<u8> {
         &ACTIVE_BLE_PROFILE_RESPONSE,
     )
     .await
+}
+
+#[cfg(feature = "_ble")]
+pub(crate) async fn read_ble_name() -> Option<BleName> {
+    request_read(FlashOperationMessage::ReadBleName, &BLE_NAME_RESPONSE).await
 }
 
 /// Send a peer address to be persisted; wait for the storage task to finish.
@@ -168,6 +177,12 @@ pub(crate) enum FlashOperationMessage {
     #[cfg(feature = "_ble")]
     // Read the persisted active BLE profile number; storage task replies via `ACTIVE_BLE_PROFILE_RESPONSE`.
     ReadActiveBleProfile,
+    #[cfg(feature = "_ble")]
+    // Read the persisted BLE advertising-name template.
+    ReadBleName,
+    #[cfg(feature = "_ble")]
+    // Persist the BLE advertising-name template.
+    BleName(BleName),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -202,6 +217,9 @@ pub(crate) enum StorageKey {
     ActiveBleProfile,
     #[cfg(feature = "_ble")]
     BondInfo(u8),
+    // Postcard tags variants by declaration order, so new keys go last.
+    #[cfg(feature = "_ble")]
+    BleName,
 }
 
 impl StorageKey {
@@ -283,6 +301,9 @@ pub(crate) enum StorageData {
     BondInfo(ProfileInfo),
     #[cfg(feature = "_ble")]
     ActiveBleProfile(u8),
+    // New variants go last, matching `StorageKey`.
+    #[cfg(feature = "_ble")]
+    BleName(BleName),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -699,6 +720,15 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     ACTIVE_BLE_PROFILE_RESPONSE.signal(resp);
                     continue;
                 }
+                #[cfg(feature = "_ble")]
+                FlashOperationMessage::ReadBleName => {
+                    let resp = match self.fetch_data(StorageKey::BleName).await {
+                        Some(StorageData::BleName(value)) => Some(value),
+                        _ => None,
+                    };
+                    BLE_NAME_RESPONSE.signal(resp);
+                    continue;
+                }
 
                 FlashOperationMessage::LayoutOptions(layout_option) => {
                     update_storage_field!(&mut self.flash, &mut self.buffer, LayoutConfig, layout_option)
@@ -762,6 +792,10 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 FlashOperationMessage::ActiveBleProfile(profile) => {
                     self.store_data(StorageKey::ActiveBleProfile, &StorageData::ActiveBleProfile(profile))
                         .await
+                }
+                #[cfg(feature = "_ble")]
+                FlashOperationMessage::BleName(value) => {
+                    self.store_data(StorageKey::BleName, &StorageData::BleName(value)).await
                 }
                 #[cfg(feature = "_ble")]
                 FlashOperationMessage::ClearSlot(slot_num) => {
@@ -998,6 +1032,8 @@ mod tests {
             StorageKey::ActiveBleProfile,
             #[cfg(feature = "_ble")]
             StorageKey::BondInfo(0),
+            #[cfg(feature = "_ble")]
+            StorageKey::BleName,
         ];
 
         let mut buffer = [0u8; 64];
