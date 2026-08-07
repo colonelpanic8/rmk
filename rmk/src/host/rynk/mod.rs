@@ -66,7 +66,8 @@ impl<'a> RynkService<'a> {
             | Cmd::SetMorseBulk
             | Cmd::SetMorseProfile
             | Cmd::SetMorseProfileBulk
-            | Cmd::SetBehaviorOptions => self.lock_config.write_requires_unlock,
+            | Cmd::SetBehaviorOptions
+            | Cmd::SetAutoMouseLayerConfigs => self.lock_config.write_requires_unlock,
             _ => false,
         }
     }
@@ -124,6 +125,8 @@ impl<'a> RynkService<'a> {
             Cmd::SetBehaviorConfig => serve::<command::SetBehaviorConfig, _>(self, msg).await,
             Cmd::GetBehaviorOptions => serve::<command::GetBehaviorOptions, _>(self, msg).await,
             Cmd::SetBehaviorOptions => serve::<command::SetBehaviorOptions, _>(self, msg).await,
+            Cmd::GetAutoMouseLayerConfigs => serve::<command::GetAutoMouseLayerConfigs, _>(self, msg).await,
+            Cmd::SetAutoMouseLayerConfigs => serve::<command::SetAutoMouseLayerConfigs, _>(self, msg).await,
 
             Cmd::GetConnectionType => serve::<command::GetConnectionType, _>(self, msg).await,
             Cmd::GetConnectionStatus => serve::<command::GetConnectionStatus, _>(self, msg).await,
