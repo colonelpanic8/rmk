@@ -7,7 +7,15 @@ use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
 
 use crate::DEVICE_INFO_STRING_MAX_LEN;
+use crate::auto_mouse::AutoMouseLayerConfig;
+#[cfg(not(feature = "host"))]
+use crate::constants::MAX_AUTO_MOUSE_LAYERS;
 use crate::morse::MorseProfile;
+
+#[cfg(not(feature = "host"))]
+pub type AutoMouseLayerConfigs = Vec<AutoMouseLayerConfig, MAX_AUTO_MOUSE_LAYERS>;
+#[cfg(feature = "host")]
+pub type AutoMouseLayerConfigs = alloc::vec::Vec<AutoMouseLayerConfig>;
 
 /// Protocol version advertised during the connection handshake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
@@ -190,6 +198,36 @@ pub struct BehaviorOptions {
     pub morse_enable_flow_tap: bool,
     pub morse_prior_idle_ms: u16,
     pub morse_default_profile: MorseProfile,
+}
+
+/// The complete auto mouse layer table and the firmware's compiled capacity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct AutoMouseLayerConfigState {
+    pub capacity: u8,
+    #[cfg_attr(feature = "wasm", tsify(type = "AutoMouseLayerConfig[]"))]
+    pub configs: AutoMouseLayerConfigs,
+}
+
+#[cfg(not(feature = "host"))]
+impl MaxSize for AutoMouseLayerConfigState {
+    const POSTCARD_MAX_SIZE: usize =
+        u8::POSTCARD_MAX_SIZE + crate::heapless_vec_max_size::<AutoMouseLayerConfig, MAX_AUTO_MOUSE_LAYERS>();
+}
+
+/// Atomic replacement payload for the complete auto mouse layer table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct SetAutoMouseLayerConfigsRequest {
+    #[cfg_attr(feature = "wasm", tsify(type = "AutoMouseLayerConfig[]"))]
+    pub configs: AutoMouseLayerConfigs,
+}
+
+#[cfg(not(feature = "host"))]
+impl MaxSize for SetAutoMouseLayerConfigsRequest {
+    const POSTCARD_MAX_SIZE: usize = crate::heapless_vec_max_size::<AutoMouseLayerConfig, MAX_AUTO_MOUSE_LAYERS>();
 }
 
 #[cfg(test)]
