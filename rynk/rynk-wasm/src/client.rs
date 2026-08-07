@@ -20,11 +20,11 @@ use rynk::rmk_types::combo::Combo;
 use rynk::rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rynk::rmk_types::fork::Fork;
 use rynk::rmk_types::led_indicator::LedIndicator;
-use rynk::rmk_types::morse::Morse;
+use rynk::rmk_types::morse::{Morse, MorseProfile};
 use rynk::rmk_types::protocol::rynk::{
     BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse,
-    LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetKeymapBulkRequest,
-    SetMorseBulkRequest, StorageResetMode,
+    GetMorseProfileBulkResponse, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion,
+    SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest, StorageResetMode,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -132,6 +132,8 @@ endpoints! {
     write_all_combos(configs: Vec<Combo>) -> (),
     read_all_morses() -> Vec<Morse>,
     write_all_morses(configs: Vec<Morse>) -> (),
+    read_all_morse_profiles() -> Vec<MorseProfile>,
+    write_all_morse_profiles(profiles: Vec<MorseProfile>) -> (),
     get_layout() -> LayoutInfo,
     // combos / forks / morse / macros
     get_combo(index: u8) -> Combo,
@@ -144,6 +146,11 @@ endpoints! {
     set_morse(index: u8, config: Morse) -> (),
     get_morse_bulk(start_index: u8) -> GetMorseBulkResponse,
     set_morse_bulk(request: SetMorseBulkRequest) -> (),
+    get_morse_profile_count() -> u8,
+    get_morse_profile(index: u8) -> MorseProfile,
+    set_morse_profile(index: u8, profile: MorseProfile) -> (),
+    get_morse_profile_bulk(start_index: u8) -> GetMorseProfileBulkResponse,
+    set_morse_profile_bulk(request: SetMorseProfileBulkRequest) -> (),
     get_macro(offset: u16) -> MacroData,
     set_macro(offset: u16, data: MacroData) -> (),
     // behavior

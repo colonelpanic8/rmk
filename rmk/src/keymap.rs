@@ -436,6 +436,7 @@ impl<'a> KeyMap<'a> {
                     .and(storage.read_combos(&mut behavior.combo.combos).await)
                     .and(storage.read_forks(&mut behavior.fork.forks).await)
                     .and(storage.read_morses(&mut behavior.morse.morses).await)
+                    .and(storage.read_morse_profiles(&mut behavior.morse.profiles).await)
             }
             .is_err()
         {
@@ -637,6 +638,31 @@ impl<'a> KeyMap<'a> {
 
     pub(crate) fn morses_len(&self) -> usize {
         self.inner.borrow().behavior.morse.morses.len()
+    }
+
+    /// Addressable morse profile slots. Slots past the ones `keyboard.toml`
+    /// named are still writable, so this is the table's capacity rather than
+    /// the number of profiles configured at build time.
+    pub(crate) fn morse_profiles_capacity(&self) -> usize {
+        self.inner.borrow().behavior.morse.profiles.capacity()
+    }
+
+    /// Replace the profile at `idx`, growing the table to reach it. Returns
+    /// `false` for an index past the table's capacity, leaving it untouched.
+    /// Slots skipped over are left unset, which resolves per-field to the
+    /// default profile exactly as an absent entry did.
+    pub(crate) fn set_morse_profile(&self, idx: u8, profile: MorseProfile) -> bool {
+        let mut inner = self.inner.borrow_mut();
+        let profiles = &mut inner.behavior.morse.profiles;
+        let idx = idx as usize;
+        if idx >= profiles.capacity() {
+            return false;
+        }
+        if idx >= profiles.len() {
+            profiles.resize(idx + 1, MorseProfile::default()).ok();
+        }
+        profiles[idx] = profile;
+        true
     }
 
     pub(crate) fn set_combo_timeout(&self, timeout: Duration) {

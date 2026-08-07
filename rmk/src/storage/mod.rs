@@ -145,6 +145,11 @@ pub(crate) enum FlashOperationMessage {
         idx: u8,
         morse: Morse,
     },
+    #[cfg(feature = "host")]
+    MorseProfile {
+        idx: u8,
+        profile: MorseProfile,
+    },
     // Current saved connection type
     ConnectionType(ConnectionType),
     // Timeout time for combos
@@ -211,6 +216,11 @@ pub(crate) enum StorageKey {
     ActiveBleProfile,
     #[cfg(feature = "_ble")]
     BondInfo(u8),
+    // Postcard tags variants by declaration order, so new keys go last: an
+    // existing keyboard's persisted items must keep the tags they were saved
+    // with.
+    #[cfg(feature = "host")]
+    MorseProfile(u8),
 }
 
 impl StorageKey {
@@ -247,6 +257,11 @@ impl StorageKey {
     #[cfg(feature = "host")]
     pub(crate) const fn morse(idx: u8) -> Self {
         Self::Morse(idx)
+    }
+
+    #[cfg(feature = "host")]
+    pub(crate) const fn morse_profile(idx: u8) -> Self {
+        Self::MorseProfile(idx)
     }
 }
 
@@ -292,6 +307,9 @@ pub(crate) enum StorageData {
     BondInfo(ProfileInfo),
     #[cfg(feature = "_ble")]
     ActiveBleProfile(u8),
+    // New variants go last, for the same reason as in `StorageKey`.
+    #[cfg(feature = "host")]
+    MorseProfile(MorseProfile),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -764,6 +782,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     self.store_data(StorageKey::morse(idx), &StorageData::Morse(morse))
                         .await
                 }
+                #[cfg(feature = "host")]
+                FlashOperationMessage::MorseProfile { idx, profile } => {
+                    self.store_data(StorageKey::morse_profile(idx), &StorageData::MorseProfile(profile))
+                        .await
+                }
                 FlashOperationMessage::ConnectionType(ty) => {
                     self.store_data(StorageKey::ConnectionType, &StorageData::ConnectionType(ty))
                         .await
@@ -1010,6 +1033,8 @@ mod tests {
             StorageKey::ActiveBleProfile,
             #[cfg(feature = "_ble")]
             StorageKey::BondInfo(0),
+            #[cfg(feature = "host")]
+            StorageKey::MorseProfile(9),
         ];
 
         let mut buffer = [0u8; 64];
