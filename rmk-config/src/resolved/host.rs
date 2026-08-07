@@ -25,7 +25,7 @@ impl crate::KeyboardTomlConfig {
             unlock_keys,
             insecure: host_toml.insecure,
             write_requires_unlock: host_toml.write_requires_unlock,
-            maintenance_mode_default: host_toml.maintenance_mode_default,
+            maintenance_mode_default: !host_toml.maintenance_lock_default,
         }
     }
 }

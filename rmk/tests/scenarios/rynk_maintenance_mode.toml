@@ -10,7 +10,7 @@ keys = "MaintenanceModeToggle No"
 
 [host]
 unlock_keys = [[0, 1]]
-maintenance_mode_default = false
+maintenance_lock_default = true
 
 [[test]]
 name = "disabled_default_blocks_every_maintenance_operation"
