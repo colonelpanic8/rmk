@@ -22,9 +22,10 @@ use rynk::rmk_types::fork::Fork;
 use rynk::rmk_types::led_indicator::LedIndicator;
 use rynk::rmk_types::morse::{Morse, MorseProfile};
 use rynk::rmk_types::protocol::rynk::{
-    BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse,
-    GetMorseProfileBulkResponse, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion,
-    SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest, StorageResetMode,
+    BehaviorConfig, BehaviorOptions, DeviceCapabilities, DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse,
+    GetMorseBulkResponse, GetMorseProfileBulkResponse, LockStatus, MacroData, MatrixState, PeripheralStatus,
+    ProtocolVersion, SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest,
+    StorageResetMode,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -156,6 +157,8 @@ endpoints! {
     // behavior
     get_behavior() -> BehaviorConfig,
     set_behavior(config: BehaviorConfig) -> (),
+    get_behavior_options() -> BehaviorOptions,
+    set_behavior_options(options: BehaviorOptions) -> (),
     // status
     get_current_layer() -> u8,
     get_matrix_state() -> MatrixState,

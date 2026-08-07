@@ -14,12 +14,12 @@ use serde::de::DeserializeOwned;
 
 use super::message::{RynkHeader, encode_frame};
 use super::{
-    BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
-    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, KeyPosition, LayoutChunk, LockStatus, MacroData,
-    MatrixState, ProtocolVersion, RynkError, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
-    SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest,
-    SetMorseProfileRequest, SetMorseRequest, StorageResetMode,
+    BehaviorConfig, BehaviorOptions, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
+    GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest,
+    GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, KeyPosition, LayoutChunk,
+    LockStatus, MacroData, MatrixState, ProtocolVersion, RynkError, SetComboBulkRequest, SetComboRequest,
+    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
+    SetMorseProfileBulkRequest, SetMorseProfileRequest, SetMorseRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -325,6 +325,8 @@ endpoints! {
     // Behavior (0x06xx).
     GetBehaviorConfig = 0x0601: () => BehaviorConfig;
     SetBehaviorConfig = 0x0602: BehaviorConfig => ();
+    GetBehaviorOptions = 0x0603: () => BehaviorOptions;
+    SetBehaviorOptions = 0x0604: BehaviorOptions => ();
 
     // Connection (0x07xx).
     GetConnectionType = 0x0701: () => ConnectionType;

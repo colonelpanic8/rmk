@@ -21,12 +21,12 @@ use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::morse::{Morse, MorseProfile};
 use rmk_types::protocol::rynk::{
-    BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
-    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, KeyPosition, LockStatus, MacroData, MatrixState,
-    PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
-    SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest,
-    SetMorseProfileRequest, SetMorseRequest, StorageResetMode, command,
+    BehaviorConfig, BehaviorOptions, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
+    GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest,
+    GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, KeyPosition, LockStatus, MacroData,
+    MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetComboRequest, SetEncoderRequest,
+    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
+    SetMorseProfileBulkRequest, SetMorseProfileRequest, SetMorseRequest, StorageResetMode, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -356,6 +356,17 @@ impl Client {
     /// Write the global behavior config.
     pub async fn set_behavior(&self, config: BehaviorConfig) -> Result<(), RynkHostError> {
         self.request::<command::SetBehaviorConfig>(&config).await
+    }
+
+    /// Read the global behavior settings added after [`BehaviorConfig`].
+    /// Firmware predating the endpoint rejects this with `UnknownCmd`.
+    pub async fn get_behavior_options(&self) -> Result<BehaviorOptions, RynkHostError> {
+        self.request::<command::GetBehaviorOptions>(&()).await
+    }
+
+    /// Replace the global behavior settings added after [`BehaviorConfig`].
+    pub async fn set_behavior_options(&self, options: BehaviorOptions) -> Result<(), RynkHostError> {
+        self.request::<command::SetBehaviorOptions>(&options).await
     }
 
     /// Read the currently active layer.
