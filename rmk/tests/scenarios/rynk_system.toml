@@ -12,11 +12,6 @@ map = """
 [[keymap.layer]]
 keys = "A  No"
 
-# Legacy lock endpoints remain available for old hosts, but command
-# authorization is controlled only by maintenance mode.
-[host]
-unlock_keys = [[0, 1]]
-
 [[test]]
 name = "version_is_the_frozen_handshake"
 steps = [
