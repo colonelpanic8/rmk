@@ -33,6 +33,27 @@ enum SlotState {
     Connected([u8; 6]),
 }
 
+#[derive(Default)]
+struct KnownPeerRecovery {
+    missed_attempts: u8,
+}
+
+impl KnownPeerRecovery {
+    fn reset(&mut self) {
+        self.missed_attempts = 0;
+    }
+
+    fn missed(&mut self) -> bool {
+        self.missed_attempts = self.missed_attempts.saturating_add(1);
+        if self.missed_attempts >= super::KNOWN_PEER_CONNECT_RESCAN_ATTEMPTS {
+            self.reset();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 // The split service and its two characteristics, declared by `#[gatt_service]`
 // in `split::ble::peripheral` and discovered by UUID here.
 const SPLIT_SERVICE_UUID: u128 = 0x4dd5fbaa_18e5_4b07_bf0a_353698659946;
@@ -56,6 +77,8 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
             *slot = SlotState::Disconnected(peer.address);
         }
     }
+    let mut recoveries: [KnownPeerRecovery; crate::SPLIT_PERIPHERALS_NUM] =
+        core::array::from_fn(|_| KnownPeerRecovery::default());
 
     let mut central = stack.central();
     wait_for_stack_started().await;
@@ -98,6 +121,7 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                     let peer = conn.peer_address();
                     if let Some(&(id, addr)) = pending.iter().find(|(_, addr)| Address::random(*addr) == peer) {
                         info!("Connected to peripheral {}", id);
+                        recoveries[id].reset();
                         peripheral_slots[id] = SlotState::Connected(addr);
                         conns[id].send(conn).await;
                     } else {
@@ -116,7 +140,19 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                     if crate::state::current_sleep_state() {
                         warn!("Connect timeout while asleep, keeping {} address(es)", pending.len());
                     } else {
-                        debug!("Connect timeout, re-arming {} address(es)", pending.len());
+                        for &(id, _) in &pending {
+                            if recoveries[id].missed() {
+                                warn!("Connect to peripheral {} repeatedly timed out, rescanning", id);
+                                peripheral_slots[id] = SlotState::NoAddr;
+                                FLASH_CHANNEL
+                                    .send(FlashOperationMessage::PeerAddress(PeerAddress::new(
+                                        id as u8, false, [0; 6],
+                                    )))
+                                    .await;
+                            } else {
+                                debug!("Connect to peripheral {} timed out, re-arming", id);
+                            }
+                        }
                     }
                     false
                 }
@@ -154,6 +190,7 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                     Some(slot) if matches!(slot, SlotState::NoAddr) => {
                         let addr = addr.into_inner();
                         info!("Scanned new peripheral {:?}", addr);
+                        recoveries[id as usize].reset();
                         *slot = SlotState::Disconnected(addr);
                         FLASH_CHANNEL
                             .send(FlashOperationMessage::PeerAddress(PeerAddress::new(id, true, addr)))
@@ -174,6 +211,27 @@ async fn wait_until_wakeup(ended: &Channel<NoopRawMutex, usize, { crate::SPLIT_P
         {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod known_peer_recovery_tests {
+    use super::KnownPeerRecovery;
+
+    #[test]
+    fn rescans_after_the_bounded_number_of_misses() {
+        let mut recovery = KnownPeerRecovery::default();
+        assert!(!recovery.missed());
+        assert!(recovery.missed());
+        assert!(!recovery.missed());
+    }
+
+    #[test]
+    fn a_success_resets_the_miss_streak() {
+        let mut recovery = KnownPeerRecovery::default();
+        assert!(!recovery.missed());
+        recovery.reset();
+        assert!(!recovery.missed());
     }
 }
 
