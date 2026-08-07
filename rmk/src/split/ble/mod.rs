@@ -15,10 +15,10 @@ pub(super) const DIRECTED_ADVERTISING_GRACE_MS: u64 = 750;
 // While a peripheral's address is known, the central keeps a connection
 // request armed so the peripheral's first advertisement after power-on is
 // caught immediately. Re-arming on this period picks up refreshed connection
-// parameters (e.g. a changed latency policy); a timeout does not invalidate
-// the address, which on nRF is FICR-derived and stable for the device's
-// lifetime. Only an empty slot (fresh storage) triggers scanning.
+// parameters. A bounded number of misses returns to discovery so corrupt
+// storage and replacement hardware cannot strand the split link forever.
 pub(super) const KNOWN_PEER_CONNECT_REARM_MS: u64 = 30_000;
+pub(super) const KNOWN_PEER_CONNECT_RESCAN_ATTEMPTS: u8 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
