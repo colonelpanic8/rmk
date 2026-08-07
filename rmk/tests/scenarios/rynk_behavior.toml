@@ -13,6 +13,12 @@ map = """
 [[keymap.layer]]
 keys = "A  B  TD(0)"
 
+[[keymap.layer]]
+keys = "_  _  _"
+
+[[keymap.layer]]
+keys = "_  _  _"
+
 # Lets `TD(0)` resolve. Most cases overwrite it over the wire, but the flow-tap
 # case asserts `X`/`Y` directly, so renaming them breaks it.
 [[behavior.morse.morses]]
@@ -121,6 +127,21 @@ steps = [
   { tap = { pos = [0, 2], duration = 400 } },
 ]
 expect = [["A"], [], ["X"], [], ["A"], [], ["Y"], []]
+
+[[test]]
+name = "behavior_options_read_returns_what_was_written"
+steps = [
+  { rynk = { cmd = "SetBehaviorOptions", payload = { tri_layer = [0, 1, 2], combo_prior_idle_ms = 75, oneshot_activate_on_keypress = true, oneshot_quick_release = true, morse_enable_flow_tap = true, morse_prior_idle_ms = 125, morse_default_profile = { unilateral_tap = true, enable_flow_tap = false, mode = "PermissiveHold", hold_timeout_ms = 225, gap_timeout_ms = 175 } } } },
+  { rynk = { cmd = "GetBehaviorOptions", reply = { tri_layer = [0, 1, 2], combo_prior_idle_ms = 75, oneshot_activate_on_keypress = true, oneshot_quick_release = true, morse_enable_flow_tap = true, morse_prior_idle_ms = 125, morse_default_profile = { unilateral_tap = true, enable_flow_tap = false, mode = "PermissiveHold", hold_timeout_ms = 225, gap_timeout_ms = 175 } } } },
+]
+
+[[test]]
+name = "invalid_tri_layer_rejects_the_whole_behavior_options_write"
+steps = [
+  { rynk = { cmd = "SetBehaviorOptions", payload = { tri_layer = [0, 1, 2], combo_prior_idle_ms = 75, oneshot_activate_on_keypress = true, oneshot_quick_release = true, morse_enable_flow_tap = true, morse_prior_idle_ms = 125, morse_default_profile = { mode = "Normal", hold_timeout_ms = 225, gap_timeout_ms = 175 } } } },
+  { rynk = { cmd = "SetBehaviorOptions", payload = { tri_layer = [0, 1, 3], combo_prior_idle_ms = 1, oneshot_activate_on_keypress = false, oneshot_quick_release = false, morse_enable_flow_tap = false, morse_prior_idle_ms = 2, morse_default_profile = { mode = "HoldOnOtherPress", hold_timeout_ms = 3, gap_timeout_ms = 4 } }, error = "Invalid" } },
+  { rynk = { cmd = "GetBehaviorOptions", reply = { tri_layer = [0, 1, 2], combo_prior_idle_ms = 75, oneshot_activate_on_keypress = true, oneshot_quick_release = true, morse_enable_flow_tap = true, morse_prior_idle_ms = 125, morse_default_profile = { mode = "Normal", hold_timeout_ms = 225, gap_timeout_ms = 175 } } } },
+]
 
 # `actions` is a pattern-to-action map: 2 = tap, 3 = hold, 4 = double tap,
 # 5 = hold after tap.

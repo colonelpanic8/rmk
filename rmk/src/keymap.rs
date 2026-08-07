@@ -582,6 +582,10 @@ impl<'a> KeyMap<'a> {
         self.inner.borrow().behavior.combo.timeout
     }
 
+    pub(crate) fn tri_layer(&self) -> Option<[u8; 3]> {
+        self.inner.borrow().behavior.tri_layer
+    }
+
     pub(crate) fn combo_prior_idle_time(&self) -> Option<Duration> {
         self.inner.borrow().behavior.combo.prior_idle_time
     }
@@ -667,6 +671,22 @@ impl<'a> KeyMap<'a> {
 
     pub(crate) fn set_combo_timeout(&self, timeout: Duration) {
         self.inner.borrow_mut().behavior.combo.timeout = timeout;
+    }
+
+    pub(crate) fn set_tri_layer(&self, tri_layer: Option<[u8; 3]>) {
+        self.inner.borrow_mut().behavior.tri_layer = tri_layer;
+    }
+
+    pub(crate) fn set_combo_prior_idle_time(&self, time: Option<Duration>) {
+        self.inner.borrow_mut().behavior.combo.prior_idle_time = time;
+    }
+
+    pub(crate) fn set_one_shot_modifiers_config(&self, config: OneShotModifiersConfig) {
+        self.inner.borrow_mut().behavior.one_shot_modifiers = config;
+    }
+
+    pub(crate) fn set_morse_enable_flow_tap(&self, enabled: bool) {
+        self.inner.borrow_mut().behavior.morse.enable_flow_tap = enabled;
     }
 
     pub(crate) fn set_one_shot_timeout(&self, timeout: Duration) {

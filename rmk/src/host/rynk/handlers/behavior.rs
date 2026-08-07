@@ -1,8 +1,10 @@
 //! Behavior-config handlers (combo timeout, one-shot timeout, tap intervals,
 //! default morse profile, flow-tap window).
 
-use rmk_types::protocol::rynk::command::{GetBehaviorConfig, SetBehaviorConfig};
-use rmk_types::protocol::rynk::{BehaviorConfig, RynkError};
+use rmk_types::protocol::rynk::command::{
+    GetBehaviorConfig, GetBehaviorOptions, SetBehaviorConfig, SetBehaviorOptions,
+};
+use rmk_types::protocol::rynk::{BehaviorConfig, BehaviorOptions, RynkError};
 
 use super::super::RynkService;
 use super::Handle;
@@ -24,5 +26,21 @@ impl Handle<SetBehaviorConfig> for RynkService<'_> {
     async fn handle(&self, cfg: BehaviorConfig) -> Result<(), RynkError> {
         self.ctx.set_behavior_config(cfg).await;
         Ok(())
+    }
+}
+
+impl Handle<GetBehaviorOptions> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<BehaviorOptions, RynkError> {
+        Ok(self.ctx.behavior_options())
+    }
+}
+
+impl Handle<SetBehaviorOptions> for RynkService<'_> {
+    async fn handle(&self, options: BehaviorOptions) -> Result<(), RynkError> {
+        if self.ctx.set_behavior_options(options).await {
+            Ok(())
+        } else {
+            Err(RynkError::Invalid)
+        }
     }
 }

@@ -8,6 +8,7 @@ use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
+use rmk_types::protocol::rynk::BehaviorOptions;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
@@ -150,6 +151,8 @@ pub(crate) enum FlashOperationMessage {
         idx: u8,
         profile: MorseProfile,
     },
+    #[cfg(feature = "host")]
+    BehaviorOptions(BehaviorOptions),
     // Current saved connection type
     ConnectionType(ConnectionType),
     // Timeout time for combos
@@ -221,6 +224,8 @@ pub(crate) enum StorageKey {
     // with.
     #[cfg(feature = "host")]
     MorseProfile(u8),
+    #[cfg(feature = "host")]
+    BehaviorOptions,
 }
 
 impl StorageKey {
@@ -310,6 +315,8 @@ pub(crate) enum StorageData {
     // New variants go last, for the same reason as in `StorageKey`.
     #[cfg(feature = "host")]
     MorseProfile(MorseProfile),
+    #[cfg(feature = "host")]
+    BehaviorOptions(StoredBehaviorOptions),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -345,6 +352,43 @@ pub(crate) struct BehaviorConfig {
     // Interval for tapping capslock.
     // macOS has special processing of capslock, when tapping capslock, the tap interval should be another value
     pub(crate) tap_capslock_interval: u16,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub(crate) struct StoredBehaviorOptions {
+    pub(crate) tri_layer: Option<[u8; 3]>,
+    pub(crate) combo_prior_idle_ms: Option<u16>,
+    pub(crate) oneshot_activate_on_keypress: bool,
+    pub(crate) oneshot_quick_release: bool,
+    pub(crate) morse_enable_flow_tap: bool,
+}
+
+impl From<BehaviorOptions> for StoredBehaviorOptions {
+    fn from(options: BehaviorOptions) -> Self {
+        Self {
+            tri_layer: options.tri_layer,
+            combo_prior_idle_ms: options.combo_prior_idle_ms,
+            oneshot_activate_on_keypress: options.oneshot_activate_on_keypress,
+            oneshot_quick_release: options.oneshot_quick_release,
+            morse_enable_flow_tap: options.morse_enable_flow_tap,
+        }
+    }
+}
+
+impl From<&config::BehaviorConfig> for StoredBehaviorOptions {
+    fn from(behavior: &config::BehaviorConfig) -> Self {
+        Self {
+            tri_layer: behavior.tri_layer,
+            combo_prior_idle_ms: behavior
+                .combo
+                .prior_idle_time
+                .map(|duration| duration.as_millis() as u16),
+            oneshot_activate_on_keypress: behavior.one_shot_modifiers.activate_on_keypress,
+            oneshot_quick_release: behavior.one_shot_modifiers.quick_release,
+            morse_enable_flow_tap: behavior.morse.enable_flow_tap,
+        }
+    }
 }
 
 impl From<LocalStorageConfig> for StorageData {
@@ -555,6 +599,21 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             behavior_config.tap.tap_capslock_interval = c.tap_capslock_interval;
         }
 
+        let read_data = self
+            .flash
+            .fetch_item(&mut self.buffer, &StorageKey::BehaviorOptions)
+            .await
+            .map_err(|e| print_storage_error::<F>(e))?;
+
+        if let Some(StorageData::BehaviorOptions(options)) = read_data {
+            behavior_config.tri_layer = options.tri_layer;
+            behavior_config.combo.prior_idle_time =
+                options.combo_prior_idle_ms.map(|ms| Duration::from_millis(ms as u64));
+            behavior_config.one_shot_modifiers.activate_on_keypress = options.oneshot_activate_on_keypress;
+            behavior_config.one_shot_modifiers.quick_release = options.oneshot_quick_release;
+            behavior_config.morse.enable_flow_tap = options.morse_enable_flow_tap;
+        }
+
         Ok(())
     }
 
@@ -590,6 +649,13 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         self.store_data(StorageKey::BehaviorConfig, &StorageData::from(behavior))
             .await
             .map_err(|e| print_storage_error::<F>(e))?;
+        #[cfg(feature = "host")]
+        self.store_data(
+            StorageKey::BehaviorOptions,
+            &StorageData::BehaviorOptions(behavior.into()),
+        )
+        .await
+        .map_err(|e| print_storage_error::<F>(e))?;
 
         #[cfg(feature = "host")]
         for (layer, layer_data) in keymap.iter().enumerate() {
@@ -640,6 +706,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         .await?;
         self.store_data(StorageKey::BehaviorConfig, &StorageData::from(behavior))
             .await?;
+        self.store_data(
+            StorageKey::BehaviorOptions,
+            &StorageData::BehaviorOptions(behavior.into()),
+        )
+        .await?;
 
         // TODO: Generic reset for vial and other hosts
         for (layer, layer_data) in keymap.iter().enumerate() {
@@ -854,6 +925,14 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     self.store_data(
                         StorageKey::BehaviorConfig,
                         &StorageData::BehaviorConfig(behavior_config),
+                    )
+                    .await
+                }
+                #[cfg(feature = "host")]
+                FlashOperationMessage::BehaviorOptions(options) => {
+                    self.store_data(
+                        StorageKey::BehaviorOptions,
+                        &StorageData::BehaviorOptions(options.into()),
                     )
                     .await
                 }
