@@ -26,6 +26,7 @@ Action::TriLayerLower                                   0a
 Action::TriLayerUpper                                   0b
 Action::TriggerMacro(7)                                 0c 07
 Action::User(9)                                         13 09
+AutoMouseLayerConfigState{4,[device1->layer2]}          04 01 01 01 02 f4 03 03 01 01 00 d6 01 00
 BatteryStatus::Available{Discharging,85}                01 01 01 55
 BatteryStatus::Unavailable                              00
 BehaviorConfig{50..120}                                 32 3c 46 50 da 80 a6 86 e8 8d 08 78
@@ -79,6 +80,7 @@ RynkError::NotReady                                     01
 RynkError::StorageFault                                 02
 RynkError::Unimplemented                                04
 RynkError::UnknownCmd                                   06
+SetAutoMouseLayerConfigsRequest{[device1->layer2]}      01 01 01 02 f4 03 03 01 01 00 d6 01 00
 SetComboRequest{3,combo}                                03 01 02 01 00 04 05 01 01 02
 SetEncoderRequest{1,2,{Morse(3),No}}                    01 02 05 03 00
 SetForkRequest{2,fork}                                  02 02 01 00 04 00 05 02 01 02 01 00 00 00 02 01

@@ -13,6 +13,8 @@ BootloaderJump request ()                                                       
 ClearBleProfile reply Ok(())                                                    04 05 07 01 01 00
 ClearBleProfile request 1                                                       05 05 07 01 01 00
 ConnectionChange topic ConnectionStatus{Configured,{1,Adv},Ble}                 03 03 80 03 02 01 02 01 00
+GetAutoMouseLayerConfigs reply Ok(state)                                        04 05 06 01 0b 04 01 01 01 02 f4 03 03 01 01 03 d6 01 01 00
+GetAutoMouseLayerConfigs request ()                                             04 05 06 01 00
 GetBatteryStatus reply Ok(Available{Discharging,85})                            04 03 08 01 05 01 01 01 55 00
 GetBatteryStatus request ()                                                     04 03 08 01 00
 GetBehaviorConfig reply Ok(BehaviorConfig{50..120})                             04 01 06 01 0d 32 3c 46 50 da 80 a6 86 e8 8d 08 78 00
@@ -71,6 +73,8 @@ Lock reply Ok(())                                                               
 Lock request ()                                                                 02 08 02 01 00
 Reboot reply Ok(())                                                             02 03 02 01 01 00
 Reboot request ()                                                               02 03 02 01 00
+SetAutoMouseLayerConfigs reply Ok(())                                           04 06 06 01 01 00
+SetAutoMouseLayerConfigs request configs                                        0d 06 06 01 01 01 01 02 f4 03 03 01 01 03 d6 01 01 00
 SetBehaviorConfig reply Ok(())                                                  04 02 06 01 01 00
 SetBehaviorConfig request BehaviorConfig{50..120}                               10 02 06 01 32 3c 46 50 da 80 a6 86 e8 8d 08 78 00
 SetBehaviorOptions reply Ok(())                                                 04 04 06 01 01 00
