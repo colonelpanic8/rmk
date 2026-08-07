@@ -16,6 +16,7 @@ maintenance_mode_default = false
 name = "disabled_default_blocks_every_maintenance_operation"
 steps = [
   { rynk = { cmd = "GetMaintenanceMode", reply = { enabled = false, default_enabled = false } } },
+  { rynk = { cmd = "Reboot", error = "NotReady" } },
   { rynk = { cmd = "BootloaderJump", error = "NotReady" } },
   { rynk = { cmd = "StorageReset", payload = "Full", error = "NotReady" } },
   { rynk = { cmd = "GetMatrixState", error = "NotReady" } },
@@ -23,11 +24,11 @@ steps = [
 ]
 
 [[test]]
-name = "legacy_unlock_does_not_bypass_disabled_maintenance_mode"
+name = "legacy_lock_endpoints_are_inert_and_do_not_bypass_maintenance_mode"
 steps = [
-  { press = [0, 1] },
-  { rynk = { cmd = "UnlockPoll", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [[0, 1]] } } },
-  { release = [0, 1] },
+  { rynk = { cmd = "GetLockStatus", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [] } } },
+  { rynk = { cmd = "UnlockPoll", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [] } } },
+  { rynk = { cmd = "Lock" } },
   { rynk = { cmd = "BootloaderJump", error = "NotReady" } },
   { rynk = { cmd = "SetKeyAction", payload = { position = { layer = 0, row = 0, col = 1 }, action = { Single = { Key = { Hid = "B" } } } }, error = "NotReady" } },
 ]
