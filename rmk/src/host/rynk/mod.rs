@@ -36,6 +36,8 @@ pub struct RynkService<'a> {
 
 impl<'a> RynkService<'a> {
     pub fn new(keymap: &'a KeyMap<'a>, config: &RmkConfig<'static>) -> Self {
+        #[cfg(feature = "_ble")]
+        crate::ble::name::initialize(config.ble_name.unwrap_or(config.device_config.product_name));
         let mut ctx = KeyboardContext::new(keymap);
         // Layout is fixed at macro expansion time, like Vial's keyboard-def.
         ctx.layout_blob = config.layout_blob;
@@ -53,6 +55,8 @@ impl<'a> RynkService<'a> {
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => true,
+            #[cfg(feature = "_ble")]
+            Cmd::SetBleName => self.lock_config.write_requires_unlock,
             Cmd::SetKeyAction
             | Cmd::SetDefaultLayer
             | Cmd::SetEncoderAction
@@ -123,6 +127,10 @@ impl<'a> RynkService<'a> {
             Cmd::SwitchBleProfile => serve::<command::SwitchBleProfile, _>(self, msg).await,
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => serve::<command::ClearBleProfile, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::GetBleName => serve::<command::GetBleName, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::SetBleName => serve::<command::SetBleName, _>(self, msg).await,
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,

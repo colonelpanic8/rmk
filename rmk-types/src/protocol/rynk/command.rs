@@ -20,6 +20,8 @@ use super::{
     SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
     SetMorseBulkRequest, SetMorseRequest, StorageResetMode,
 };
+#[cfg(feature = "_ble")]
+use super::BleName;
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
 use crate::battery::BatteryStatus;
@@ -323,6 +325,12 @@ endpoints! {
     SwitchBleProfile = 0x0704: u8 => ();
     #[cfg(feature = "_ble")]
     ClearBleProfile = 0x0705: u8 => ();
+    #[cfg(feature = "_ble")]
+    /// Read the persistent BLE advertising-name template.
+    GetBleName = 0x0708: () => BleName;
+    #[cfg(feature = "_ble")]
+    /// Replace the persistent BLE advertising-name template.
+    SetBleName = 0x0709: BleName => ();
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
