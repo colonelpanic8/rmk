@@ -14,12 +14,13 @@ use serde::de::DeserializeOwned;
 
 use super::message::{RynkHeader, encode_frame};
 use super::{
-    BehaviorConfig, BuildInfo, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
-    GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest,
-    GetMorseBulkResponse, KeyPosition, LayerState, LayoutChunk, LockStatus, MacroData, MatrixState, PointingConfig,
-    ProtocolVersion, RynkError, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
-    SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest,
-    SetPointingConfigRequest, StorageResetMode,
+    AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, BuildInfo, DeviceCapabilities, DeviceInfo,
+    GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse,
+    GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest,
+    GetMorseProfileBulkResponse, KeyPosition, LayerState, LayoutChunk, LockStatus, MacroData, MatrixState,
+    PointingConfig, ProtocolVersion, RynkError, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboRequest,
+    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
+    SetMorseProfileBulkRequest, SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -31,7 +32,7 @@ use crate::connection::{ConnectionStatus, ConnectionType};
 use crate::fork::Fork;
 use crate::led_indicator::LedIndicator;
 use crate::modifier::ModifierCombination;
-use crate::morse::Morse;
+use crate::morse::{Morse, MorseProfile};
 #[cfg(feature = "split")]
 use crate::protocol::rynk::PeripheralStatus;
 #[cfg(feature = "lighting")]
@@ -336,6 +337,18 @@ endpoints! {
     GetMorseBulk = 0x0403: GetMorseBulkRequest => GetMorseBulkResponse;
     SetMorseBulk = 0x0404: SetMorseBulkRequest => ();
 
+    // Morse profiles (0x04xx) — the named timing profiles tap-hold keys resolve
+    // through, addressed by their table index.
+    /// Number of profile slots. Also the support probe for the four commands
+    /// below: firmware built before them answers `UnknownCmd`.
+    GetMorseProfileCount = 0x0405: () => u8;
+    /// Profile a key bound to this index resolves to — the table entry, or the
+    /// default profile for a slot nothing has written.
+    GetMorseProfile = 0x0406: u8 => MorseProfile;
+    SetMorseProfile = 0x0407: SetMorseProfileRequest => ();
+    GetMorseProfileBulk = 0x0408: GetMorseProfileBulkRequest => GetMorseProfileBulkResponse;
+    SetMorseProfileBulk = 0x0409: SetMorseProfileBulkRequest => ();
+
     // Fork (0x05xx).
     GetFork = 0x0501: u8 => Fork;
     SetFork = 0x0502: SetForkRequest => ();
@@ -343,6 +356,10 @@ endpoints! {
     // Behavior (0x06xx).
     GetBehaviorConfig = 0x0601: () => BehaviorConfig;
     SetBehaviorConfig = 0x0602: BehaviorConfig => ();
+    GetBehaviorOptions = 0x0603: () => BehaviorOptions;
+    SetBehaviorOptions = 0x0604: BehaviorOptions => ();
+    GetAutoMouseLayerConfigs = 0x0605: () => AutoMouseLayerConfigState;
+    SetAutoMouseLayerConfigs = 0x0606: SetAutoMouseLayerConfigsRequest => ();
 
     // Connection (0x07xx).
     GetConnectionType = 0x0701: () => ConnectionType;

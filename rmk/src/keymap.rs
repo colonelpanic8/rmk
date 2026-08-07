@@ -496,8 +496,36 @@ impl<'a> KeyMap<'a> {
 
     pub(crate) fn auto_mouse_layer_configs(
         &self,
-    ) -> heapless::Vec<crate::config::AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> {
-        self.inner.borrow().behavior.auto_mouse_layer.clone()
+    ) -> heapless::Vec<rmk_types::auto_mouse::AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> {
+        let inner = self.inner.borrow();
+        if let Some(configs) = &inner.behavior.runtime_auto_mouse_layer {
+            return configs.clone();
+        }
+
+        inner
+            .behavior
+            .auto_mouse_layer
+            .iter()
+            .map(|config| {
+                let extra_mouse_keys = config.extra_mouse_keys.iter().copied().collect();
+                rmk_types::auto_mouse::AutoMouseLayerConfig {
+                    device_id: config.device_id,
+                    target_layer: config.target_layer,
+                    timeout_ms: config.timeout.as_millis() as u32,
+                    threshold: config.threshold,
+                    deactivate_on_key: config.deactivate_on_key,
+                    extra_mouse_keys,
+                    reset_timeout_on_key: config.reset_timeout_on_key,
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn set_auto_mouse_layer_configs(
+        &self,
+        configs: heapless::Vec<rmk_types::auto_mouse::AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>,
+    ) {
+        self.inner.borrow_mut().behavior.runtime_auto_mouse_layer = Some(configs);
     }
 
     /// Whether `layer_num` is set in the layer mask.
@@ -546,6 +574,10 @@ impl<'a> KeyMap<'a> {
 
     pub(crate) fn combo_timeout(&self) -> Duration {
         self.inner.borrow().behavior.combo.timeout
+    }
+
+    pub(crate) fn tri_layer(&self) -> Option<[u8; 3]> {
+        self.inner.borrow().behavior.tri_layer
     }
 
     pub(crate) fn combo_prior_idle_time(&self) -> Option<Duration> {
@@ -672,8 +704,49 @@ impl<'a> KeyMap<'a> {
         self.inner.borrow().behavior.morse.morses.len()
     }
 
+    /// Addressable morse profile slots. Slots past the ones `keyboard.toml`
+    /// named are still writable, so this is the table's capacity rather than
+    /// the number of profiles configured at build time.
+    pub(crate) fn morse_profiles_capacity(&self) -> usize {
+        self.inner.borrow().behavior.morse.profiles.capacity()
+    }
+
+    /// Replace the profile at `idx`, growing the table to reach it. Returns
+    /// `false` for an index past the table's capacity, leaving it untouched.
+    /// Slots skipped over are left unset, which resolves per-field to the
+    /// default profile exactly as an absent entry did.
+    pub(crate) fn set_morse_profile(&self, idx: u8, profile: MorseProfile) -> bool {
+        let mut inner = self.inner.borrow_mut();
+        let profiles = &mut inner.behavior.morse.profiles;
+        let idx = idx as usize;
+        if idx >= profiles.capacity() {
+            return false;
+        }
+        if idx >= profiles.len() {
+            profiles.resize(idx + 1, MorseProfile::default()).ok();
+        }
+        profiles[idx] = profile;
+        true
+    }
+
     pub(crate) fn set_combo_timeout(&self, timeout: Duration) {
         self.inner.borrow_mut().behavior.combo.timeout = timeout;
+    }
+
+    pub(crate) fn set_tri_layer(&self, tri_layer: Option<[u8; 3]>) {
+        self.inner.borrow_mut().behavior.tri_layer = tri_layer;
+    }
+
+    pub(crate) fn set_combo_prior_idle_time(&self, time: Option<Duration>) {
+        self.inner.borrow_mut().behavior.combo.prior_idle_time = time;
+    }
+
+    pub(crate) fn set_one_shot_modifiers_config(&self, config: OneShotModifiersConfig) {
+        self.inner.borrow_mut().behavior.one_shot_modifiers = config;
+    }
+
+    pub(crate) fn set_morse_enable_flow_tap(&self, enabled: bool) {
+        self.inner.borrow_mut().behavior.morse.enable_flow_tap = enabled;
     }
 
     pub(crate) fn set_one_shot_timeout(&self, timeout: Duration) {

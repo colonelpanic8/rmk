@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::action::{Action, EncoderAction, KeyAction, KeyboardAction, LightAction};
+use crate::auto_mouse::AutoMouseLayerConfig;
 use crate::battery::{BatteryStatus, ChargeState};
 use crate::ble::{BleState, BleStatus};
 use crate::combo::Combo;
@@ -206,11 +207,14 @@ struct Exemplars {
     device_info: DeviceInfo,
     build_info: BuildInfo,
     behavior: BehaviorConfig,
+    behavior_options: BehaviorOptions,
+    auto_mouse: AutoMouseLayerConfigState,
     connection: ConnectionStatus,
     state_bits: StateBits,
     combo: Combo,
     fork: Fork,
     morse: Morse,
+    profile: MorseProfile,
     macro_data: MacroData,
     encoder: EncoderAction,
 }
@@ -266,6 +270,28 @@ fn exemplars() -> Exemplars {
         tap_interval_ms: 200,
         tap_capslock_interval_ms: 20,
     };
+    let behavior_options = BehaviorOptions {
+        tri_layer: Some([1, 2, 3]),
+        combo_prior_idle_ms: Some(40),
+        oneshot_activate_on_keypress: true,
+        oneshot_quick_release: false,
+        morse_enable_flow_tap: true,
+        morse_prior_idle_ms: 60,
+        morse_default_profile: MorseProfile::new(None, Some(MorseMode::Normal), Some(70), Some(80)),
+    };
+    let auto_mouse_config = AutoMouseLayerConfig {
+        device_id: Some(1),
+        target_layer: 2,
+        timeout_ms: 500,
+        threshold: 3,
+        deactivate_on_key: true,
+        extra_mouse_keys: [KeyCode::Hid(HidKeyCode::LCtrl)].into_iter().collect(),
+        reset_timeout_on_key: false,
+    };
+    let auto_mouse = AutoMouseLayerConfigState {
+        capacity: 4,
+        configs: [auto_mouse_config].into_iter().collect(),
+    };
     let connection = ConnectionStatus {
         usb: UsbState::Configured,
         ble: BleStatus {
@@ -303,6 +329,7 @@ fn exemplars() -> Exemplars {
         profile: MorseProfile::const_default(),
         actions: morse_actions,
     };
+    let profile = MorseProfile::new(None, Some(MorseMode::Normal), Some(200), Some(150));
     let mut macro_bytes = heapless::Vec::new();
     macro_bytes.extend_from_slice(&[0x01, 0x02, 0x03]).unwrap();
     let macro_data = MacroData { data: macro_bytes };
@@ -314,11 +341,14 @@ fn exemplars() -> Exemplars {
         device_info,
         build_info,
         behavior,
+        behavior_options,
+        auto_mouse,
         connection,
         state_bits,
         combo,
         fork,
         morse,
+        profile,
         macro_data,
         encoder,
     }
@@ -355,7 +385,6 @@ fn wire_values_locked() {
         default_layer: 2,
         active_bitmap: [0x05, 0, 0, 0, 0, 0, 0, 0x80],
     };
-    let profile = MorseProfile::new(None, Some(MorseMode::Normal), Some(200), Some(150));
     let split_latency_policy = SplitCentralLatencyPolicy {
         powered: 0,
         battery: 4,
@@ -475,7 +504,7 @@ fn wire_values_locked() {
             "MouseButtons(B1|B8)",
             encode(&(MouseButtons::BUTTON1 | MouseButtons::BUTTON8))
         ),
-        ("MorseProfile(Normal,200,150)", encode(&profile)),
+        ("MorseProfile(Normal,200,150)", encode(&ex.profile)),
         // --- Keymap / encoder / behavior config payloads ---
         (
             "KeyPosition{layer:0,row:5,col:13}",
@@ -500,6 +529,11 @@ fn wire_values_locked() {
         ("BehaviorConfig{50,500,200,20}", encode(&ex.behavior)),
         ("SplitLatencyPolicy{0,4,Some(2)}", encode(&split_latency_policy),),
         ("SplitLatencyState{policy,true,2}", encode(&split_latency_state),),
+        (
+            "BehaviorOptions{[1,2,3],40,true,false,true,60,profile}",
+            encode(&ex.behavior_options),
+        ),
+        ("AutoMouseLayerConfigState{4,[device1->layer2]}", encode(&ex.auto_mouse)),
         ("ConnectionStatus{Configured,{1,Adv},Ble}", encode(&ex.connection)),
         ("ProtocolVersion{1,0}", encode(&ProtocolVersion { major: 1, minor: 0 })),
         ("ProtocolVersion::CURRENT", encode(&ProtocolVersion::CURRENT)),
@@ -581,11 +615,24 @@ fn wire_values_locked() {
             })
         ),
         (
+            "SetMorseProfileRequest{3,profile}",
+            encode(&SetMorseProfileRequest {
+                index: 3,
+                profile: ex.profile
+            })
+        ),
+        (
             "SetForkRequest{2,fork}",
             encode(&SetForkRequest {
                 index: 2,
                 config: ex.fork
             })
+        ),
+        (
+            "SetAutoMouseLayerConfigsRequest{[device1->layer2]}",
+            encode(&SetAutoMouseLayerConfigsRequest {
+                configs: ex.auto_mouse.configs.clone(),
+            }),
         ),
     ];
     let view: alloc::vec::Vec<(&str, &[u8])> = entries.iter().map(|(l, b)| (*l, b.as_slice())).collect();
@@ -865,6 +912,37 @@ fn wire_frames_locked() {
             "SetMorse reply Ok(())",
             encode_frame(Cmd::SetMorse, SEQ, &Ok::<(), RynkError>(()))
         ),
+        (
+            "GetMorseProfileCount request ()",
+            encode_frame(Cmd::GetMorseProfileCount, SEQ, &())
+        ),
+        (
+            "GetMorseProfileCount reply Ok(16)",
+            encode_frame(Cmd::GetMorseProfileCount, SEQ, &Ok::<u8, RynkError>(16)),
+        ),
+        (
+            "GetMorseProfile request 3",
+            encode_frame(Cmd::GetMorseProfile, SEQ, &3u8)
+        ),
+        (
+            "GetMorseProfile reply Ok(MorseProfile(Normal,200,150))",
+            encode_frame(Cmd::GetMorseProfile, SEQ, &Ok::<MorseProfile, RynkError>(ex.profile)),
+        ),
+        (
+            "SetMorseProfile request SetMorseProfileRequest{3,profile}",
+            encode_frame(
+                Cmd::SetMorseProfile,
+                SEQ,
+                &SetMorseProfileRequest {
+                    index: 3,
+                    profile: ex.profile
+                }
+            ),
+        ),
+        (
+            "SetMorseProfile reply Ok(())",
+            encode_frame(Cmd::SetMorseProfile, SEQ, &Ok::<(), RynkError>(()))
+        ),
         // Fork (0x05xx).
         ("GetFork request 2", encode_frame(Cmd::GetFork, SEQ, &2u8)),
         (
@@ -906,6 +984,52 @@ fn wire_frames_locked() {
         (
             "SetBehaviorConfig reply Ok(())",
             encode_frame(Cmd::SetBehaviorConfig, SEQ, &Ok::<(), RynkError>(())),
+        ),
+        (
+            "GetBehaviorOptions request ()",
+            encode_frame(Cmd::GetBehaviorOptions, SEQ, &()),
+        ),
+        (
+            "GetBehaviorOptions reply Ok(BehaviorOptions)",
+            encode_frame(
+                Cmd::GetBehaviorOptions,
+                SEQ,
+                &Ok::<BehaviorOptions, RynkError>(ex.behavior_options),
+            ),
+        ),
+        (
+            "SetBehaviorOptions request BehaviorOptions",
+            encode_frame(Cmd::SetBehaviorOptions, SEQ, &ex.behavior_options),
+        ),
+        (
+            "SetBehaviorOptions reply Ok(())",
+            encode_frame(Cmd::SetBehaviorOptions, SEQ, &Ok::<(), RynkError>(())),
+        ),
+        (
+            "GetAutoMouseLayerConfigs request ()",
+            encode_frame(Cmd::GetAutoMouseLayerConfigs, SEQ, &()),
+        ),
+        (
+            "GetAutoMouseLayerConfigs reply Ok(state)",
+            encode_frame(
+                Cmd::GetAutoMouseLayerConfigs,
+                SEQ,
+                &Ok::<AutoMouseLayerConfigState, RynkError>(ex.auto_mouse.clone()),
+            ),
+        ),
+        (
+            "SetAutoMouseLayerConfigs request configs",
+            encode_frame(
+                Cmd::SetAutoMouseLayerConfigs,
+                SEQ,
+                &SetAutoMouseLayerConfigsRequest {
+                    configs: ex.auto_mouse.configs.clone(),
+                },
+            ),
+        ),
+        (
+            "SetAutoMouseLayerConfigs reply Ok(())",
+            encode_frame(Cmd::SetAutoMouseLayerConfigs, SEQ, &Ok::<(), RynkError>(())),
         ),
         // Connection (0x07xx).
         (

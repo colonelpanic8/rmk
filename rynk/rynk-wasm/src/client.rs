@@ -21,30 +21,31 @@ use rynk::rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rynk::rmk_types::fork::Fork;
 use rynk::rmk_types::led_indicator::LedIndicator;
 use rynk::rmk_types::modifier::ModifierCombination;
-use rynk::rmk_types::morse::Morse;
+use rynk::rmk_types::morse::{Morse, MorseProfile};
 use rynk::rmk_types::protocol::rynk::{
     AbortLightingOverlayReplaceRequest, AbortLightingRuntimeConditionalSceneReplaceRequest,
-    AbortLightingSceneReplaceRequest, BeginLightingOverlayReplaceRequest,
-    BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig, BuildInfo,
-    ClearLightingOverlayRequest, CommitLightingOverlayReplaceRequest,
+    AbortLightingSceneReplaceRequest, AutoMouseLayerConfigState, BeginLightingOverlayReplaceRequest,
+    BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig,
+    BehaviorOptions, BuildInfo, ClearLightingOverlayRequest, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
-    DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, LayerState, LightingCapabilities,
-    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
-    LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage, LightingExtension,
-    LightingExtensionLayers, LightingExtensionNamesPage, LightingExtensionNamesRequest, LightingExtensionParamsPage,
-    LightingExtensionParamsRequest, LightingKeysPage, LightingLedsPage, LightingOutputModeState, LightingOutputsPage,
-    LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest,
-    LightingPhysicalKeysPage, LightingRoutesPage, LightingRuntimeConditionalScenePageRequest,
-    LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneTransaction,
-    LightingRuntimeConditionalScenesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
-    LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData,
-    MatrixState, PeripheralStatus, PointingConfig, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
-    PutLightingOverlayChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
+    DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, GetMorseProfileBulkResponse,
+    LayerState, LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage,
+    LightingConditionalSceneStatus, LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage,
+    LightingExtension, LightingExtensionLayers, LightingExtensionNamesPage, LightingExtensionNamesRequest,
+    LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingKeysPage, LightingLedsPage,
+    LightingOutputModeState, LightingOutputsPage, LightingOverlayPage, LightingOverlayPageRequest,
+    LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage, LightingRoutesPage,
+    LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
+    LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
+    LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZoneMembershipsPage,
+    LightingZonesPage, LockStatus, MacroData, MatrixState, PeripheralStatus, PointingConfig, ProtocolVersion,
+    PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
+    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetAutoMouseLayerConfigsRequest,
     SetComboBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest,
     SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest, SetLightingOutputModeRequest,
     SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest, SetMorseBulkRequest,
-    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
-    UnsetLightingSceneCellRequest,
+    SetMorseProfileBulkRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
+    UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -154,6 +155,8 @@ endpoints! {
     write_all_combos(configs: Vec<Combo>) -> (),
     read_all_morses() -> Vec<Morse>,
     write_all_morses(configs: Vec<Morse>) -> (),
+    read_all_morse_profiles() -> Vec<MorseProfile>,
+    write_all_morse_profiles(profiles: Vec<MorseProfile>) -> (),
     get_layout() -> LayoutInfo,
     // combos / forks / morse / macros
     get_combo(index: u8) -> Combo,
@@ -166,6 +169,11 @@ endpoints! {
     set_morse(index: u8, config: Morse) -> (),
     get_morse_bulk(start_index: u8) -> GetMorseBulkResponse,
     set_morse_bulk(request: SetMorseBulkRequest) -> (),
+    get_morse_profile_count() -> u8,
+    get_morse_profile(index: u8) -> MorseProfile,
+    set_morse_profile(index: u8, profile: MorseProfile) -> (),
+    get_morse_profile_bulk(start_index: u8) -> GetMorseProfileBulkResponse,
+    set_morse_profile_bulk(request: SetMorseProfileBulkRequest) -> (),
     get_macro(offset: u16) -> MacroData,
     set_macro(offset: u16, data: MacroData) -> (),
     // pointing
@@ -176,6 +184,10 @@ endpoints! {
     set_behavior(config: BehaviorConfig) -> (),
     get_split_central_latency() -> SplitCentralLatencyState,
     set_split_central_latency(policy: SplitCentralLatencyPolicy) -> SplitCentralLatencyState,
+    get_behavior_options() -> BehaviorOptions,
+    set_behavior_options(options: BehaviorOptions) -> (),
+    get_auto_mouse_layer_configs() -> AutoMouseLayerConfigState,
+    set_auto_mouse_layer_configs(request: SetAutoMouseLayerConfigsRequest) -> (),
     // status
     get_current_layer() -> u8,
     get_layer_state() -> LayerState,

@@ -1,5 +1,6 @@
 use embassy_time::Duration;
 use heapless::Vec;
+use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::fork::Fork;
 use rmk_types::keycode::KeyCode;
 use rmk_types::morse::{Morse, MorseMode, MorseProfile};
@@ -40,6 +41,8 @@ pub struct BehaviorConfig {
     pub auto_mouse_layer: Vec<AutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>,
     pub mouse_layer_scale: Vec<MouseLayerScaleConfig, MOUSE_LAYER_SCALE_MAX_NUM>,
     pub unicode: UnicodeConfig,
+    #[doc(hidden)]
+    pub runtime_auto_mouse_layer: Option<Vec<RuntimeAutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>>,
 }
 
 /// Mouse movement and scroll scaling for one active layer.
