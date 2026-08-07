@@ -336,6 +336,12 @@ pub enum HidKeyCode {
     Assistant = 0x00C0,
     MissionControl = 0x00C1,
     Launchpad = 0x00C2,
+    /// Brightness Minimum
+    BrightnessMinimum = 0x00C3,
+    /// Brightness Maximum
+    BrightnessMaximum = 0x00C4,
+    /// Auto Brightness
+    BrightnessAuto = 0x00C5,
     /// Mouse Up
     MouseUp = 0x00CD,
     /// Mouse Down
@@ -471,6 +477,9 @@ impl HidKeyCode {
             HidKeyCode::MediaRewind => Some(ConsumerKey::Rewind),
             HidKeyCode::BrightnessUp => Some(ConsumerKey::BrightnessUp),
             HidKeyCode::BrightnessDown => Some(ConsumerKey::BrightnessDown),
+            HidKeyCode::BrightnessMinimum => Some(ConsumerKey::BrightnessMinimum),
+            HidKeyCode::BrightnessMaximum => Some(ConsumerKey::BrightnessMaximum),
+            HidKeyCode::BrightnessAuto => Some(ConsumerKey::BrightnessAuto),
             HidKeyCode::ControlPanel => Some(ConsumerKey::ControlPanel),
             HidKeyCode::Assistant => Some(ConsumerKey::Assistant),
             HidKeyCode::MissionControl => Some(ConsumerKey::DesktopShowAllWindows),
