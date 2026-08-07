@@ -1,5 +1,6 @@
 use embassy_time::Duration;
 use heapless::Vec;
+use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::fork::Fork;
 use rmk_types::keycode::KeyCode;
 use rmk_types::morse::{Morse, MorseMode, MorseProfile};
@@ -25,6 +26,8 @@ pub struct BehaviorConfig {
     pub keyboard_macros: KeyboardMacrosConfig,
     pub mouse_key: MouseKeyConfig,
     pub auto_mouse_layer: Vec<AutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>,
+    #[doc(hidden)]
+    pub runtime_auto_mouse_layer: Option<Vec<RuntimeAutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>>,
 }
 
 /// Config for auto mouse layer behavior

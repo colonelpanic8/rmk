@@ -196,3 +196,28 @@ fn behavior_options_write_survives_restart() {
             .await;
     });
 }
+
+#[cfg(feature = "storage")]
+#[test]
+fn auto_mouse_layer_configs_write_survives_restart() {
+    const SET_CONFIGS: &str = r#"{"configs":[{"device_id":1,"target_layer":2,"timeout_ms":500,"threshold":3,"deactivate_on_key":false,"extra_mouse_keys":[],"reset_timeout_on_key":false}]}"#;
+    const GET_CONFIGS: &str = r#"{"capacity":2,"configs":[{"device_id":1,"target_layer":2,"timeout_ms":500,"threshold":3,"deactivate_on_key":false,"extra_mouse_keys":[],"reset_timeout_on_key":false}]}"#;
+
+    test_block_on(async {
+        let flash = crate::simulator::flash::InMemoryFlash::new();
+        let keymap = [[[k!(A)]], [[k!(A)]], [[k!(A)]]];
+        {
+            let mut keyboard = SimKeyboard::builder(keymap).build_with_flash(flash.clone()).await;
+            keyboard
+                .rynk::<command::SetAutoMouseLayerConfigs>(SET_CONFIGS, RynkReply::Ok("null"))
+                .wait_storage()
+                .run()
+                .await;
+        }
+        let mut keyboard = SimKeyboard::builder(keymap).build_with_flash(flash).await;
+        keyboard
+            .rynk::<command::GetAutoMouseLayerConfigs>("null", RynkReply::Ok(GET_CONFIGS))
+            .run()
+            .await;
+    });
+}

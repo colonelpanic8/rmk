@@ -22,10 +22,10 @@ use rynk::rmk_types::fork::Fork;
 use rynk::rmk_types::led_indicator::LedIndicator;
 use rynk::rmk_types::morse::{Morse, MorseProfile};
 use rynk::rmk_types::protocol::rynk::{
-    BehaviorConfig, BehaviorOptions, DeviceCapabilities, DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse,
-    GetMorseBulkResponse, GetMorseProfileBulkResponse, LockStatus, MacroData, MatrixState, PeripheralStatus,
-    ProtocolVersion, SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest,
-    StorageResetMode,
+    AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, DeviceCapabilities, DeviceInfo, GetComboBulkResponse,
+    GetKeymapBulkResponse, GetMorseBulkResponse, GetMorseProfileBulkResponse, LockStatus, MacroData, MatrixState,
+    PeripheralStatus, ProtocolVersion, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetKeymapBulkRequest,
+    SetMorseBulkRequest, SetMorseProfileBulkRequest, StorageResetMode,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -159,6 +159,8 @@ endpoints! {
     set_behavior(config: BehaviorConfig) -> (),
     get_behavior_options() -> BehaviorOptions,
     set_behavior_options(options: BehaviorOptions) -> (),
+    get_auto_mouse_layer_configs() -> AutoMouseLayerConfigState,
+    set_auto_mouse_layer_configs(request: SetAutoMouseLayerConfigsRequest) -> (),
     // status
     get_current_layer() -> u8,
     get_matrix_state() -> MatrixState,
