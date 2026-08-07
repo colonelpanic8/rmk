@@ -1,0 +1,44 @@
+features = ["rynk"]
+
+[layout]
+rows = 1
+cols = 2
+map = "(0,0) (0,1)"
+
+[[keymap.layer]]
+keys = "MaintenanceModeToggle No"
+
+[host]
+unlock_keys = [[0, 1]]
+maintenance_mode_default = false
+
+[[test]]
+name = "disabled_default_blocks_every_maintenance_operation"
+steps = [
+  { rynk = { cmd = "GetMaintenanceMode", reply = { enabled = false, default_enabled = false } } },
+  { rynk = { cmd = "BootloaderJump", error = "NotReady" } },
+  { rynk = { cmd = "StorageReset", payload = "Full", error = "NotReady" } },
+  { rynk = { cmd = "GetMatrixState", error = "NotReady" } },
+  { rynk = { cmd = "SetKeyAction", payload = { position = { layer = 0, row = 0, col = 1 }, action = { Single = { Key = { Hid = "B" } } } }, error = "NotReady" } },
+]
+
+[[test]]
+name = "legacy_unlock_does_not_bypass_disabled_maintenance_mode"
+steps = [
+  { press = [0, 1] },
+  { rynk = { cmd = "UnlockPoll", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [[0, 1]] } } },
+  { release = [0, 1] },
+  { rynk = { cmd = "BootloaderJump", error = "NotReady" } },
+  { rynk = { cmd = "SetKeyAction", payload = { position = { layer = 0, row = 0, col = 1 }, action = { Single = { Key = { Hid = "B" } } } }, error = "NotReady" } },
+]
+
+[[test]]
+name = "toggle_key_opens_the_complete_maintenance_gate"
+steps = [
+  { tap = { pos = [0, 0], duration = 10 } },
+  { rynk = { cmd = "GetMaintenanceMode", reply = { enabled = true, default_enabled = false } } },
+  { rynk = { cmd = "GetMatrixState", reply = { pressed_bitmap = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] } } },
+  { rynk = { cmd = "SetKeyAction", payload = { position = { layer = 0, row = 0, col = 1 }, action = { Single = { Key = { Hid = "B" } } } } } },
+  { tap = { pos = [0, 1], duration = 10 } },
+]
+expect = [["B"], []]

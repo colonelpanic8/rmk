@@ -15,7 +15,8 @@ keys = "A  MO(1)  No"
 [[keymap.layer]]
 keys = "B  _  No"
 
-# `GetMatrixState` and `ClearBleProfile` are gated unconditionally.
+# The legacy challenge is present to prove it has no bearing on maintenance
+# authorization.
 [host]
 unlock_keys = [[0, 2]]
 
@@ -33,7 +34,6 @@ steps = [
 name = "matrix_state_reports_the_held_keys"
 steps = [
   { press = [0, 2] },
-  { rynk = { cmd = "UnlockPoll", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [[0, 2]] } } },
   { rynk = { cmd = "GetMatrixState", reply = { pressed_bitmap = [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] } } },
   { release = [0, 2] },
   { rynk = { cmd = "GetMatrixState", reply = { pressed_bitmap = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] } } },

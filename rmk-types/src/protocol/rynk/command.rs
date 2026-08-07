@@ -16,9 +16,9 @@ use super::message::{RynkHeader, encode_frame};
 use super::{
     BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LayoutChunk,
-    LockStatus, MatrixState, ProtocolVersion, RynkError, SetComboBulkRequest, SetComboRequest, SetEncoderRequest,
-    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest,
-    StorageResetMode,
+    LockStatus, MaintenanceMode, MatrixState, ProtocolVersion, RynkError, SetComboBulkRequest, SetComboRequest,
+    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
+    SetMorseRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -268,8 +268,9 @@ endpoints! {
     BootloaderJump = 0x0004: () => ();
     StorageReset = 0x0005: StorageResetMode => ();
 
-    // Lock gate. All three stay dispatchable while locked.
-    /// Pure read of the current lock state — no side effects.
+    // Legacy physical-lock protocol retained for host compatibility. These
+    // endpoints do not authorize maintenance commands.
+    /// Pure read of the legacy lock state — no side effects.
     GetLockStatus = 0x0006: () => LockStatus;
     /// Arms/refreshes the unlock attempt and samples the held challenge keys.
     UnlockPoll = 0x0007: () => LockStatus;
@@ -279,6 +280,8 @@ endpoints! {
     GetLayout = 0x0009: u32 => LayoutChunk;
     /// Identity strings and USB ids; feature gating stays in `GetCapabilities`.
     GetDeviceInfo = 0x000A: () => DeviceInfo;
+    /// Read the live gate for host maintenance operations.
+    GetMaintenanceMode = 0x000D: () => MaintenanceMode;
 
     // Keymap (0x01xx) — includes encoder.
     GetKeyAction = 0x0101: KeyPosition => KeyAction;
