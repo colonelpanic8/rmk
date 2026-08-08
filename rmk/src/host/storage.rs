@@ -1,7 +1,9 @@
+use core::fmt::Write;
+
 use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::constants::MACRO_CHUNK_SIZE;
-use rmk_types::morse::MorseProfile;
+use rmk_types::morse::{MorseProfile, MorseProfileName};
 
 use crate::keyboard::combo::Combo;
 use crate::storage::{Storage, StorageKey, StorageValue, print_storage_error};
@@ -20,6 +22,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             .fetch_all_items(&mut self.buffer)
             .await
             .map_err(|e| print_storage_error::<F>(e))?;
+
+        // Which profile slots storage spoke for, so a slot whose profile was stored without a
+        // name gets a generated one below, while a stored empty name still means "vacant".
+        let mut stored_profile = [false; crate::MORSE_PROFILE_MAX_NUM];
+        let mut stored_name = [false; crate::MORSE_PROFILE_MAX_NUM];
 
         // Read all keymap keys and encoder configs
         while let Some((key, value)) = key_iterator
@@ -97,9 +104,37 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                             profiles.resize(idx + 1, MorseProfile::default()).ok();
                         }
                         profiles[idx] = profile;
+                        stored_profile[idx] = true;
+                    }
+                }
+                (StorageKey::MorseProfileName(idx), StorageValue::MorseProfileName(name)) => {
+                    let idx = idx as usize;
+                    let morse = &mut behavior.morse;
+                    if idx < morse.profiles.capacity() {
+                        if idx >= morse.profiles.len() {
+                            morse.profiles.resize(idx + 1, MorseProfile::default()).ok();
+                        }
+                        if idx >= morse.profile_names.len() {
+                            morse.profile_names.resize(idx + 1, MorseProfileName::new()).ok();
+                        }
+                        morse.profile_names[idx] = name;
+                        stored_name[idx] = true;
                     }
                 }
                 _ => continue,
+            }
+        }
+
+        // A profile written before names existed occupies its slot under a generated name.
+        for idx in 0..crate::MORSE_PROFILE_MAX_NUM {
+            let names = &mut behavior.morse.profile_names;
+            if stored_profile[idx] && !stored_name[idx] && names.get(idx).is_none_or(|name| name.is_empty()) {
+                let mut name = MorseProfileName::new();
+                write!(name, "profile_{idx:03}").expect("generated profile name fits");
+                if idx >= names.len() {
+                    names.resize(idx + 1, MorseProfileName::new()).ok();
+                }
+                names[idx] = name;
             }
         }
 

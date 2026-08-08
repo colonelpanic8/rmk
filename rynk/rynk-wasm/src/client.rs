@@ -25,8 +25,9 @@ use rynk::rmk_types::morse::Morse;
 use rynk::rmk_types::protocol::rynk::{
     AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, DeviceCapabilities, DeviceInfo, GetComboBulkResponse,
     GetKeymapBulkResponse, GetMorseBulkResponse, GetMorseProfileBulkResponse, LockStatus, MatrixState,
-    PeripheralStatus, ProtocolVersion, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetKeymapBulkRequest,
-    SetMorseBulkRequest, SetMorseProfileBulkRequest, StorageResetMode,
+    MorseProfileState, PeripheralStatus, ProtocolVersion, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest,
+    SetKeymapBulkRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
+    StorageResetMode,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -102,6 +103,11 @@ impl RynkClient {
         }
     }
 
+    #[wasm_bindgen(unchecked_return_type = "MorseProfileState")]
+    pub async fn read_morse_profile_state(&self) -> Result<JsValue, JsValue> {
+        let state = self.drive(self.client.read_morse_profile_state()).await?;
+        serde_wasm_bindgen::to_value(&state).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
     #[wasm_bindgen(unchecked_return_type = "MorseProfile[]")]
     pub async fn read_all_morse_profiles(&self) -> Result<JsValue, JsValue> {
         let profiles = self.drive(self.client.read_all_morse_profiles()).await?;
@@ -194,6 +200,9 @@ endpoints! {
     get_morse_profile_count() -> u8,
     get_morse_profile_bulk(start_index: u8) -> GetMorseProfileBulkResponse,
     set_morse_profile_bulk(request: SetMorseProfileBulkRequest) -> (),
+    get_morse_profile_state(offset: u8) -> MorseProfileState,
+    set_morse_profile_entry(request: SetMorseProfileEntryRequest) -> (),
+    delete_morse_profile(index: u8) -> (),
     read_macro(index: u8) -> Vec<MacroOp>,
     // behavior
     get_behavior() -> BehaviorConfig,

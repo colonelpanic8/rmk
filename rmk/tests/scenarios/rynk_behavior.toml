@@ -3,6 +3,12 @@
 # each case proves it by making the keyboard behave differently afterwards.
 features = ["rynk"]
 
+[[test]]
+name = "an_unconfigured_board_has_no_named_profiles"
+steps = [
+  { rynk = { cmd = "GetMorseProfileState", payload = { offset = 0 }, reply = { capacity = 16, total = 0, entries = [] } } },
+]
+
 [layout]
 rows = 1
 cols = 3

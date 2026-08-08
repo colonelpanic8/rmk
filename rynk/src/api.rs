@@ -24,10 +24,11 @@ use rmk_types::morse::{Morse, MorseProfile};
 use rmk_types::protocol::rynk::{
     AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, Cmd, DeviceCapabilities, DeviceInfo,
     GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse,
-    GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, KeyPosition,
-    LockStatus, MatrixState, PeripheralStatus, ProtocolVersion, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest,
-    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseProfileBulkRequest, SetMorseProfileRequest, SetMorseRequest, StorageResetMode,
+    GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse,
+    GetMorseProfileStateRequest, KeyPosition, LockStatus, MatrixState, MorseProfileEntry, MorseProfileState,
+    PeripheralStatus, ProtocolVersion, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboRequest,
+    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
+    SetMorseProfileBulkRequest, SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest, StorageResetMode,
     command,
 };
 #[cfg(feature = "alloc")]
@@ -336,6 +337,22 @@ impl Client {
         self.request::<command::SetMorseProfileBulk>(&request).await
     }
 
+    /// Read the sparse set of occupied profile slots and their persistent names.
+    pub async fn get_morse_profile_state(&self, offset: u8) -> Result<MorseProfileState, RynkHostError> {
+        self.request::<command::GetMorseProfileState>(&GetMorseProfileStateRequest { offset })
+            .await
+    }
+
+    /// Create, rename, or update one stable profile slot.
+    pub async fn set_morse_profile_entry(&self, request: SetMorseProfileEntryRequest) -> Result<(), RynkHostError> {
+        self.request::<command::SetMorseProfileEntry>(&request).await
+    }
+
+    /// Vacate one profile slot without renumbering later bindings.
+    pub async fn delete_morse_profile(&self, index: u8) -> Result<(), RynkHostError> {
+        self.request::<command::DeleteMorseProfile>(&index).await
+    }
+
     /// Read macro `index` whole: its ops in order, empty for an unset slot. An
     /// index at or past [`DeviceCapabilities::max_macros`] fails with `RynkError::Invalid`.
     pub async fn get_macro(&self, index: u8) -> Result<Macro, RynkHostError> {
@@ -511,6 +528,26 @@ impl Client {
             c.get_morse_profile_bulk(start as u8).await.map(|r| r.profiles)
         })
         .await
+    }
+
+    /// Read the complete sparse named-profile catalog a page at a time.
+    pub async fn read_morse_profile_state(&self) -> Result<MorseProfileState, RynkHostError> {
+        let first = self.get_morse_profile_state(0).await?;
+        let capacity = first.capacity;
+        let total = first.total;
+        let mut entries: Vec<MorseProfileEntry> = first.entries;
+        while entries.len() < total as usize {
+            let page = self.get_morse_profile_state(entries.len() as u8).await?;
+            if page.entries.is_empty() {
+                break;
+            }
+            entries.extend(page.entries);
+        }
+        Ok(MorseProfileState {
+            capacity,
+            total: entries.len() as u8,
+            entries,
+        })
     }
 
     /// Write the whole keymap with concurrent paged writes, each page filled up to the

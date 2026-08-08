@@ -242,6 +242,29 @@ fn morse_profile_write_survives_restart() {
     });
 }
 
+#[cfg(feature = "storage")]
+#[test]
+fn named_morse_profile_survives_restart() {
+    const SET_ENTRY: &str = r#"{"entry":{"index":3,"name":"thumb-layer","profile":{"mode":"Normal","hold_timeout_ms":180,"gap_timeout_ms":180}}}"#;
+    const GET_STATE: &str = r#"{"capacity":16,"total":1,"entries":[{"index":3,"name":"thumb-layer","profile":{"mode":"Normal","hold_timeout_ms":180,"gap_timeout_ms":180}}]}"#;
+
+    test_block_on(async {
+        let flash = crate::simulator::Flash::new();
+        {
+            let mut keyboard = SimKeyboard::builder([[[k!(A)]]]).build_with_flash(flash.clone()).await;
+            keyboard
+                .rynk::<command::SetMorseProfileEntry>(SET_ENTRY, RynkReply::Ok("null"))
+                .run()
+                .await;
+        }
+        let mut keyboard = SimKeyboard::builder([[[k!(A)]]]).build_with_flash(flash).await;
+        keyboard
+            .rynk::<command::GetMorseProfileState>(r#"{"offset":0}"#, RynkReply::Ok(GET_STATE))
+            .run()
+            .await;
+    });
+}
+
 /// Global behavior options are durable just like the older timeout payload.
 #[cfg(feature = "storage")]
 #[test]

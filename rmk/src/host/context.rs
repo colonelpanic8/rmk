@@ -9,9 +9,14 @@ use rmk_types::combo::Combo as ComboConfig;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
+#[cfg(feature = "storage")]
+use rmk_types::morse::MorseProfileName;
 use rmk_types::morse::{Morse, MorseProfile};
 #[cfg(feature = "rynk")]
-use rmk_types::protocol::rynk::{BehaviorConfig, BehaviorOptions};
+use rmk_types::protocol::rynk::{
+    BehaviorConfig, BehaviorOptions, MORSE_PROFILE_ENTRY_CHUNK, MorseProfileEntry, MorseProfileState,
+    SetMorseProfileEntryRequest,
+};
 
 #[cfg(feature = "rynk")]
 use crate::config::OneShotModifiersConfig;
@@ -205,6 +210,33 @@ impl<'a> KeyboardContext<'a> {
         ((idx as usize) < self.keymap.morse_profiles_capacity()).then(|| self.keymap.morse_profile(idx))
     }
 
+    #[cfg(feature = "rynk")]
+    pub fn morse_profile_state(&self, offset: u8) -> MorseProfileState {
+        let total = (0..self.keymap.morse_profiles_capacity())
+            .filter(|index| self.keymap.morse_profile_name(*index as u8).is_some())
+            .count();
+        let mut entries: heapless::Vec<MorseProfileEntry, MORSE_PROFILE_ENTRY_CHUNK> = Default::default();
+        for index in (0..self.keymap.morse_profiles_capacity())
+            .filter(|index| self.keymap.morse_profile_name(*index as u8).is_some())
+            .skip(offset as usize)
+            .take(MORSE_PROFILE_ENTRY_CHUNK)
+        {
+            let index = index as u8;
+            entries
+                .push(MorseProfileEntry {
+                    index,
+                    name: self.keymap.morse_profile_name(index).expect("filtered occupied slot"),
+                    profile: self.keymap.morse_profile(index),
+                })
+                .expect("page is bounded by the catalog chunk size");
+        }
+        MorseProfileState {
+            capacity: self.keymap.morse_profiles_capacity() as u8,
+            total: total as u8,
+            entries,
+        }
+    }
+
     /// Replace the profile at `idx` and persist it. `Ok(false)` for an index
     /// past the table's capacity, which changes nothing.
     pub async fn set_morse_profile(&self, idx: u8, profile: MorseProfile) -> Result<bool, ()> {
@@ -212,7 +244,77 @@ impl<'a> KeyboardContext<'a> {
             return Ok(false);
         }
         #[cfg(feature = "storage")]
-        store(StorageItem::MorseProfile { idx, profile }).await?;
+        {
+            store(StorageItem::MorseProfile { idx, profile }).await?;
+            store(StorageItem::MorseProfileName {
+                idx,
+                name: self.keymap.morse_profile_name(idx).expect("setter occupies the slot"),
+            })
+            .await?;
+        }
+        Ok(true)
+    }
+
+    /// Create, rename, or update one slot. `Ok(false)` for an index past the table, an
+    /// empty name, or a name another slot already carries; nothing changes then.
+    #[cfg(feature = "rynk")]
+    pub async fn set_morse_profile_entry(&self, request: SetMorseProfileEntryRequest) -> Result<bool, ()> {
+        let capacity = self.keymap.morse_profiles_capacity();
+        let entry = request.entry;
+        if entry.index as usize >= capacity || entry.name.trim().is_empty() {
+            return Ok(false);
+        }
+        for index in 0..capacity {
+            if index != entry.index as usize
+                && self
+                    .keymap
+                    .morse_profile_name(index as u8)
+                    .is_some_and(|name| name == entry.name)
+            {
+                return Ok(false);
+            }
+        }
+        if !self
+            .keymap
+            .set_named_morse_profile(entry.index, entry.name.clone(), entry.profile)
+        {
+            return Ok(false);
+        }
+
+        #[cfg(feature = "storage")]
+        {
+            store(StorageItem::MorseProfile {
+                idx: entry.index,
+                profile: entry.profile,
+            })
+            .await?;
+            store(StorageItem::MorseProfileName {
+                idx: entry.index,
+                name: entry.name,
+            })
+            .await?;
+        }
+        Ok(true)
+    }
+
+    /// Vacate slot `idx`. `Ok(false)` for an index past the table.
+    pub async fn delete_morse_profile(&self, idx: u8) -> Result<bool, ()> {
+        if !self.keymap.delete_morse_profile(idx) {
+            return Ok(false);
+        }
+        #[cfg(feature = "storage")]
+        {
+            store(StorageItem::MorseProfile {
+                idx,
+                profile: MorseProfile::default(),
+            })
+            .await?;
+            store(StorageItem::MorseProfileName {
+                idx,
+                name: MorseProfileName::new(),
+            })
+            .await?;
+        }
         Ok(true)
     }
 

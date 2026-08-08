@@ -16,10 +16,11 @@ use super::message::{RynkHeader, encode_frame};
 use super::{
     AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, DeviceCapabilities, DeviceInfo, GetComboBulkRequest,
     GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMorseBulkRequest,
-    GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, KeyPosition, LayoutChunk, LockStatus,
-    MatrixState, ProtocolVersion, RynkError, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboRequest,
-    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
-    SetMorseProfileBulkRequest, SetMorseProfileRequest, SetMorseRequest, StorageResetMode,
+    GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, GetMorseProfileStateRequest,
+    KeyPosition, LayoutChunk, LockStatus, MatrixState, MorseProfileState, ProtocolVersion, RynkError,
+    SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
+    SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseProfileBulkRequest,
+    SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -318,6 +319,12 @@ endpoints! {
     SetMorseProfile = 0x0407: SetMorseProfileRequest => ();
     GetMorseProfileBulk = 0x0408: GetMorseProfileBulkRequest => GetMorseProfileBulkResponse;
     SetMorseProfileBulk = 0x0409: SetMorseProfileBulkRequest => ();
+    /// Read one page of occupied profile slots, including persistent names.
+    GetMorseProfileState = 0x040C: GetMorseProfileStateRequest => MorseProfileState;
+    /// Create, rename, or update one stable profile slot.
+    SetMorseProfileEntry = 0x040D: SetMorseProfileEntryRequest => ();
+    /// Vacate one profile slot without renumbering any later bindings.
+    DeleteMorseProfile = 0x040E: u8 => ();
 
     // Fork (0x05xx).
     GetFork = 0x0501: u8 => Fork;

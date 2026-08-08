@@ -12,6 +12,8 @@ use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
 #[cfg(feature = "host")]
+use rmk_types::morse::MorseProfileName;
+#[cfg(feature = "host")]
 use rmk_types::protocol::rynk::BehaviorOptions;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::Cache;
@@ -167,6 +169,8 @@ pub(crate) enum StorageKey {
     BehaviorOptions,
     #[cfg(feature = "host")]
     AutoMouseLayerConfigs,
+    #[cfg(feature = "host")]
+    MorseProfileName(u8),
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -230,6 +234,11 @@ pub(crate) enum StorageItem {
     BehaviorOptions(StoredBehaviorOptions),
     #[cfg(feature = "host")]
     AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
+    #[cfg(feature = "host")]
+    MorseProfileName {
+        idx: u8,
+        name: MorseProfileName,
+    },
 }
 
 impl StorageItem {
@@ -271,7 +280,14 @@ impl StorageItem {
             #[cfg(feature = "host")]
             Self::BehaviorOptions(v) => (StorageKey::BehaviorOptions, StorageValue::BehaviorOptions(v)),
             #[cfg(feature = "host")]
-            Self::AutoMouseLayerConfigs(v) => (StorageKey::AutoMouseLayerConfigs, StorageValue::AutoMouseLayerConfigs(v)),
+            Self::AutoMouseLayerConfigs(v) => (
+                StorageKey::AutoMouseLayerConfigs,
+                StorageValue::AutoMouseLayerConfigs(v),
+            ),
+            #[cfg(feature = "host")]
+            Self::MorseProfileName { idx, name } => {
+                (StorageKey::MorseProfileName(idx), StorageValue::MorseProfileName(name))
+            }
         }
     }
 }
@@ -327,6 +343,8 @@ pub(crate) enum StorageValue {
     BehaviorOptions(StoredBehaviorOptions),
     #[cfg(feature = "host")]
     AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
+    #[cfg(feature = "host")]
+    MorseProfileName(MorseProfileName),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -647,6 +665,8 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 profile,
             })
             .await;
+            let name = behavior.morse.profile_names.get(idx).cloned().unwrap_or_default();
+            put(StorageItem::MorseProfileName { idx: idx as u8, name }).await;
         }
         // The whole buffer, so a macro the user wrote over the host protocol is
         // replaced by its default or cleared.
@@ -1139,6 +1159,8 @@ mod tests {
             StorageKey::BehaviorOptions,
             #[cfg(feature = "host")]
             StorageKey::AutoMouseLayerConfigs,
+            #[cfg(feature = "host")]
+            StorageKey::MorseProfileName(12),
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1178,6 +1200,8 @@ mod tests {
             StorageValue::BehaviorOptions((&RuntimeBehaviorConfig::default()).into()),
             #[cfg(feature = "host")]
             StorageValue::AutoMouseLayerConfigs(heapless::Vec::new()),
+            #[cfg(feature = "host")]
+            StorageValue::MorseProfileName(MorseProfileName::new()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
