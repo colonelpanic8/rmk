@@ -242,6 +242,15 @@ impl crate::KeyboardTomlConfig {
                 self.rmk.morse_profile_max_num
             ));
         }
+        if let Some((name, _)) = morse
+            .as_ref()
+            .and_then(|m| m.profiles.iter().find(|(name, _)| name.len() > 32))
+        {
+            return Err(format!(
+                "behavior.morse profile name `{name}` is {} bytes, but runtime names are limited to 32 bytes",
+                name.len()
+            ));
+        }
 
         let auto_mouse_layer = toml_behavior
             .auto_mouse_layer

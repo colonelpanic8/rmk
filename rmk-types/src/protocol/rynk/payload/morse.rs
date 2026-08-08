@@ -3,7 +3,7 @@
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
 
-use crate::morse::{Morse, MorseProfile};
+use crate::morse::{MORSE_PROFILE_NAME_MAX_LEN, Morse, MorseProfile, MorseProfileName};
 #[cfg(not(feature = "host"))]
 use crate::protocol::rynk::payload::bulk_capacity::MAX_BULK_ITEMS;
 
@@ -19,6 +19,66 @@ type BulkMorses = alloc::vec::Vec<Morse>;
 type BulkMorseProfiles = heapless::Vec<MorseProfile, MAX_BULK_ITEMS>;
 #[cfg(feature = "host")]
 type BulkMorseProfiles = alloc::vec::Vec<MorseProfile>;
+
+/// Maximum named profiles returned by one catalog page.
+pub const MORSE_PROFILE_ENTRY_CHUNK: usize = 4;
+
+#[cfg(not(feature = "host"))]
+type MorseProfileEntries = heapless::Vec<MorseProfileEntry, MORSE_PROFILE_ENTRY_CHUNK>;
+#[cfg(feature = "host")]
+type MorseProfileEntries = alloc::vec::Vec<MorseProfileEntry>;
+
+/// One occupied, stable runtime morse profile slot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct MorseProfileEntry {
+    pub index: u8,
+    #[cfg_attr(feature = "wasm", tsify(type = "string"))]
+    pub name: MorseProfileName,
+    pub profile: MorseProfile,
+}
+
+impl MaxSize for MorseProfileEntry {
+    const POSTCARD_MAX_SIZE: usize = u8::POSTCARD_MAX_SIZE
+        + crate::heapless_vec_max_size::<u8, MORSE_PROFILE_NAME_MAX_LEN>()
+        + MorseProfile::POSTCARD_MAX_SIZE;
+}
+
+/// Request a page of occupied profile slots, offset within the occupied list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct GetMorseProfileStateRequest {
+    pub offset: u8,
+}
+
+/// One page of the sparse named-profile table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct MorseProfileState {
+    pub capacity: u8,
+    pub total: u8,
+    #[cfg_attr(feature = "wasm", tsify(type = "MorseProfileEntry[]"))]
+    pub entries: MorseProfileEntries,
+}
+
+#[cfg(not(feature = "host"))]
+impl MaxSize for MorseProfileState {
+    const POSTCARD_MAX_SIZE: usize =
+        2 * u8::POSTCARD_MAX_SIZE + crate::heapless_vec_max_size::<MorseProfileEntry, MORSE_PROFILE_ENTRY_CHUNK>();
+}
+
+/// Create, rename, or update one occupied profile slot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct SetMorseProfileEntryRequest {
+    pub entry: MorseProfileEntry,
+}
 
 /// Request payload for `SetMorse`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
@@ -202,13 +262,29 @@ mod tests {
         round_trip(&GetMorseProfileBulkRequest { start_index: u8::MAX });
     }
 
+    fn named_profile(index: u8) -> MorseProfileEntry {
+        MorseProfileEntry {
+            index,
+            name: MorseProfileName::try_from("home-row-mod").unwrap(),
+            profile: full_profile(),
+        }
+    }
+
+    #[test]
+    fn round_trip_named_morse_profile_requests() {
+        let entry = named_profile(3);
+        round_trip(&GetMorseProfileStateRequest { offset: 4 });
+        round_trip(&SetMorseProfileEntryRequest { entry: entry.clone() });
+        assert_max_size_bound(&entry);
+    }
+
     // Firmware-only: exercises heapless bulk capacity.
     #[cfg(not(feature = "host"))]
     mod bulk {
         use heapless::Vec;
 
         use super::super::*;
-        use super::{full_morse, full_profile};
+        use super::{full_morse, full_profile, named_profile};
         use crate::morse::{Morse, MorseProfile};
         use crate::protocol::rynk::payload::bulk_capacity::MAX_BULK_ITEMS;
         use crate::protocol::rynk::tests::{assert_max_size_bound, round_trip};
@@ -261,6 +337,21 @@ mod tests {
             let resp = GetMorseProfileBulkResponse { profiles };
             round_trip(&resp);
             assert_max_size_bound(&resp);
+        }
+
+        #[test]
+        fn round_trip_morse_profile_state_max_page() {
+            let mut entries = Vec::new();
+            for index in 0..MORSE_PROFILE_ENTRY_CHUNK {
+                entries.push(named_profile(index as u8)).unwrap();
+            }
+            let state = MorseProfileState {
+                capacity: u8::MAX,
+                total: u8::MAX,
+                entries,
+            };
+            round_trip(&state);
+            assert_max_size_bound(&state);
         }
     }
 }

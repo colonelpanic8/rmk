@@ -26,7 +26,7 @@ use crate::fork::{Fork, StateBits};
 use crate::keycode::{ConsumerKey, HidKeyCode, KeyCode, SpecialKey, SystemControlKey};
 use crate::led_indicator::LedIndicator;
 use crate::modifier::ModifierCombination;
-use crate::morse::{Morse, MorseMode, MorseProfile, TAP};
+use crate::morse::{Morse, MorseMode, MorseProfile, MorseProfileName, TAP};
 use crate::mouse_button::MouseButtons;
 
 /// Buffer size used by round-trip / max-size helpers.
@@ -388,6 +388,16 @@ fn exemplars() -> Exemplars {
 #[test]
 fn wire_values_locked() {
     let ex = exemplars();
+    let profile_entry = MorseProfileEntry {
+        index: 3,
+        name: MorseProfileName::try_from("home-row-mod").unwrap(),
+        profile: ex.profile,
+    };
+    let profile_state = MorseProfileState {
+        capacity: 16,
+        total: 1,
+        entries: core::iter::once(profile_entry.clone()).collect(),
+    };
 
     // Values-only exemplars (no frame counterpart).
     let mut unlock_keys = heapless::Vec::new();
@@ -605,6 +615,18 @@ fn wire_values_locked() {
                 profile: ex.profile
             })
         ),
+        ("MorseProfileEntry{3,home-row-mod,profile}", encode(&profile_entry)),
+        ("MorseProfileState{16,1,[entry]}", encode(&profile_state)),
+        (
+            "GetMorseProfileStateRequest{0}",
+            encode(&GetMorseProfileStateRequest { offset: 0 }),
+        ),
+        (
+            "SetMorseProfileEntryRequest{entry}",
+            encode(&SetMorseProfileEntryRequest {
+                entry: profile_entry.clone(),
+            }),
+        ),
         (
             "SetForkRequest{2,fork}",
             encode(&SetForkRequest {
@@ -653,6 +675,16 @@ fn wire_values_locked() {
 #[test]
 fn wire_frames_locked() {
     let ex = exemplars();
+    let profile_entry = MorseProfileEntry {
+        index: 3,
+        name: MorseProfileName::try_from("home-row-mod").unwrap(),
+        profile: ex.profile,
+    };
+    let profile_state = MorseProfileState {
+        capacity: 16,
+        total: 1,
+        entries: core::iter::once(profile_entry.clone()).collect(),
+    };
 
     // Request seq; a reply echoes it. Topics are always seq 0.
     const SEQ: u8 = 1;
@@ -914,6 +946,42 @@ fn wire_frames_locked() {
         (
             "SetMorseProfile reply Ok(())",
             encode_frame(Cmd::SetMorseProfile, SEQ, &Ok::<(), RynkError>(()))
+        ),
+        (
+            "GetMorseProfileState request {offset:0}",
+            encode_frame(
+                Cmd::GetMorseProfileState,
+                SEQ,
+                &GetMorseProfileStateRequest { offset: 0 }
+            ),
+        ),
+        (
+            "GetMorseProfileState reply Ok(state)",
+            encode_frame(
+                Cmd::GetMorseProfileState,
+                SEQ,
+                &Ok::<MorseProfileState, RynkError>(profile_state)
+            ),
+        ),
+        (
+            "SetMorseProfileEntry request {entry}",
+            encode_frame(
+                Cmd::SetMorseProfileEntry,
+                SEQ,
+                &SetMorseProfileEntryRequest { entry: profile_entry },
+            ),
+        ),
+        (
+            "SetMorseProfileEntry reply Ok(())",
+            encode_frame(Cmd::SetMorseProfileEntry, SEQ, &Ok::<(), RynkError>(())),
+        ),
+        (
+            "DeleteMorseProfile request 3",
+            encode_frame(Cmd::DeleteMorseProfile, SEQ, &3u8),
+        ),
+        (
+            "DeleteMorseProfile reply Ok(())",
+            encode_frame(Cmd::DeleteMorseProfile, SEQ, &Ok::<(), RynkError>(())),
         ),
         // Fork (0x05xx).
         ("GetFork request 2", encode_frame(Cmd::GetFork, SEQ, &2u8)),

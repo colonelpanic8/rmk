@@ -1,9 +1,10 @@
 use core::cell::RefCell;
+use core::fmt::Write;
 
 use embassy_time::Duration;
 use rmk_types::action::{EncoderAction, KeyAction};
 use rmk_types::fork::Fork;
-use rmk_types::morse::{Morse, MorseProfile};
+use rmk_types::morse::{Morse, MorseProfile, MorseProfileName};
 #[cfg(all(feature = "storage", feature = "host"))]
 use {
     crate::{boot::reboot_keyboard, storage::Storage},
@@ -424,7 +425,11 @@ impl<'a> KeyMap<'a> {
                     .and(storage.read_combos(&mut behavior.combo.combos).await)
                     .and(storage.read_forks(&mut behavior.fork.forks).await)
                     .and(storage.read_morses(&mut behavior.morse.morses).await)
-                    .and(storage.read_morse_profiles(&mut behavior.morse.profiles).await)
+                    .and(
+                        storage
+                            .read_morse_profiles(&mut behavior.morse.profiles, &mut behavior.morse.profile_names)
+                            .await,
+                    )
             }
             .is_err()
         {
@@ -641,11 +646,12 @@ impl<'a> KeyMap<'a> {
     pub(crate) fn morse_profile(&self, idx: u8) -> MorseProfile {
         let inner = self.inner.borrow();
         let morse = &inner.behavior.morse;
-        morse
-            .profiles
-            .get(idx as usize)
-            .copied()
-            .unwrap_or(morse.default_profile)
+        let idx = idx as usize;
+        match (morse.profile_names.get(idx), morse.profiles.get(idx)) {
+            (Some(name), Some(profile)) if !name.is_empty() => *profile,
+            (None, Some(profile)) if morse.profile_names.is_empty() => *profile,
+            _ => morse.default_profile,
+        }
     }
 
     pub(crate) fn mouse_key_config(&self) -> MouseKeyConfig {
@@ -667,21 +673,61 @@ impl<'a> KeyMap<'a> {
         self.inner.borrow().behavior.morse.profiles.capacity()
     }
 
+    pub(crate) fn morse_profile_name(&self, idx: u8) -> Option<MorseProfileName> {
+        self.inner
+            .borrow()
+            .behavior
+            .morse
+            .profile_names
+            .get(idx as usize)
+            .filter(|name| !name.is_empty())
+            .cloned()
+    }
+
     /// Replace the profile at `idx`, growing the table to reach it. Returns
     /// `false` for an index past the table's capacity, leaving it untouched.
     /// Slots skipped over are left unset, which resolves per-field to the
     /// default profile exactly as an absent entry did.
     pub(crate) fn set_morse_profile(&self, idx: u8, profile: MorseProfile) -> bool {
+        let name = self.morse_profile_name(idx).unwrap_or_else(|| {
+            let mut name = MorseProfileName::new();
+            write!(name, "profile_{idx:03}").expect("generated profile name fits");
+            name
+        });
+        self.set_named_morse_profile(idx, name, profile)
+    }
+
+    pub(crate) fn set_named_morse_profile(&self, idx: u8, name: MorseProfileName, profile: MorseProfile) -> bool {
         let mut inner = self.inner.borrow_mut();
-        let profiles = &mut inner.behavior.morse.profiles;
+        let morse = &mut inner.behavior.morse;
         let idx = idx as usize;
-        if idx >= profiles.capacity() {
+        if idx >= morse.profiles.capacity() || name.is_empty() {
             return false;
         }
-        if idx >= profiles.len() {
-            profiles.resize(idx + 1, MorseProfile::default()).ok();
+        if idx >= morse.profiles.len() {
+            morse.profiles.resize(idx + 1, MorseProfile::default()).ok();
         }
-        profiles[idx] = profile;
+        if idx >= morse.profile_names.len() {
+            morse.profile_names.resize(idx + 1, MorseProfileName::new()).ok();
+        }
+        morse.profiles[idx] = profile;
+        morse.profile_names[idx] = name;
+        true
+    }
+
+    pub(crate) fn delete_morse_profile(&self, idx: u8) -> bool {
+        let mut inner = self.inner.borrow_mut();
+        let morse = &mut inner.behavior.morse;
+        let idx = idx as usize;
+        if idx >= morse.profiles.capacity() {
+            return false;
+        }
+        if let Some(profile) = morse.profiles.get_mut(idx) {
+            *profile = MorseProfile::default();
+        }
+        if let Some(name) = morse.profile_names.get_mut(idx) {
+            name.clear();
+        }
         true
     }
 
