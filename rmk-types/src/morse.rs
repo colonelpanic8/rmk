@@ -5,12 +5,18 @@
 //! - [`MorsePattern`] — tap/hold pattern encoding (up to 15 steps in a u16)
 //! - [`Morse`] — full morse key definition (profile + pattern→action map)
 
-use heapless::LinearMap;
+use heapless::{LinearMap, String};
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
 
 use crate::action::Action;
 use crate::constants::MORSE_SIZE;
+
+/// Maximum UTF-8 byte length of a user-facing runtime morse profile name.
+pub const MORSE_PROFILE_NAME_MAX_LEN: usize = 32;
+
+/// Human-facing name attached to a stable morse profile slot.
+pub type MorseProfileName = String<MORSE_PROFILE_NAME_MAX_LEN>;
 
 // ---------------------------------------------------------------------------
 // MorseMode & MorseProfile — timing/behavior configuration

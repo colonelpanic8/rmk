@@ -2,12 +2,12 @@
 
 use rmk_types::morse::{Morse, MorseProfile};
 use rmk_types::protocol::rynk::command::{
-    GetMorse, GetMorseBulk, GetMorseProfile, GetMorseProfileBulk, GetMorseProfileCount, SetMorse, SetMorseBulk,
-    SetMorseProfile, SetMorseProfileBulk,
+    DeleteMorseProfile, GetMorse, GetMorseBulk, GetMorseProfile, GetMorseProfileBulk, GetMorseProfileCount,
+    GetMorseProfileState, SetMorse, SetMorseBulk, SetMorseProfile, SetMorseProfileBulk, SetMorseProfileEntry,
 };
 use rmk_types::protocol::rynk::{
-    GetMorseBulkRequest, GetMorseProfileBulkRequest, RynkError, RynkMessage, SetMorseProfileRequest, SetMorseRequest,
-    bulk_item_capacity,
+    GetMorseBulkRequest, GetMorseProfileBulkRequest, GetMorseProfileStateRequest, MorseProfileState, RynkError,
+    RynkMessage, SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest, bulk_item_capacity,
 };
 
 use super::super::RynkService;
@@ -94,5 +94,31 @@ impl HandleBulk<SetMorseProfileBulk> for RynkService<'_> {
             self.ctx.set_morse_profile(idx as u8, profile).await;
         }
         msg.encode_response(&())
+    }
+}
+
+impl Handle<GetMorseProfileState> for RynkService<'_> {
+    async fn handle(&self, request: GetMorseProfileStateRequest) -> Result<MorseProfileState, RynkError> {
+        Ok(self.ctx.morse_profile_state(request.offset))
+    }
+}
+
+impl Handle<SetMorseProfileEntry> for RynkService<'_> {
+    async fn handle(&self, request: SetMorseProfileEntryRequest) -> Result<(), RynkError> {
+        if self.ctx.set_morse_profile_entry(request).await {
+            Ok(())
+        } else {
+            Err(RynkError::Invalid)
+        }
+    }
+}
+
+impl Handle<DeleteMorseProfile> for RynkService<'_> {
+    async fn handle(&self, index: u8) -> Result<(), RynkError> {
+        if self.ctx.delete_morse_profile(index).await {
+            Ok(())
+        } else {
+            Err(RynkError::Invalid)
+        }
     }
 }
