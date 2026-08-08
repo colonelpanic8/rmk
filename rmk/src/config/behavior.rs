@@ -3,7 +3,7 @@ use heapless::Vec;
 use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::fork::Fork;
 use rmk_types::keycode::KeyCode;
-use rmk_types::morse::{Morse, MorseMode, MorseProfile};
+use rmk_types::morse::{Morse, MorseMode, MorseProfile, MorseProfileName};
 
 use crate::keyboard::combo::Combo;
 use crate::{
@@ -136,6 +136,10 @@ pub struct MorsesConfig {
     /// default profile.
     pub profiles: Vec<MorseProfile, MORSE_PROFILE_MAX_NUM>,
 
+    /// Stable human-facing names parallel to `profiles`. An empty name marks
+    /// a vacant slot without renumbering later bindings.
+    pub profile_names: Vec<MorseProfileName, MORSE_PROFILE_MAX_NUM>,
+
     pub morses: Vec<Morse, MORSE_MAX_NUM>,
 }
 
@@ -146,6 +150,7 @@ impl Default for MorsesConfig {
             prior_idle_time: Duration::from_millis(120),
             default_profile: MorseProfile::new(Some(false), Some(MorseMode::Normal), Some(250u16), Some(250u16)),
             profiles: Vec::new(),
+            profile_names: Vec::new(),
             morses: Vec::new(),
         }
     }

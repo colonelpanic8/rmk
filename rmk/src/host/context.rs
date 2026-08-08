@@ -9,9 +9,14 @@ use rmk_types::combo::Combo as ComboConfig;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
+#[cfg(feature = "storage")]
+use rmk_types::morse::MorseProfileName;
 use rmk_types::morse::{Morse, MorseProfile};
 #[cfg(feature = "rynk")]
-use rmk_types::protocol::rynk::{BehaviorConfig, BehaviorOptions};
+use rmk_types::protocol::rynk::{
+    BehaviorConfig, BehaviorOptions, MORSE_PROFILE_ENTRY_CHUNK, MorseProfileEntry, MorseProfileState,
+    SetMorseProfileEntryRequest,
+};
 
 #[cfg(feature = "rynk")]
 use crate::config::OneShotModifiersConfig;
@@ -252,6 +257,33 @@ impl<'a> KeyboardContext<'a> {
         ((idx as usize) < self.keymap.morse_profiles_capacity()).then(|| self.keymap.morse_profile(idx))
     }
 
+    #[cfg(feature = "rynk")]
+    pub fn morse_profile_state(&self, offset: u8) -> MorseProfileState {
+        let total = (0..self.keymap.morse_profiles_capacity())
+            .filter(|index| self.keymap.morse_profile_name(*index as u8).is_some())
+            .count();
+        let mut entries: heapless::Vec<MorseProfileEntry, MORSE_PROFILE_ENTRY_CHUNK> = Default::default();
+        for index in (0..self.keymap.morse_profiles_capacity())
+            .filter(|index| self.keymap.morse_profile_name(*index as u8).is_some())
+            .skip(offset as usize)
+            .take(MORSE_PROFILE_ENTRY_CHUNK)
+        {
+            let index = index as u8;
+            entries
+                .push(MorseProfileEntry {
+                    index,
+                    name: self.keymap.morse_profile_name(index).expect("filtered occupied slot"),
+                    profile: self.keymap.morse_profile(index),
+                })
+                .expect("page is bounded by the catalog chunk size");
+        }
+        MorseProfileState {
+            capacity: self.keymap.morse_profiles_capacity() as u8,
+            total: total as u8,
+            entries,
+        }
+    }
+
     /// Replace the profile at `idx` and persist it. Returns `false` for an
     /// index past the table's capacity, which changes nothing.
     pub async fn set_morse_profile(&self, idx: u8, profile: MorseProfile) -> bool {
@@ -259,9 +291,81 @@ impl<'a> KeyboardContext<'a> {
             return false;
         }
         #[cfg(feature = "storage")]
-        FLASH_CHANNEL
-            .send(FlashOperationMessage::MorseProfile { idx, profile })
-            .await;
+        {
+            FLASH_CHANNEL
+                .send(FlashOperationMessage::MorseProfile { idx, profile })
+                .await;
+            FLASH_CHANNEL
+                .send(FlashOperationMessage::MorseProfileName {
+                    idx,
+                    name: self.keymap.morse_profile_name(idx).expect("setter occupies the slot"),
+                })
+                .await;
+        }
+        true
+    }
+
+    #[cfg(feature = "rynk")]
+    pub async fn set_morse_profile_entry(&self, request: SetMorseProfileEntryRequest) -> bool {
+        let capacity = self.keymap.morse_profiles_capacity();
+        let entry = request.entry;
+        if entry.index as usize >= capacity || entry.name.trim().is_empty() {
+            return false;
+        }
+        for index in 0..capacity {
+            if index != entry.index as usize
+                && self
+                    .keymap
+                    .morse_profile_name(index as u8)
+                    .is_some_and(|name| name == entry.name)
+            {
+                return false;
+            }
+        }
+        if !self
+            .keymap
+            .set_named_morse_profile(entry.index, entry.name.clone(), entry.profile)
+        {
+            return false;
+        }
+
+        #[cfg(feature = "storage")]
+        {
+            FLASH_CHANNEL
+                .send(FlashOperationMessage::MorseProfile {
+                    idx: entry.index,
+                    profile: entry.profile,
+                })
+                .await;
+            FLASH_CHANNEL
+                .send(FlashOperationMessage::MorseProfileName {
+                    idx: entry.index,
+                    name: entry.name,
+                })
+                .await;
+        }
+        true
+    }
+
+    pub async fn delete_morse_profile(&self, idx: u8) -> bool {
+        if !self.keymap.delete_morse_profile(idx) {
+            return false;
+        }
+        #[cfg(feature = "storage")]
+        {
+            FLASH_CHANNEL
+                .send(FlashOperationMessage::MorseProfile {
+                    idx,
+                    profile: MorseProfile::default(),
+                })
+                .await;
+            FLASH_CHANNEL
+                .send(FlashOperationMessage::MorseProfileName {
+                    idx,
+                    name: MorseProfileName::new(),
+                })
+                .await;
+        }
         true
     }
 

@@ -117,6 +117,9 @@ impl<'a> RynkService<'a> {
             Cmd::SetMorseProfile => serve::<command::SetMorseProfile, _>(self, msg).await,
             Cmd::GetMorseProfileBulk => serve_bulk::<command::GetMorseProfileBulk, _>(self, msg).await,
             Cmd::SetMorseProfileBulk => serve_bulk::<command::SetMorseProfileBulk, _>(self, msg).await,
+            Cmd::GetMorseProfileState => serve::<command::GetMorseProfileState, _>(self, msg).await,
+            Cmd::SetMorseProfileEntry => serve::<command::SetMorseProfileEntry, _>(self, msg).await,
+            Cmd::DeleteMorseProfile => serve::<command::DeleteMorseProfile, _>(self, msg).await,
 
             Cmd::GetFork => serve::<command::GetFork, _>(self, msg).await,
             Cmd::SetFork => serve::<command::SetFork, _>(self, msg).await,

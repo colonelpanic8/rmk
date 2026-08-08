@@ -1,6 +1,6 @@
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::fork::Fork;
-use rmk_types::morse::{Morse, MorseProfile};
+use rmk_types::morse::{Morse, MorseProfile, MorseProfileName};
 use serde::de::{Error as DeError, SeqAccess, Visitor};
 use serde::{Deserializer, Serializer};
 
@@ -191,20 +191,43 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
     pub(crate) async fn read_morse_profiles(
         &mut self,
         profiles: &mut heapless::Vec<MorseProfile, MORSE_PROFILE_MAX_NUM>,
+        profile_names: &mut heapless::Vec<MorseProfileName, MORSE_PROFILE_MAX_NUM>,
     ) -> Result<(), ()> {
         for i in 0..MORSE_PROFILE_MAX_NUM {
-            let key = StorageKey::morse_profile(i as u8);
-            let read_data = self
+            let profile_data = self
                 .flash
-                .fetch_item(&mut self.buffer, &key)
+                .fetch_item(&mut self.buffer, &StorageKey::morse_profile(i as u8))
+                .await
+                .map_err(|e| print_storage_error::<F>(e))?;
+            let name_data = self
+                .flash
+                .fetch_item(&mut self.buffer, &StorageKey::morse_profile_name(i as u8))
                 .await
                 .map_err(|e| print_storage_error::<F>(e))?;
 
-            if let Some(StorageData::MorseProfile(profile)) = read_data {
+            let had_profile = matches!(profile_data, Some(StorageData::MorseProfile(_)));
+            if let Some(StorageData::MorseProfile(profile)) = profile_data {
                 if i >= profiles.len() {
                     profiles.resize(i + 1, MorseProfile::default()).ok();
                 }
                 profiles[i] = profile;
+            }
+            if let Some(StorageData::MorseProfileName(name)) = name_data {
+                if i >= profiles.len() {
+                    profiles.resize(i + 1, MorseProfile::default()).ok();
+                }
+                if i >= profile_names.len() {
+                    profile_names.resize(i + 1, MorseProfileName::new()).ok();
+                }
+                profile_names[i] = name;
+            } else if had_profile && profile_names.get(i).is_none_or(|name| name.is_empty()) {
+                use core::fmt::Write;
+                let mut name = MorseProfileName::new();
+                write!(name, "profile_{i:03}").expect("generated profile name fits");
+                if i >= profile_names.len() {
+                    profile_names.resize(i + 1, MorseProfileName::new()).ok();
+                }
+                profile_names[i] = name;
             }
         }
 

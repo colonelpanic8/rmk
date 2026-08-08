@@ -8,7 +8,7 @@ use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::connection::ConnectionType;
-use rmk_types::morse::MorseProfile;
+use rmk_types::morse::{MorseProfile, MorseProfileName};
 use rmk_types::protocol::rynk::BehaviorOptions;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
@@ -153,6 +153,11 @@ pub(crate) enum FlashOperationMessage {
         profile: MorseProfile,
     },
     #[cfg(feature = "host")]
+    MorseProfileName {
+        idx: u8,
+        name: MorseProfileName,
+    },
+    #[cfg(feature = "host")]
     BehaviorOptions(BehaviorOptions),
     #[cfg(feature = "host")]
     AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
@@ -231,6 +236,8 @@ pub(crate) enum StorageKey {
     BehaviorOptions,
     #[cfg(feature = "host")]
     AutoMouseLayerConfigs,
+    #[cfg(feature = "host")]
+    MorseProfileName(u8),
 }
 
 impl StorageKey {
@@ -272,6 +279,11 @@ impl StorageKey {
     #[cfg(feature = "host")]
     pub(crate) const fn morse_profile(idx: u8) -> Self {
         Self::MorseProfile(idx)
+    }
+
+    #[cfg(feature = "host")]
+    pub(crate) const fn morse_profile_name(idx: u8) -> Self {
+        Self::MorseProfileName(idx)
     }
 }
 
@@ -324,6 +336,8 @@ pub(crate) enum StorageData {
     BehaviorOptions(StoredBehaviorOptions),
     #[cfg(feature = "host")]
     AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
+    #[cfg(feature = "host")]
+    MorseProfileName(MorseProfileName),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -906,6 +920,14 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 FlashOperationMessage::MorseProfile { idx, profile } => {
                     self.store_data(StorageKey::morse_profile(idx), &StorageData::MorseProfile(profile))
                         .await
+                }
+                #[cfg(feature = "host")]
+                FlashOperationMessage::MorseProfileName { idx, name } => {
+                    self.store_data(
+                        StorageKey::morse_profile_name(idx),
+                        &StorageData::MorseProfileName(name),
+                    )
+                    .await
                 }
                 FlashOperationMessage::ConnectionType(ty) => {
                     self.store_data(StorageKey::ConnectionType, &StorageData::ConnectionType(ty))

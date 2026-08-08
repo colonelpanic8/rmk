@@ -13,6 +13,8 @@ BootloaderJump request ()                                                       
 ClearBleProfile reply Ok(())                                                    04 05 07 01 01 00
 ClearBleProfile request 1                                                       05 05 07 01 01 00
 ConnectionChange topic ConnectionStatus{Configured,{1,Adv},Ble}                 03 03 80 03 02 01 02 01 00
+DeleteMorseProfile reply Ok(())                                                 04 0e 04 01 01 00
+DeleteMorseProfile request 3                                                    05 0e 04 01 03 00
 GetAutoMouseLayerConfigs reply Ok(state)                                        04 05 06 01 0b 04 01 01 01 02 f4 03 03 01 01 03 d6 01 01 00
 GetAutoMouseLayerConfigs request ()                                             04 05 06 01 00
 GetBatteryStatus reply Ok(Available{Discharging,85})                            04 03 08 01 05 01 01 01 55 00
@@ -59,6 +61,8 @@ GetMorseProfile reply Ok(MorseProfile(Normal,200,150))                          
 GetMorseProfile request 3                                                       05 06 04 01 03 00
 GetMorseProfileCount reply Ok(16)                                               04 05 04 01 02 10 00
 GetMorseProfileCount request ()                                                 04 05 04 01 00
+GetMorseProfileState reply Ok(state)                                            04 0c 04 01 17 10 01 01 03 0c 68 6f 6d 65 2d 72 6f 77 2d 6d 6f 64 c8 81 b0 89 0c 00
+GetMorseProfileState request {offset:0}                                         04 0c 04 01 01 00
 GetPeripheralStatus reply Ok(PeripheralStatus{true,Available{Discharging,85}})  04 04 08 01 06 01 01 01 01 55 00
 GetPeripheralStatus request 1                                                   05 04 08 01 01 00
 GetSleepState reply Ok(true)                                                    04 06 08 01 02 01 00
@@ -96,6 +100,8 @@ SetMorse reply Ok(())                                                           
 SetMorse request SetMorseRequest{0,morse}                                       04 02 04 01 01 04 01 02 01 02 04 00
 SetMorseProfile reply Ok(())                                                    04 07 04 01 01 00
 SetMorseProfile request SetMorseProfileRequest{3,profile}                       0a 07 04 01 03 c8 81 b0 89 0c 00
+SetMorseProfileEntry reply Ok(())                                               04 0d 04 01 01 00
+SetMorseProfileEntry request {entry}                                            17 0d 04 01 03 0c 68 6f 6d 65 2d 72 6f 77 2d 6d 6f 64 c8 81 b0 89 0c 00
 SleepState topic true                                                           03 04 80 02 01 00
 StorageReset reply Ok(())                                                       02 05 02 01 01 00
 StorageReset request StorageResetMode::Full                                     02 05 02 01 01 00
