@@ -114,6 +114,35 @@ struct KeyMapInner<'a> {
 }
 
 impl KeyMapInner<'_> {
+    #[cfg(feature = "split")]
+    fn split_layer_state(&self) -> crate::split::SplitLayerState {
+        let effective = self.get_activated_layer();
+        let default = self.get_default_layer();
+        let mut active = 0_u64;
+        if default < crate::split::SplitLayerState::CAPACITY {
+            active |= 1_u64 << default;
+        }
+        for (layer, enabled) in self
+            .layer_state
+            .iter()
+            .copied()
+            .take(crate::split::SplitLayerState::CAPACITY as usize)
+            .enumerate()
+        {
+            if enabled {
+                active |= 1_u64 << layer;
+            }
+        }
+        crate::split::SplitLayerState::new(effective, default, active)
+    }
+
+    fn publish_layer_change(&self) {
+        let effective = self.get_activated_layer();
+        #[cfg(feature = "split")]
+        crate::split::update_layer_state(self.split_layer_state());
+        publish_event(LayerChangeEvent::new(effective));
+    }
+
     #[inline]
     fn layer_index(&self, layer: usize, row: usize, col: usize) -> usize {
         layer * self.row * self.col + row * self.col + col
@@ -156,9 +185,16 @@ impl KeyMapInner<'_> {
         self.behavior.default_layer = layer_num;
         let after = self.get_activated_layer();
         // With no layer key held, the activated layer follows the default; a
-        // held layer masks the change and observers see nothing.
+        // held layer masks the effective change. Split transport still needs
+        // a wakeup because the default and active bitmap changed.
         if before != after {
-            publish_event(LayerChangeEvent::new(after));
+            self.publish_layer_change();
+        } else {
+            #[cfg(feature = "split")]
+            {
+                crate::split::update_layer_state(self.split_layer_state());
+                publish_event(LayerChangeEvent::new(after));
+            }
         }
     }
 
@@ -300,8 +336,7 @@ impl KeyMapInner<'_> {
     fn update_fn_layer_state(&mut self) {
         if self.num_layer > 3 {
             self.layer_state[3] = self.layer_state[1] && self.layer_state[2];
-            let layer = self.get_activated_layer();
-            publish_event(LayerChangeEvent::new(layer));
+            self.publish_layer_change();
         }
     }
 
@@ -310,8 +345,7 @@ impl KeyMapInner<'_> {
             self.layer_state[tri_layer[2] as usize] =
                 self.layer_state[tri_layer[0] as usize] && self.layer_state[tri_layer[1] as usize];
         }
-        let layer = self.get_activated_layer();
-        publish_event(LayerChangeEvent::new(layer));
+        self.publish_layer_change();
     }
 
     fn activate_layer(&mut self, layer_num: u8) {
@@ -982,6 +1016,44 @@ mod test {
         assert_eq!(
             keymap.get_action_with_layer_cache(KeyboardEvent::key(0, 0, false)),
             k!(A)
+        );
+    }
+
+    #[cfg(feature = "split")]
+    #[test]
+    fn split_layer_state_tracks_the_complete_active_set() {
+        use crate::config::{BehaviorConfig, PositionalConfig};
+        use crate::keymap::{KeyMap, KeymapData};
+
+        let mut data = KeymapData::<1, 1, 4>::new([[[k!(A)]], [[k!(B)]], [[k!(C)]], [[k!(D)]]]);
+        let mut behavior = BehaviorConfig::default();
+        let positional = PositionalConfig::<1, 1>::default();
+        let keymap = KeyMap::build(&mut data, &mut behavior, &positional);
+
+        assert_eq!(
+            crate::split::current_layer_state(),
+            crate::split::SplitLayerState::new(0, 0, 1)
+        );
+
+        assert!(keymap.activate_layer_if_inactive(2));
+        assert_eq!(
+            crate::split::current_layer_state(),
+            crate::split::SplitLayerState::new(2, 0, 0b101)
+        );
+
+        // A lower default is masked by the held layer, so the legacy
+        // effective-layer event does not fire. The split snapshot must still
+        // carry the changed default and active bitmap.
+        keymap.set_default_layer(1);
+        assert_eq!(
+            crate::split::current_layer_state(),
+            crate::split::SplitLayerState::new(2, 1, 0b110)
+        );
+
+        keymap.deactivate_layer_if_active(2);
+        assert_eq!(
+            crate::split::current_layer_state(),
+            crate::split::SplitLayerState::new(1, 1, 0b010)
         );
     }
 }

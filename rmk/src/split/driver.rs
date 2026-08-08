@@ -220,7 +220,13 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
         {
             return;
         }
-
+        if self
+            .send(&SplitMessage::LayerState(super::current_layer_state()))
+            .await
+            .is_err()
+        {
+            return;
+        }
         #[cfg(feature = "dfu_split")]
         self.check_firmware_update().await;
 
@@ -235,7 +241,7 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
             let next_event_to_peri = async {
                 crate::select_biased_with_feature! {
                     e = indicator_sub.next_event().fuse() => SplitMessage::KeyboardIndicator(e.0.into_bits()),
-                    e = layer_sub.next_event().fuse() => SplitMessage::Layer(e.0),
+                    _ = layer_sub.next_event().fuse() => SplitMessage::LayerState(super::current_layer_state()),
                     e = connection_sub.next_event().fuse() => SplitMessage::ConnectionStatus(e.0),
                     with_feature("_ble"): _ = clear_peer_sub.next_event().fuse() => {
                         #[cfg(feature = "storage")]
