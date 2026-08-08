@@ -120,19 +120,22 @@ fn expand_morse(morse: &Option<Morse>) -> proc_macro2::TokenStream {
         // Interned morse profile table, in the same sorted-name order used by
         // `morse_profile` when it emits per-key indices. The pushes can't overflow:
         // the profile count is validated against the capacity in `behavior()`.
-        let profile_tokens = sorted_profile_names(&profiles_ref).into_iter().map(|name| {
+        let profile_names = sorted_profile_names(&profiles_ref);
+        let profile_tokens = profile_names.iter().map(|name| {
             let profile = profiles_ref
                 .as_ref()
-                .and_then(|m| m.get(&name))
+                .and_then(|m| m.get(name))
                 .expect("name from same map");
             expand_profile(profile)
         });
+        let name_tokens = profile_names.iter();
 
         quote! {
             behavior_config.morse.enable_flow_tap = #enable_flow_tap;
             behavior_config.morse.prior_idle_time = ::embassy_time::Duration::from_millis(#prior_idle_time_ms);
             behavior_config.morse.default_profile = #default_profile;
             #( let _ = behavior_config.morse.profiles.push(#profile_tokens); )*
+            #( let _ = behavior_config.morse.profile_names.push(::rmk::types::morse::MorseProfileName::try_from(#name_tokens).expect("validated morse profile name")); )*
             #morses
         }
     } else {
