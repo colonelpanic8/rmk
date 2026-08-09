@@ -4,7 +4,7 @@ use embassy_time::Duration;
 use rmk_types::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
 use rmk_types::battery::BatteryStatus;
-use rmk_types::combo::Combo as ComboConfig;
+use rmk_types::combo::{Combo as ComboConfig, ComboDefinition};
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
@@ -190,6 +190,59 @@ impl<'a> KeyboardContext<'a> {
         FLASH_CHANNEL.send(FlashOperationMessage::Combo { idx, config }).await;
         #[cfg(not(feature = "storage"))]
         let _ = config;
+        true
+    }
+
+    /// Validate a versioned combo against this keyboard's matrix. Legacy
+    /// action combos retain the validation behavior of `SetCombo`; position
+    /// combos reject out-of-range layers/coordinates and duplicate positions.
+    pub fn combo_definition_is_valid(&self, definition: &ComboDefinition) -> bool {
+        let ComboDefinition::Positions(config) = definition else {
+            return true;
+        };
+        let (rows, cols, layers) = self.keymap_dimensions();
+        if config.layer.is_some_and(|layer| layer as usize >= layers) {
+            return false;
+        }
+        config.positions.iter().enumerate().all(|(idx, position)| {
+            (position.row as usize) < rows
+                && (position.col as usize) < cols
+                && !config.positions[..idx].contains(position)
+        })
+    }
+
+    /// Replace a combo slot using the additive action-or-position definition.
+    pub async fn set_combo_definition(&self, idx: u8, definition: ComboDefinition) -> bool {
+        if !self.combo_definition_is_valid(&definition) {
+            return false;
+        }
+        let valid = self.keymap.with_combos_mut(|combos| {
+            if (idx as usize) >= combos.len() {
+                return false;
+            }
+            combos[idx as usize] = if definition.is_empty() {
+                None
+            } else {
+                Some(Combo::from_definition(definition.clone()))
+            };
+            true
+        });
+        if !valid {
+            return false;
+        }
+        #[cfg(feature = "storage")]
+        match definition {
+            ComboDefinition::Actions(config) => {
+                FLASH_CHANNEL.send(FlashOperationMessage::Combo { idx, config }).await;
+            }
+            ComboDefinition::Positions(config) => {
+                FLASH_CHANNEL
+                    .send(FlashOperationMessage::PositionCombo { idx, config })
+                    .await;
+            }
+        }
+        #[cfg(not(feature = "storage"))]
+        let _ = definition;
         true
     }
 

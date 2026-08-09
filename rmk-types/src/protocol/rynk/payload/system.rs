@@ -22,8 +22,9 @@ pub struct ProtocolVersion {
 
 impl ProtocolVersion {
     /// Current protocol version for this firmware release.
-    /// Now the protocol is still being developed, so the version is v0.1
-    pub const CURRENT: Self = Self { major: 0, minor: 1 };
+    /// Version 0.2 adds the combo-definition endpoints while preserving the
+    /// original combo command schemas.
+    pub const CURRENT: Self = Self { major: 0, minor: 2 };
 }
 
 /// Device capabilities discovered during the connection handshake.
