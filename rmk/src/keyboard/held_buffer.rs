@@ -102,6 +102,11 @@ pub enum KeyState {
     /// including the current hold
     Holding(MorsePattern),
 
+    /// The hold timeout elapsed under `opposite_hand_hold`, but no hold action
+    /// has been emitted. An opposite-hand or bilateral press can still turn it
+    /// into a hold; release or a same-hand ordinary key turns it into a tap.
+    HoldArmed(MorsePattern),
+
     /// After a release event is received for a key still kept in the HeldBuffer - so morse pattern may continue
     /// The data represents the already completed morse pattern
     Released(MorsePattern),

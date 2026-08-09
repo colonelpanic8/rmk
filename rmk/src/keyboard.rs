@@ -12,7 +12,7 @@ use rmk_types::fork::StateBits;
 use rmk_types::keycode::{ConsumerKey, HidKeyCode, KeyCode, SpecialKey, SystemControlKey};
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::modifier::ModifierCombination;
-use rmk_types::morse::{MorseMode, MorsePattern, TAP};
+use rmk_types::morse::{HOLD, MorseMode, MorsePattern, TAP};
 use rmk_types::mouse_button::MouseButtons;
 use usbd_hid::descriptor::{MediaKeyboardReport, SystemControlReport};
 
@@ -497,13 +497,14 @@ impl<'a> Keyboard<'a> {
                         // Unilateral tap of the held key is triggered
                         debug!("Cleaning buffered morse key due to unilateral tap or flow tap");
                         match held_key.state {
-                            KeyState::Pressed(_) | KeyState::Holding(_) => {
+                            KeyState::Pressed(_) | KeyState::Holding(_) | KeyState::HoldArmed(_) => {
                                 // In this state pattern is not surely finished,
                                 // however an other key is pressed so terminate the sequence
                                 // with a tap due to UnilateralTap decision; try to resolve as is
                                 let pattern = match held_key.state {
                                     KeyState::Pressed(pattern) => pattern.followed_by_tap(), // The HeldKeyDecision turned this into tap!
                                     KeyState::Holding(pattern) => pattern,
+                                    KeyState::HoldArmed(pattern) => pattern.followed_by_tap(),
                                     _ => unreachable!(),
                                 };
                                 debug!("Pattern after unilateral tap or flow tap: {:?}", pattern);
@@ -535,13 +536,14 @@ impl<'a> Keyboard<'a> {
                             // Permissive hold of held key is triggered
                             debug!("Cleaning buffered morse key due to permissive hold or hold on other key press");
                             match held_key.state {
-                                KeyState::Pressed(_) | KeyState::Holding(_) => {
+                                KeyState::Pressed(_) | KeyState::Holding(_) | KeyState::HoldArmed(_) => {
                                     // In this state pattern is not surely finished,
                                     // however an other key is pressed so terminate the sequence
                                     // with a hold due to PermissiveHold/HoldOnOtherKeyPress decision; try to resolve as is
                                     let pattern = match held_key.state {
                                         KeyState::Pressed(pattern) => pattern.followed_by_hold(), // The HeldKeyDecision turned this into hold!
                                         KeyState::Holding(pattern) => pattern,
+                                        KeyState::HoldArmed(pattern) => pattern.followed_by_hold(),
                                         _ => unreachable!(),
                                     };
                                     keyboard_state_updated = true;
@@ -594,12 +596,13 @@ impl<'a> Keyboard<'a> {
                             resolved = true;
                         } else {
                             match held_key.state {
-                                KeyState::Pressed(_) | KeyState::Holding(_) => {
+                                KeyState::Pressed(_) | KeyState::Holding(_) | KeyState::HoldArmed(_) => {
                                     debug!("Cleaning buffered Release key");
 
                                     let pattern = match held_key.state {
                                         KeyState::Pressed(pattern) => pattern.followed_by_tap(), // TODO? should we double check the timeout with Instant::now() >= held_key.timeout_time?
                                         KeyState::Holding(pattern) => pattern,
+                                        KeyState::HoldArmed(pattern) => pattern.followed_by_tap(),
                                         _ => unreachable!(),
                                     };
 
@@ -607,10 +610,11 @@ impl<'a> Keyboard<'a> {
 
                                     let final_action =
                                         Self::try_predict_final_action(self.keymap, &key_action, pattern);
-                                    let defer_for_quick_tap = matches!(held_key.state, KeyState::Pressed(_))
-                                        && !pattern.is_empty()
-                                        && pattern.is_all_taps()
-                                        && Self::quick_tap_window(self.keymap, &key_action).is_some();
+                                    let defer_for_quick_tap =
+                                        matches!(held_key.state, KeyState::Pressed(_) | KeyState::HoldArmed(_))
+                                            && !pattern.is_empty()
+                                            && pattern.is_all_taps()
+                                            && Self::quick_tap_window(self.keymap, &key_action).is_some();
                                     if let Some(action) = final_action
                                         && !defer_for_quick_tap
                                     {
@@ -689,22 +693,24 @@ impl<'a> Keyboard<'a> {
 
         // Whether the held buffer needs to be checked.
         let check_held_buffer = event.pressed
-            || self
-                .held_buffer
-                .find_action(key_action)
-                .is_some_and(|k| matches!(k.state, KeyState::Pressed(_) | KeyState::Released(_)));
+            || self.held_buffer.find_action(key_action).is_some_and(|k| {
+                matches!(
+                    k.state,
+                    KeyState::Pressed(_) | KeyState::HoldArmed(_) | KeyState::Released(_)
+                )
+            });
 
         if check_held_buffer {
             // First, sort by press time
             self.held_buffer.keys.sort_unstable_by_key(|k| k.press_time);
 
             // Check all unresolved held keys, calculate their decision one-by-one
-            for held_key in self
-                .held_buffer
-                .keys
-                .iter()
-                .filter(|k| matches!(k.state, KeyState::Pressed(_) | KeyState::Released(_)))
-            {
+            for held_key in self.held_buffer.keys.iter().filter(|k| {
+                matches!(
+                    k.state,
+                    KeyState::Pressed(_) | KeyState::HoldArmed(_) | KeyState::Released(_)
+                )
+            }) {
                 // Releasing a key is already buffered
                 if !event.pressed && held_key.action == *key_action {
                     debug!("Releasing a held key: {:?}", event);
@@ -723,6 +729,60 @@ impl<'a> Keyboard<'a> {
                 // The remaining keys are not same as the current key, check only morse keys
                 if held_key.event.pos != event.pos && held_key.action.is_morse() {
                     let mode = Self::tap_hold_mode(self.keymap, &held_key.action);
+
+                    // Strict hand-aware tap-hold policy. Unlike unilateral_tap,
+                    // this remains unresolved after the timeout and therefore
+                    // must run before the ordinary mode-specific decisions.
+                    if Self::is_opposite_hand_hold_enabled(self.keymap, &held_key.action)
+                        && matches!(held_key.state, KeyState::Pressed(_) | KeyState::HoldArmed(_))
+                    {
+                        if event.pressed {
+                            let activates_hold = match (held_key.event.pos, event.pos) {
+                                (KeyboardEventPos::Key(held_pos), KeyboardEventPos::Key(trigger_pos)) => {
+                                    let held_hand = self.keymap.hand_at(held_pos.row as usize, held_pos.col as usize);
+                                    let trigger_hand =
+                                        self.keymap.hand_at(trigger_pos.row as usize, trigger_pos.col as usize);
+                                    held_hand.triggers_opposite_hand_hold(trigger_hand)
+                                }
+                                _ => false,
+                            };
+
+                            if activates_hold {
+                                debug!("Opposite-hand hold activated by key press");
+                                let _ = decisions.push((held_key.event.pos, HeldKeyDecision::HoldOnOtherKeyPress));
+                                decision_for_current_key = KeyBehaviorDecision::CleanBuffer;
+                                continue;
+                            }
+
+                            // Keep two same-hand home-row modifiers pending so
+                            // a later opposite-hand key can activate both. If
+                            // the second key is tapped, its release resolves
+                            // the older key as a tap below.
+                            let current_has_modifier_hold = key_action.is_morse()
+                                && matches!(
+                                    Self::action_from_pattern(self.keymap, key_action, HOLD),
+                                    Action::Modifier(_)
+                                );
+                            if current_has_modifier_hold {
+                                debug!("Same-hand modifier tap-hold remains eligible for a chord");
+                                continue;
+                            }
+
+                            debug!("Non-triggering key resolves opposite-hand-only hold as tap");
+                            let _ = decisions.push((held_key.event.pos, HeldKeyDecision::UnilateralTap));
+                            decision_for_current_key = KeyBehaviorDecision::CleanBuffer;
+                            continue;
+                        }
+
+                        // The release of a non-triggering key settles any older
+                        // pending same-hand modifier sequence as taps. The held
+                        // key's own release was handled at the top of the loop.
+                        if decision_for_current_key != KeyBehaviorDecision::Release {
+                            debug!("Non-triggering key release settles opposite-hand-only hold as tap");
+                            let _ = decisions.push((held_key.event.pos, HeldKeyDecision::UnilateralTap));
+                            continue;
+                        }
+                    }
 
                     if event.pressed {
                         // The current key is being pressed

@@ -370,6 +370,7 @@ fn wire_values_locked() {
         key_positions: unlock_keys,
     };
     let profile = MorseProfile::new(None, Some(MorseMode::Normal), Some(200), Some(150));
+    let opposite_profile = profile.with_opposite_hand_hold(Some(true));
 
     let entries: alloc::vec::Vec<(&str, alloc::vec::Vec<u8>)> = alloc::vec![
         // --- Response envelope + connection ---
@@ -469,6 +470,7 @@ fn wire_values_locked() {
             encode(&(MouseButtons::BUTTON1 | MouseButtons::BUTTON8))
         ),
         ("MorseProfile(Normal,200,150)", encode(&profile)),
+        ("MorseProfile(OppHand,Normal,200,150)", encode(&opposite_profile),),
         // --- Keymap / encoder / behavior config payloads ---
         (
             "KeyPosition{layer:0,row:5,col:13}",
