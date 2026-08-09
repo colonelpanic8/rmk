@@ -15,6 +15,14 @@ impl<'a> Keyboard<'a> {
 
         match key.state {
             KeyState::Pressed(pattern) => {
+                if Self::is_opposite_hand_hold_enabled(self.keymap, &key.action) {
+                    debug!("Opposite-hand hold armed at timeout");
+                    if let Some(k) = self.held_buffer.find_pos_mut(key.event.pos) {
+                        k.state = KeyState::HoldArmed(pattern);
+                    }
+                    return;
+                }
+
                 // The time since the key press is longer than the timeout,
                 // if there is no possibility for longer morse patterns, trigger the action:
                 let pattern = pattern.followed_by_hold();
@@ -116,10 +124,12 @@ impl<'a> Keyboard<'a> {
             if let Some(k) = self.held_buffer.find_pos_mut(event.pos) {
                 debug!("Releasing morse key: {:?}", k);
                 match k.state {
-                    KeyState::Pressed(pattern) => {
+                    state @ (KeyState::Pressed(pattern) | KeyState::HoldArmed(pattern)) => {
                         let released_time = Instant::now(); // TODO? It would be better if the event would carry the real timestamp of the release event!
 
-                        let hold = released_time >= k.timeout_time;
+                        // An opposite-hand-only timeout merely arms the hold;
+                        // releasing without a qualifying trigger is always a tap.
+                        let hold = !matches!(state, KeyState::HoldArmed(_)) && released_time >= k.timeout_time;
 
                         let pattern = if hold {
                             debug!("pattern after hold release: {:?}", pattern);
@@ -279,7 +289,7 @@ impl<'a> Keyboard<'a> {
             k.action.is_morse()
                 && matches!(
                     k.state,
-                    KeyState::Pressed(_) | KeyState::Holding(_) | KeyState::Released(_)
+                    KeyState::Pressed(_) | KeyState::Holding(_) | KeyState::HoldArmed(_) | KeyState::Released(_)
                 )
         })
     }
@@ -400,6 +410,27 @@ impl<'a> Keyboard<'a> {
 
         // Use the global default
         keymap.morse_default_profile().unilateral_tap().unwrap_or(false)
+    }
+
+    /// Whether this key uses compiled hand geometry to gate its hold action.
+    pub fn is_opposite_hand_hold_enabled(keymap: &KeyMap, key_action: &KeyAction) -> bool {
+        match key_action {
+            KeyAction::TapHold(_, _, idx) => {
+                if let Some(enabled) = keymap.morse_profile(*idx).opposite_hand_hold() {
+                    return enabled;
+                }
+            }
+            KeyAction::Morse(index) => {
+                if let Some(morse) = keymap.get_morse(*index as usize)
+                    && let Some(enabled) = morse.profile.opposite_hand_hold()
+                {
+                    return enabled;
+                }
+            }
+            _ => {}
+        }
+
+        keymap.morse_default_profile().opposite_hand_hold().unwrap_or(false)
     }
 
     pub fn is_flow_tap_enabled(keymap: &KeyMap, key_action: &KeyAction) -> bool {
