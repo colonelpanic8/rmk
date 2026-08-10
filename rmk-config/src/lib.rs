@@ -830,8 +830,9 @@ pub(crate) struct MorseProfile {
     pub unilateral_tap: Option<bool>,
 
     /// If true, a tap-hold key's hold action is activated only by a key on the
-    /// opposite hand or a bilateral key. Reaching the timeout only arms the
-    /// hold; same-hand ordinary keys resolve it as a tap.
+    /// opposite hand or a bilateral key pressed after the timeout. Reaching
+    /// the timeout only arms the hold; earlier or same-hand ordinary keys
+    /// resolve it as a tap.
     pub opposite_hand_hold: Option<bool>,
 
     /// The decision mode of the morse/tap-hold key (only one of permissive_hold, hold_on_other_press and normal_mode can be true)
@@ -948,7 +949,8 @@ pub(crate) struct MorsesConfig {
     /// if true, tap-hold key will always send tap action when tapped with the same hand only
     pub unilateral_tap: Option<bool>,
 
-    /// If true, holds are activated only by an opposite-hand or bilateral key.
+    /// If true, holds are activated only by an opposite-hand or bilateral key
+    /// pressed after the hold timeout.
     pub opposite_hand_hold: Option<bool>,
 
     /// The decision mode of the morse/tap-hold key (only one of permissive_hold, hold_on_other_press and normal_mode can be true)
