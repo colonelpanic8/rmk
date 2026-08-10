@@ -44,6 +44,17 @@ steps = [
 ]
 expect = [["RShift"], ["RShift", "A"], ["RShift"], []]
 
+# Before the timeout, even an opposite-hand key must resolve the HRM as a tap.
+# This makes hold_timeout a real lower bound for hold activation.
+[[test]]
+name = "opposite_hand_hold_cross_hand_letter_before_timeout_types_taps"
+steps = [
+  { press = [0, 3] },
+  { tap = { pos = [0, 0], duration = 10 } },
+  { release = [0, 3] },
+]
+expect = [["J"], ["J", "A"], ["J"], []]
+
 # A second same-hand HRM whose hold is a modifier does not prematurely tap J.
 # The opposite-hand A activates both pending modifiers as one Ctrl+Shift chord.
 [[test]]
@@ -78,11 +89,13 @@ steps = [
 ]
 expect = [["J"], ["J", "K"], ["J"], []]
 
-# Bilateral keys are explicit hold triggers regardless of the held key's hand.
+# Bilateral keys are explicit hold triggers after the timeout, regardless of
+# the held key's hand.
 [[test]]
 name = "opposite_hand_hold_bilateral_key_activates_hold"
 steps = [
   { press = [0, 3] },
+  { no_report = 250 },
   { press = [0, 6] },
   { release = [0, 6] },
   { release = [0, 3] },
