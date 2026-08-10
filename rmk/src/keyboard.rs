@@ -753,15 +753,17 @@ impl<'a> Keyboard<'a> {
                         && matches!(held_key.state, KeyState::Pressed(_) | KeyState::HoldArmed(_))
                     {
                         if event.pressed {
-                            let activates_hold = match (held_key.event.source, event.source) {
-                                (KeyboardEventSource::Key(held_pos), KeyboardEventSource::Key(trigger_pos)) => {
-                                    let held_hand = self.keymap.hand_at(held_pos.row as usize, held_pos.col as usize);
-                                    let trigger_hand =
-                                        self.keymap.hand_at(trigger_pos.row as usize, trigger_pos.col as usize);
-                                    held_hand.triggers_opposite_hand_hold(trigger_hand)
-                                }
-                                _ => false,
-                            };
+                            let activates_hold = matches!(held_key.state, KeyState::HoldArmed(_))
+                                && match (held_key.event.source, event.source) {
+                                    (KeyboardEventSource::Key(held_pos), KeyboardEventSource::Key(trigger_pos)) => {
+                                        let held_hand =
+                                            self.keymap.hand_at(held_pos.row as usize, held_pos.col as usize);
+                                        let trigger_hand =
+                                            self.keymap.hand_at(trigger_pos.row as usize, trigger_pos.col as usize);
+                                        held_hand.triggers_opposite_hand_hold(trigger_hand)
+                                    }
+                                    _ => false,
+                                };
 
                             if activates_hold {
                                 debug!("Opposite-hand hold activated by key press");
