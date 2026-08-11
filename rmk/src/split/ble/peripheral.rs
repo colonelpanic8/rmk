@@ -1,6 +1,7 @@
 #[cfg(feature = "subrating")]
 use bt_hci::{cmd::le::LeSetHostFeature, controller::ControllerCmdSync};
 use embassy_futures::join::join;
+use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Timer};
 use rmk_types::connection::ConnectionStatus;
 use trouble_host::prelude::*;
@@ -183,10 +184,20 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
 
         let server = BleSplitPeripheralServer::new_default("rmk").unwrap();
         loop {
+            crate::split::selector::wait_wireless_selected().await;
             update_status(|c| *c = ConnectionStatus::new());
             publish_event(CentralConnectedEvent { connected: false });
             publish_event(SleepStateEvent::new(false));
-            match split_peripheral_advertise(id, central_addr, &mut peripheral, &server).await {
+            let connection = select(
+                split_peripheral_advertise(id, central_addr, &mut peripheral, &server),
+                crate::split::selector::wait_wired_selected(),
+            )
+            .await;
+            let connection = match connection {
+                Either::First(connection) => connection,
+                Either::Second(_) => continue,
+            };
+            match connection {
                 Ok(conn) => {
                     info!("Connected to the central");
                     publish_event(CentralConnectedEvent { connected: true });
@@ -204,7 +215,7 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
                             central_addr = Some(new_addr);
                         }
                     }
-                    peripheral.run().await;
+                    let _ = select(peripheral.run(), crate::split::selector::wait_wired_selected()).await;
                     info!("Disconnected from the central");
                 }
                 Err(BleHostError::BleHost(Error::Timeout)) => {

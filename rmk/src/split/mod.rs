@@ -13,10 +13,12 @@ pub mod ble;
 pub mod central;
 /// Common abstraction layer of split driver
 pub(crate) mod driver;
+#[cfg(feature = "_nrf_ble")]
+pub mod nrf;
 pub mod peripheral;
 #[cfg(feature = "rp2040")]
 pub mod rp;
-#[cfg(not(feature = "_ble"))]
+pub mod selector;
 pub mod serial;
 
 /// Maximum size of a split message
@@ -101,6 +103,11 @@ pub(crate) enum SplitMessage {
     /// Peripheral → Central: confirm mark_updated succeeded, about to reset.
     #[cfg(feature = "dfu_split")]
     FirmwareUpdateConfirm,
+
+    /// Half-duplex central request for one queued peripheral message.
+    HalfDuplexPoll,
+    /// Half-duplex response when the peripheral has nothing queued.
+    HalfDuplexIdle,
 }
 
 // -----------------------------------------------------------------------

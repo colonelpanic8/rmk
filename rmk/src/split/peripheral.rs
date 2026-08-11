@@ -2,7 +2,6 @@
 #[cfg(all(feature = "_ble", feature = "subrating"))]
 use bt_hci::{cmd::le::LeSetHostFeature, controller::ControllerCmdSync};
 use embassy_futures::select::{Either, select};
-#[cfg(not(feature = "_ble"))]
 use embedded_io_async::{Read, Write};
 use futures::FutureExt;
 #[cfg(all(feature = "_ble", feature = "storage"))]
@@ -22,8 +21,7 @@ use crate::event::{
 };
 #[cfg(feature = "display")]
 use crate::event::{ModifierEvent, WpmUpdateEvent};
-#[cfg(not(feature = "_ble"))]
-use crate::split::serial::SerialSplitDriver;
+use crate::split::serial::{HalfDuplexPeripheralDriver, SerialSplitDriver};
 use crate::state::update_status;
 
 /// Run the split peripheral service. On BLE builds this owns the peripheral's
@@ -62,6 +60,34 @@ pub async fn run_rmk_split_peripheral<
             .set_random_address(Address::random(address))
             .build();
         crate::split::ble::peripheral::initialize_nrf_ble_split_peripheral_and_run(id, &stack).await;
+    }
+}
+
+/// Run a split peripheral over serial even when the keyboard also enables BLE
+/// for host communication.
+pub async fn run_rmk_split_peripheral_serial<S: Write + Read>(serial: S) {
+    let mut peripheral = SplitPeripheral::new(SerialSplitDriver::new(serial));
+    loop {
+        peripheral.run().await;
+    }
+}
+
+/// Run a split peripheral on a centrally-polled half-duplex serial bus.
+pub async fn run_rmk_split_peripheral_half_duplex<S: Write + Read>(serial: S) {
+    let mut peripheral = SplitPeripheral::new(HalfDuplexPeripheralDriver::new(serial));
+    loop {
+        peripheral.run().await;
+    }
+}
+
+/// Run a serial peripheral while automatic selection prefers the wired link.
+pub async fn run_rmk_split_peripheral_auto_half_duplex<S: Write + Read>(serial: S) {
+    let mut peripheral = SplitPeripheral::new(HalfDuplexPeripheralDriver::new(serial));
+    loop {
+        crate::split::selector::wait_wired_selected().await;
+        match select(peripheral.run(), crate::split::selector::wait_wireless_selected()).await {
+            Either::First(_) | Either::Second(_) => {}
+        }
     }
 }
 
