@@ -78,7 +78,7 @@ where
     config: BleBatteryConfig<'static>,
     /// One matrix region per split peripheral.
     #[cfg(feature = "split")]
-    peripheral_matrices: [PeripheralMatrixConfig; crate::SPLIT_PERIPHERALS_NUM],
+    peripheral_matrices: Option<[PeripheralMatrixConfig; crate::SPLIT_PERIPHERALS_NUM]>,
     #[cfg(feature = "host")]
     host_service: Option<&'a crate::host::HostService<'a>>,
     // Keeps `'a` in the type's parameter list across all feature configurations.
@@ -94,7 +94,7 @@ where
         controller: C,
         address: [u8; 6],
         rmk_config: RmkConfig<'static>,
-        #[cfg(feature = "split")] peripheral_matrices: [PeripheralMatrixConfig; crate::SPLIT_PERIPHERALS_NUM],
+        #[cfg(feature = "split")] peripheral_matrices: Option<[PeripheralMatrixConfig; crate::SPLIT_PERIPHERALS_NUM]>,
     ) -> Self {
         Self {
             controller: Some(controller),
@@ -162,6 +162,21 @@ where
 
         let controller = self.controller.take().expect("BleTransport::run called twice");
 
+        let Some(peripheral_matrices) = self.peripheral_matrices else {
+            let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
+                HostResources::new();
+            let stack = trouble_host::new(controller, &mut resources)
+                .set_random_address(Address::random(self.address))
+                .build();
+            run_ble_keyboard(
+                &stack,
+                &self.device_config,
+                &self.config,
+                #[cfg(feature = "host")]
+                self.host_service,
+            )
+            .await;
+        };
         let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> = HostResources::new();
         let stack = trouble_host::new(controller, &mut resources)
             .set_random_address(Address::random(self.address))
@@ -175,7 +190,7 @@ where
 
         let sessions =
             embassy_futures::join::join_array(core::array::from_fn::<_, { crate::SPLIT_PERIPHERALS_NUM }, _>(|i| {
-                run_peripheral_session(i, &conn_channels[i], &ended, &stack, self.peripheral_matrices[i])
+                run_peripheral_session(i, &conn_channels[i], &ended, &stack, peripheral_matrices[i])
             }));
         join3(
             run_ble_keyboard(

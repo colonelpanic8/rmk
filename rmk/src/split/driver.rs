@@ -193,7 +193,7 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
     /// The manager receives from the peripheral and publishes input events.
     /// It also syncs the central's `ConnectionStatus` to the peripheral on every
     /// change as an informational signal
-    pub(crate) async fn run(mut self) {
+    pub(crate) async fn run(&mut self) {
         use crate::event::EventSubscriber;
 
         let mut indicator_sub = crate::event::LedIndicatorEvent::subscriber();
