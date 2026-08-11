@@ -21,11 +21,11 @@ use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::morse::Morse;
 use rmk_types::protocol::rynk::{
-    BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
-    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
-    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
+    BehaviorConfig, Cmd, DeviceCapabilities, DeviceDataDescriptor, DeviceDataRecord, DeviceInfo, GetComboBulkRequest,
+    GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest,
+    GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus,
+    ProtocolVersion, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest,
+    SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -67,6 +67,16 @@ impl Client {
     /// Read the firmware's protocol version.
     pub async fn get_version(&self) -> Result<ProtocolVersion, RynkHostError> {
         self.request::<command::GetVersion>(&()).await
+    }
+
+    /// Describe the board-defined, machine-readable device-data namespace.
+    pub async fn get_device_data_descriptor(&self) -> Result<DeviceDataDescriptor, RynkHostError> {
+        self.request::<command::GetDeviceDataDescriptor>(&()).await
+    }
+
+    /// Read one typed record from the board-defined device-data namespace.
+    pub async fn get_device_data_record(&self, index: u8) -> Result<DeviceDataRecord, RynkHostError> {
+        self.request::<command::GetDeviceDataRecord>(&index).await
     }
 
     /// Return the capability set saved during the connect handshake.

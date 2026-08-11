@@ -2,11 +2,12 @@
 
 use rmk_types::constants;
 use rmk_types::protocol::rynk::command::{
-    BootloaderJump, GetCapabilities, GetDeviceInfo, GetLockStatus, GetVersion, Lock, Reboot, StorageReset, UnlockPoll,
+    BootloaderJump, GetCapabilities, GetDeviceDataDescriptor, GetDeviceDataRecord, GetDeviceInfo, GetLockStatus,
+    GetVersion, Lock, Reboot, StorageReset, UnlockPoll,
 };
 use rmk_types::protocol::rynk::{
-    DEVICE_INFO_STRING_SIZE, DeviceCapabilities, DeviceInfo, FirmwareVersion, LockStatus, MAX_BULK_ITEMS,
-    MAX_BULK_KEYS, ProtocolVersion, RYNK_MAX_PAYLOAD_SIZE, RynkError, StorageResetMode,
+    DEVICE_INFO_STRING_SIZE, DeviceCapabilities, DeviceDataDescriptor, DeviceDataRecord, DeviceInfo, FirmwareVersion,
+    LockStatus, MAX_BULK_ITEMS, MAX_BULK_KEYS, ProtocolVersion, RYNK_MAX_PAYLOAD_SIZE, RynkError, StorageResetMode,
 };
 
 use super::super::RynkService;
@@ -137,6 +138,25 @@ impl Handle<GetDeviceInfo> for RynkService<'_> {
             product_name: truncated(self.device.product_name),
             serial_number: truncated(self.device.serial_number),
         })
+    }
+}
+
+impl Handle<GetDeviceDataDescriptor> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<DeviceDataDescriptor, RynkError> {
+        self.device_data
+            .as_ref()
+            .map(|(descriptor, _)| descriptor.clone())
+            .ok_or(RynkError::Unimplemented)
+    }
+}
+
+impl Handle<GetDeviceDataRecord> for RynkService<'_> {
+    async fn handle(&self, index: u8) -> Result<DeviceDataRecord, RynkError> {
+        let (descriptor, record) = self.device_data.as_ref().ok_or(RynkError::Unimplemented)?;
+        if index >= descriptor.record_count {
+            return Err(RynkError::Invalid);
+        }
+        record(index).ok_or(RynkError::Invalid)
     }
 }
 

@@ -6,8 +6,9 @@ use rmk_types::action::KeyAction;
 use rmk_types::battery::BatteryStatus;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::protocol::rynk::{
-    GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, PeripheralStatus, ProtocolVersion,
-    SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest,
+    DeviceDataDescriptor, DeviceDataRecord, DeviceDataValue, DeviceDataVolatility, GetComboBulkResponse,
+    GetKeymapBulkResponse, GetMorseBulkResponse, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
+    SetKeymapBulkRequest, SetMorseBulkRequest,
 };
 use tokio::time::timeout;
 
@@ -461,6 +462,44 @@ async fn wired_split_peripheral_status_is_supported() {
             .await
             .unwrap(),
         status
+    );
+}
+
+#[tokio::test]
+async fn board_defined_device_data_round_trips() {
+    let descriptor = DeviceDataDescriptor {
+        namespace: "com.example.keyboard".try_into().unwrap(),
+        schema_version: 1,
+        record_count: 1,
+    };
+    let record = DeviceDataRecord {
+        key: "split.activeTransport".try_into().unwrap(),
+        volatility: DeviceDataVolatility::Live,
+        value: DeviceDataValue::Text("wired".try_into().unwrap()),
+    };
+    let (client, mut driver) = connect_session(
+        handshake_steps(caps()),
+        vec![
+            Step::AwaitWrites(3),
+            Step::Chunk(reply(Cmd::GetDeviceDataDescriptor, 3, descriptor.clone())),
+            Step::AwaitWrites(4),
+            Step::Chunk(reply(Cmd::GetDeviceDataRecord, 4, record.clone())),
+            Step::Hang,
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        drive(&mut driver, &client, client.get_device_data_descriptor())
+            .await
+            .unwrap(),
+        descriptor
+    );
+    assert_eq!(
+        drive(&mut driver, &client, client.get_device_data_record(0))
+            .await
+            .unwrap(),
+        record
     );
 }
 
