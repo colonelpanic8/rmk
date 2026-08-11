@@ -12,7 +12,8 @@ use embedded_io_async::{Read, Write};
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::constants::RYNK_BUFFER_SIZE;
 use rmk_types::protocol::rynk::{
-    Cmd, Deframer, RYNK_HEADER_SIZE, RynkError, RynkMessage, command, encode_frame, max_wire_size,
+    Cmd, Deframer, DeviceDataDescriptor, DeviceDataRecord, RYNK_HEADER_SIZE, RynkError, RynkMessage, command,
+    encode_frame, max_wire_size,
 };
 
 use self::handlers::{serve, serve_bulk};
@@ -32,6 +33,8 @@ pub struct RynkService<'a> {
     device: DeviceConfig<'static>,
     /// Policy copied into each session's authorization gate.
     lock_config: LockConfig,
+    /// Optional board-defined, machine-readable data source.
+    device_data: Option<(DeviceDataDescriptor, fn(u8) -> Option<DeviceDataRecord>)>,
 }
 
 impl<'a> RynkService<'a> {
@@ -43,7 +46,18 @@ impl<'a> RynkService<'a> {
             ctx,
             device: config.device_config,
             lock_config: config.lock_config,
+            device_data: None,
         }
+    }
+
+    /// Attach one board-defined device-data namespace.
+    pub fn with_device_data(
+        mut self,
+        descriptor: DeviceDataDescriptor,
+        record: fn(u8) -> Option<DeviceDataRecord>,
+    ) -> Self {
+        self.device_data = Some((descriptor, record));
+        self
     }
 
     /// Whether `cmd` needs an unlocked device.
@@ -87,6 +101,8 @@ impl<'a> RynkService<'a> {
             Cmd::UnlockPoll => serve::<command::UnlockPoll, _>(locker, msg).await,
             Cmd::Lock => serve::<command::Lock, _>(locker, msg).await,
             Cmd::GetDeviceInfo => serve::<command::GetDeviceInfo, _>(self, msg).await,
+            Cmd::GetDeviceDataDescriptor => serve::<command::GetDeviceDataDescriptor, _>(self, msg).await,
+            Cmd::GetDeviceDataRecord => serve::<command::GetDeviceDataRecord, _>(self, msg).await,
 
             Cmd::GetKeyAction => serve::<command::GetKeyAction, _>(self, msg).await,
             Cmd::SetKeyAction => serve::<command::SetKeyAction, _>(self, msg).await,

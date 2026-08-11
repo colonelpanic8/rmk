@@ -207,6 +207,8 @@ struct Exemplars {
     matrix: MatrixState,
     capabilities: DeviceCapabilities,
     device_info: DeviceInfo,
+    device_data_descriptor: DeviceDataDescriptor,
+    device_data_record: DeviceDataRecord,
     behavior: BehaviorConfig,
     connection: ConnectionStatus,
     state_bits: StateBits,
@@ -260,6 +262,16 @@ fn exemplars() -> Exemplars {
         manufacturer: heapless::String::try_from("RMK").unwrap(),
         product_name: heapless::String::try_from("RMK Keyboard").unwrap(),
         serial_number: heapless::String::try_from("rynk:0001").unwrap(),
+    };
+    let device_data_descriptor = DeviceDataDescriptor {
+        namespace: heapless::String::try_from("com.example.keyboard").unwrap(),
+        schema_version: 1,
+        record_count: 2,
+    };
+    let device_data_record = DeviceDataRecord {
+        key: heapless::String::try_from("split.activeTransport").unwrap(),
+        volatility: DeviceDataVolatility::Live,
+        value: DeviceDataValue::Text(heapless::String::try_from("wired").unwrap()),
     };
     // Quick-tap sits in the u64's high bits, so the profile also exercises a
     // long-varint encoding.
@@ -326,6 +338,8 @@ fn exemplars() -> Exemplars {
         matrix,
         capabilities,
         device_info,
+        device_data_descriptor,
+        device_data_record,
         behavior,
         connection,
         state_bits,
@@ -488,6 +502,17 @@ fn wire_values_locked() {
         ("MatrixState{[0x05,0x00,0x20]}", encode(&ex.matrix)),
         ("DeviceCapabilities{1..16}", encode(&ex.capabilities)),
         ("DeviceInfo{1.2.3,4,5,RMK,..}", encode(&ex.device_info)),
+        (
+            "DeviceDataDescriptor{com.example.keyboard,1,2}",
+            encode(&ex.device_data_descriptor),
+        ),
+        (
+            "DeviceDataRecord{split.activeTransport,Live,Text(wired)}",
+            encode(&ex.device_data_record),
+        ),
+        ("DeviceDataValue::Bool(true)", encode(&DeviceDataValue::Bool(true))),
+        ("DeviceDataValue::Unsigned(42)", encode(&DeviceDataValue::Unsigned(42)),),
+        ("DeviceDataValue::Signed(-42)", encode(&DeviceDataValue::Signed(-42)),),
         ("BehaviorConfig{50..120}", encode(&ex.behavior)),
         ("ConnectionStatus{Configured,{1,Adv},Ble}", encode(&ex.connection)),
         ("ProtocolVersion{1,0}", encode(&ProtocolVersion { major: 1, minor: 0 })),
@@ -701,6 +726,30 @@ fn wire_frames_locked() {
                 Cmd::GetDeviceInfo,
                 SEQ,
                 &Ok::<DeviceInfo, RynkError>(ex.device_info.clone())
+            ),
+        ),
+        (
+            "GetDeviceDataDescriptor request ()",
+            encode_frame(Cmd::GetDeviceDataDescriptor, SEQ, &()),
+        ),
+        (
+            "GetDeviceDataDescriptor reply Ok(com.example.keyboard,1,2)",
+            encode_frame(
+                Cmd::GetDeviceDataDescriptor,
+                SEQ,
+                &Ok::<DeviceDataDescriptor, RynkError>(ex.device_data_descriptor.clone()),
+            ),
+        ),
+        (
+            "GetDeviceDataRecord request 1",
+            encode_frame(Cmd::GetDeviceDataRecord, SEQ, &1_u8),
+        ),
+        (
+            "GetDeviceDataRecord reply Ok(split.activeTransport,Live,Text(wired))",
+            encode_frame(
+                Cmd::GetDeviceDataRecord,
+                SEQ,
+                &Ok::<DeviceDataRecord, RynkError>(ex.device_data_record.clone()),
             ),
         ),
         // Keymap / encoder (0x01xx).
