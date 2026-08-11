@@ -20,7 +20,7 @@ fn expand_split_communication_config(chip: &ChipModel, split_config: &SplitConfi
     match split_config.connection {
         // The BLE transport loads its peripherals' addresses itself.
         SplitConnection::Ble => quote! {},
-        SplitConnection::Serial => {
+        SplitConnection::Serial | SplitConnection::Auto => {
             // We need to initialize serial instance for serial
             let serial_config: Vec<SerialConfig> = split_config
                 .central
@@ -101,6 +101,73 @@ pub(crate) fn expand_serial_init(chip: &ChipModel, serial: Vec<SerialConfig>) ->
                         }
                     }
                     _ => panic!("Serial instance {:?} is not recognised", s.instance),
+                }
+            }
+            ChipSeries::Nrf52 => {
+                if !s.half_duplex {
+                    panic!("nRF serial split currently requires `half_duplex = true`");
+                }
+                let uart_instance = format_ident!("{}", s.instance);
+                let uart_name = format_ident!("{}", s.instance.to_lowercase());
+                let tx_name = format_ident!("{}_tx", s.instance.to_lowercase());
+                let rx_name = format_ident!("{}_rx", s.instance.to_lowercase());
+                let tx_pin = format_ident!("{}", s.tx_pin);
+                let rx_pin = format_ident!("{}", s.rx_pin);
+                let direction_pin = format_ident!(
+                    "{}",
+                    s.direction_pin
+                        .as_ref()
+                        .expect("nRF half-duplex serial requires `direction_pin`")
+                );
+                let timer = format_ident!("{}", s.timer.as_deref().unwrap_or("TIMER2"));
+                let ppi_channels = s
+                    .ppi_channels
+                    .clone()
+                    .unwrap_or_else(|| ["PPI_CH0".to_string(), "PPI_CH1".to_string()]);
+                let ppi_ch1 = format_ident!("{}", ppi_channels[0]);
+                let ppi_ch2 = format_ident!("{}", ppi_channels[1]);
+                let irq_name = format_ident!("IrqsUarte{}", idx);
+                let uart_irq = match s.instance.as_str() {
+                    "UARTE0" => format_ident!("UARTE0"),
+                    other => format_ident!("{}", other),
+                };
+                let baudrate = match s.baudrate.unwrap_or(115_200) {
+                    115_200 => quote! { ::embassy_nrf::uarte::Baudrate::Baud115200 },
+                    230_400 => quote! { ::embassy_nrf::uarte::Baudrate::Baud230400 },
+                    460_800 => quote! { ::embassy_nrf::uarte::Baudrate::Baud460800 },
+                    921_600 => quote! { ::embassy_nrf::uarte::Baudrate::Baud921600 },
+                    1_000_000 => quote! { ::embassy_nrf::uarte::Baudrate::Baud1M },
+                    baudrate => panic!("Unsupported nRF UARTE baud rate {baudrate}"),
+                };
+                quote! {
+                    ::embassy_nrf::bind_interrupts!(struct #irq_name {
+                        #uart_irq => ::embassy_nrf::uarte::InterruptHandler<::embassy_nrf::peripherals::#uart_instance>;
+                    });
+                    let mut uart_config = ::embassy_nrf::uarte::Config::default();
+                    uart_config.baudrate = #baudrate;
+                    let #uart_name = ::embassy_nrf::uarte::Uarte::new(
+                        p.#uart_instance,
+                        p.#rx_pin,
+                        p.#tx_pin,
+                        #irq_name,
+                        uart_config,
+                    );
+                    let (#tx_name, #rx_name) = #uart_name.split_with_idle(
+                        p.#timer,
+                        p.#ppi_ch1,
+                        p.#ppi_ch2,
+                    );
+                    let direction = ::embassy_nrf::gpio::Output::new(
+                        p.#direction_pin,
+                        ::embassy_nrf::gpio::Level::Low,
+                        ::embassy_nrf::gpio::OutputDrive::Standard,
+                    );
+                    let #uart_name = ::rmk::split::nrf::HalfDuplexUarte::new(
+                        #tx_name,
+                        #rx_name,
+                        direction,
+                        ::embassy_time::Duration::from_micros(20),
+                    );
                 }
             }
             _ => panic!("Serial for chip {:?} isn't implemented yet", chip.series),

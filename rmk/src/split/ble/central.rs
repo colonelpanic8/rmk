@@ -147,6 +147,7 @@ pub(crate) async fn run_ble_peripheral_manager<
     trace!("SPLIT_MESSAGE_MAX_SIZE: {}", SPLIT_MESSAGE_MAX_SIZE);
 
     loop {
+        crate::split::selector::wait_wireless_selected().await;
         // Check until the address is available
         let address = loop {
             if let Some(addr) = slot.get() {
@@ -196,10 +197,19 @@ pub(crate) async fn run_ble_peripheral_manager<
 
                 set_peripheral_connected(peri_id, true);
 
-                if let Err(e) = run_central_manager_task(peri_id, stack, &conn, matrix_config).await {
-                    #[cfg(feature = "defmt")]
-                    let e = defmt::Debug2Format(&e);
-                    error!("BLE central error: {:?}", e);
+                match select(
+                    run_central_manager_task(peri_id, stack, &conn, matrix_config),
+                    crate::split::selector::wait_wired_selected(),
+                )
+                .await
+                {
+                    Either::First(Err(e)) => {
+                        #[cfg(feature = "defmt")]
+                        let e = defmt::Debug2Format(&e);
+                        error!("BLE central error: {:?}", e);
+                    }
+                    Either::First(Ok(())) => {}
+                    Either::Second(_) => info!("Wired split selected; stopping BLE split session"),
                 }
             }
             Ok(Err(e)) => {
@@ -344,7 +354,7 @@ async fn discover_and_run_manager<C: Controller + ControllerCmdAsync<LeSetPhy>, 
             message_to_peripheral,
             client,
         };
-        let peripheral_manager = PeripheralManager::new(split_ble_driver, id, matrix_config);
+        let mut peripheral_manager = PeripheralManager::new(split_ble_driver, id, matrix_config);
         peripheral_manager.run().await;
         info!("Peripheral manager stopped");
     };
