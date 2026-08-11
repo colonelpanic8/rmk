@@ -1,8 +1,7 @@
 #[cfg(feature = "subrating")]
 use bt_hci::{cmd::le::LeSetHostFeature, controller::ControllerCmdSync};
 use embassy_futures::join::join;
-#[cfg(feature = "custom_message")]
-use embassy_futures::select::select;
+use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Timer};
 #[cfg(feature = "custom_message")]
 use postcard::experimental::max_size::MaxSize;
@@ -223,10 +222,20 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
 
         let server = BleSplitPeripheralServer::new_default("rmk").unwrap();
         loop {
+            crate::split::selector::wait_wireless_selected().await;
             update_status(|c| *c = ConnectionStatus::new());
             publish_event(CentralConnectedEvent { connected: false });
             publish_event(SleepStateEvent::new(false));
-            match split_peripheral_advertise(id, central_addr, &mut peripheral, &server).await {
+            let connection = select(
+                split_peripheral_advertise(id, central_addr, &mut peripheral, &server),
+                crate::split::selector::wait_wired_selected(),
+            )
+            .await;
+            let connection = match connection {
+                Either::First(connection) => connection,
+                Either::Second(_) => continue,
+            };
+            match connection {
                 Ok(conn) => {
                     info!("Connected to the central");
                     publish_event(CentralConnectedEvent { connected: true });
@@ -245,17 +254,19 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
                             central_addr = Some(new_addr);
                         }
                     }
-                    #[cfg(not(feature = "custom_message"))]
-                    peripheral.run().await;
-                    #[cfg(feature = "custom_message")]
-                    select(peripheral.run(), {
-                        // A peripheral has one link, so everything queued goes out on it.
-                        let custom_to_central = &server.service.custom_to_central;
-                        forward(None, async |encoded| {
-                            custom_to_central.notify_raw(&conn, encoded, false).await
+                    let session = async {
+                        #[cfg(not(feature = "custom_message"))]
+                        peripheral.run().await;
+                        #[cfg(feature = "custom_message")]
+                        select(peripheral.run(), {
+                            let custom_to_central = &server.service.custom_to_central;
+                            forward(None, async |encoded| {
+                                custom_to_central.notify_raw(&conn, encoded, false).await
+                            })
                         })
-                    })
-                    .await;
+                        .await;
+                    };
+                    let _ = select(session, crate::split::selector::wait_wired_selected()).await;
                     info!("Disconnected from the central");
                 }
                 Err(BleHostError::BleHost(Error::Timeout)) => {
