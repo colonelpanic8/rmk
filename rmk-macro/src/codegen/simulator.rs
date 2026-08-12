@@ -326,6 +326,7 @@ fn expand_rmk_config(host: &Host, layout_blob: &[u8]) -> TokenStream2 {
                 write_requires_unlock: #write_requires_unlock,
             },
             layout_blob: #blob,
+            layer_names: &[],
             ..Default::default()
         })
     }

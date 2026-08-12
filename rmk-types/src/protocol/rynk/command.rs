@@ -16,9 +16,9 @@ use super::message::{RynkHeader, encode_frame};
 use super::{
     BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    KeyPosition, LayoutChunk, LockStatus, MacroData, MatrixState, ProtocolVersion, RynkError, SetComboBulkRequest,
-    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseRequest, StorageResetMode,
+    KeyPosition, LayerMetadata, LayoutChunk, LockStatus, MacroData, MatrixState, ProtocolVersion, RynkError,
+    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
+    SetLayerMetadataRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -288,6 +288,10 @@ endpoints! {
     SetEncoderAction = 0x0106: SetEncoderRequest => ();
     GetKeymapBulk = 0x0107: GetKeymapBulkRequest => GetKeymapBulkResponse;
     SetKeymapBulk = 0x0108: SetKeymapBulkRequest => ();
+    /// Read one fixed layer slot's persistent name and logical occupancy.
+    GetLayerMetadata = 0x0109: u8 => LayerMetadata;
+    /// Rename, occupy, or vacate one fixed layer slot.
+    SetLayerMetadata = 0x010A: SetLayerMetadataRequest => ();
 
     // Macro (0x02xx).
     GetMacro = 0x0201: GetMacroRequest => MacroData;
