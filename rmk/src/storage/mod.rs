@@ -9,6 +9,8 @@ use embedded_storage::nor_flash::NorFlash;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::LayerMetadata;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::Cache;
 use sequential_storage::cache::key_pointers::ArrayKeyPointers;
@@ -157,6 +159,8 @@ pub(crate) enum StorageKey {
     BondInfo(u8),
     /// A slot the board defines, see [`store_user_data`].
     UserData(u8),
+    #[cfg(feature = "rynk")]
+    LayerMetadata(u8),
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -211,6 +215,11 @@ pub(crate) enum StorageItem {
         slot: u8,
         data: heapless::Vec<u8, USER_DATA_MAX_SIZE>,
     },
+    #[cfg(feature = "rynk")]
+    LayerMetadata {
+        layer: u8,
+        metadata: LayerMetadata,
+    },
 }
 
 impl StorageItem {
@@ -246,6 +255,10 @@ impl StorageItem {
             Self::BondInfo(v) => (StorageKey::BondInfo(v.slot_num), StorageValue::BondInfo(v)),
             #[cfg(feature = "_ble")]
             Self::ActiveBleProfile(v) => (StorageKey::ActiveBleProfile, StorageValue::ActiveBleProfile(v)),
+            #[cfg(feature = "rynk")]
+            Self::LayerMetadata { layer, metadata } => {
+                (StorageKey::LayerMetadata(layer), StorageValue::LayerMetadata(metadata))
+            }
             Self::UserData { slot, data } => (StorageKey::UserData(slot), StorageValue::UserData(data)),
         }
     }
@@ -296,6 +309,8 @@ pub(crate) enum StorageValue {
     #[cfg(feature = "_ble")]
     ActiveBleProfile(u8),
     UserData(heapless::Vec<u8, USER_DATA_MAX_SIZE>),
+    #[cfg(feature = "rynk")]
+    LayerMetadata(LayerMetadata),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -779,6 +794,30 @@ mod tests {
         });
     }
 
+    #[cfg(feature = "rynk")]
+    #[test]
+    fn layer_metadata_survives_flash_map_reopen() {
+        block_on(async {
+            let metadata = LayerMetadata {
+                occupied: true,
+                name: heapless::String::try_from("Navigation").unwrap(),
+            };
+            let mut storage = new_storage(async_flash_wrapper(Part::new())).await;
+            storage
+                .put(StorageItem::LayerMetadata {
+                    layer: 2,
+                    metadata: metadata.clone(),
+                })
+                .await
+                .unwrap();
+            let (flash, _) = storage.flash.destroy();
+            let mut reopened = new_storage(flash).await;
+            assert!(
+                matches!(reopened.fetch(StorageKey::LayerMetadata(2)).await, Ok(Some(StorageValue::LayerMetadata(actual))) if actual == metadata)
+            );
+        });
+    }
+
     #[test]
     fn user_data_round_trips_through_its_slot() {
         with_storage_task(Part::new(), async {
@@ -1025,6 +1064,9 @@ mod tests {
             StorageKey::ActiveBleProfile,
             #[cfg(feature = "_ble")]
             StorageKey::BondInfo(10),
+            StorageKey::UserData(0),
+            #[cfg(feature = "rynk")]
+            StorageKey::LayerMetadata(9),
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1057,6 +1099,9 @@ mod tests {
             StorageValue::BondInfo(ProfileInfo::default()),
             #[cfg(feature = "_ble")]
             StorageValue::ActiveBleProfile(0),
+            StorageValue::UserData(heapless::Vec::new()),
+            #[cfg(feature = "rynk")]
+            StorageValue::LayerMetadata(LayerMetadata::vacant()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
