@@ -23,9 +23,9 @@ use rmk_types::morse::Morse;
 use rmk_types::protocol::rynk::{
     BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
-    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
+    KeyPosition, LayerMetadata, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion,
+    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
+    SetLayerMetadataRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -148,6 +148,23 @@ impl Client {
     /// Set the default layer.
     pub async fn set_default_layer(&self, layer: u8) -> Result<(), RynkHostError> {
         self.request::<command::SetDefaultLayer>(&layer).await
+    }
+
+    /// Read one fixed layer slot's device-backed logical metadata.
+    pub async fn get_layer_metadata(&self, layer: u8) -> Result<LayerMetadata, RynkHostError> {
+        self.request::<command::GetLayerMetadata>(&layer).await
+    }
+
+    /// Persist one fixed layer slot's logical occupancy and name.
+    pub async fn set_layer_metadata(&self, layer: u8, metadata: LayerMetadata) -> Result<(), RynkHostError> {
+        if !self.capabilities.storage_enabled {
+            return Err(RynkHostError::Unsupported(
+                Cmd::SetLayerMetadata,
+                "storage not enabled",
+            ));
+        }
+        self.request::<command::SetLayerMetadata>(&SetLayerMetadataRequest { layer, metadata })
+            .await
     }
 
     /// Read both rotation actions for one encoder on one layer.

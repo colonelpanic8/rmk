@@ -32,6 +32,8 @@ pub struct RynkService<'a> {
     device: DeviceConfig<'static>,
     /// Policy copied into each session's authorization gate.
     lock_config: LockConfig,
+    /// Compiled fallback metadata; persistent per-slot records override it.
+    layer_names: &'static [Option<&'static str>],
 }
 
 impl<'a> RynkService<'a> {
@@ -43,6 +45,7 @@ impl<'a> RynkService<'a> {
             ctx,
             device: config.device_config,
             lock_config: config.lock_config,
+            layer_names: config.layer_names,
         }
     }
 
@@ -56,6 +59,7 @@ impl<'a> RynkService<'a> {
             Cmd::SetKeyAction
             | Cmd::SetDefaultLayer
             | Cmd::SetEncoderAction
+            | Cmd::SetLayerMetadata
             | Cmd::SetMacro
             | Cmd::SetCombo
             | Cmd::SetMorse
@@ -96,6 +100,8 @@ impl<'a> RynkService<'a> {
             Cmd::SetEncoderAction => serve::<command::SetEncoderAction, _>(self, msg).await,
             Cmd::GetKeymapBulk => serve_bulk::<command::GetKeymapBulk, _>(self, msg).await,
             Cmd::SetKeymapBulk => serve_bulk::<command::SetKeymapBulk, _>(self, msg).await,
+            Cmd::GetLayerMetadata => serve::<command::GetLayerMetadata, _>(self, msg).await,
+            Cmd::SetLayerMetadata => serve::<command::SetLayerMetadata, _>(self, msg).await,
 
             Cmd::GetMacro => serve::<command::GetMacro, _>(self, msg).await,
             Cmd::SetMacro => serve::<command::SetMacro, _>(self, msg).await,

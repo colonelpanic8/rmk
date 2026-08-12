@@ -23,8 +23,8 @@ use rynk::rmk_types::led_indicator::LedIndicator;
 use rynk::rmk_types::morse::Morse;
 use rynk::rmk_types::protocol::rynk::{
     BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse,
-    LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetKeymapBulkRequest,
-    SetMorseBulkRequest, StorageResetMode,
+    LayerMetadata, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
+    SetKeymapBulkRequest, SetMorseBulkRequest, StorageResetMode,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -121,6 +121,8 @@ endpoints! {
     set_key(layer: u8, row: u8, col: u8, action: KeyAction) -> (),
     get_default_layer() -> u8,
     set_default_layer(layer: u8) -> (),
+    get_layer_metadata(layer: u8) -> LayerMetadata,
+    set_layer_metadata(layer: u8, metadata: LayerMetadata) -> (),
     get_encoder(encoder_id: u8, layer: u8) -> EncoderAction,
     set_encoder(encoder_id: u8, layer: u8, action: EncoderAction) -> (),
     get_keymap_bulk(layer: u8, start_row: u8, start_col: u8) -> GetKeymapBulkResponse,
