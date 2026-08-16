@@ -128,6 +128,7 @@ pub struct Morse {
 pub struct MorseProfile {
     pub enable_flow_tap: Option<bool>,
     pub unilateral_tap: Option<bool>,
+    pub opposite_hand_hold: Option<bool>,
     pub permissive_hold: Option<bool>,
     pub hold_on_other_press: Option<bool>,
     pub tap_unless_interrupted: Option<bool>,
@@ -161,6 +162,21 @@ impl crate::KeyboardTomlConfig {
     /// Resolve behavioral configuration from TOML config.
     pub fn behavior(&self) -> Result<Behavior, String> {
         let toml_behavior = self.get_behavior_config()?;
+
+        if let Some(morse) = &toml_behavior.morse {
+            if morse.unilateral_tap == Some(true) && morse.opposite_hand_hold == Some(true) {
+                return Err("behavior.morse.unilateral_tap and opposite_hand_hold cannot both be true".to_string());
+            }
+            if let Some((name, _)) = morse.profiles.as_ref().and_then(|profiles| {
+                profiles.iter().find(|(_, profile)| {
+                    profile.unilateral_tap == Some(true) && profile.opposite_hand_hold == Some(true)
+                })
+            }) {
+                return Err(format!(
+                    "behavior.morse.profiles.{name}: unilateral_tap and opposite_hand_hold cannot both be true"
+                ));
+            }
+        }
 
         let tri_layer = toml_behavior.tri_layer.map(|t| [t.upper, t.lower, t.adjust]);
 
@@ -225,6 +241,7 @@ impl crate::KeyboardTomlConfig {
             let default_profile = MorseProfile {
                 enable_flow_tap: None,
                 unilateral_tap: m.unilateral_tap,
+                opposite_hand_hold: m.opposite_hand_hold,
                 permissive_hold: m.permissive_hold,
                 hold_on_other_press: m.hold_on_other_press,
                 tap_unless_interrupted: m.tap_unless_interrupted,
@@ -379,6 +396,7 @@ fn resolve_morse_profile(p: &crate::MorseProfile) -> MorseProfile {
     MorseProfile {
         enable_flow_tap: p.enable_flow_tap,
         unilateral_tap: p.unilateral_tap,
+        opposite_hand_hold: p.opposite_hand_hold,
         permissive_hold: p.permissive_hold,
         hold_on_other_press: p.hold_on_other_press,
         tap_unless_interrupted: p.tap_unless_interrupted,
@@ -522,6 +540,40 @@ hold_trigger_regions = ["missing"]
             err.contains("unknown layout region 'missing'"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn hand_policies_cannot_both_be_enabled() {
+        for (toml, expected) in [
+            (
+                r#"
+[behavior.morse]
+unilateral_tap = true
+opposite_hand_hold = true
+"#,
+                "behavior.morse.unilateral_tap and opposite_hand_hold cannot both be true",
+            ),
+            (
+                r#"
+[behavior.morse.profiles.hrm]
+unilateral_tap = true
+opposite_hand_hold = true
+"#,
+                "behavior.morse.profiles.hrm: unilateral_tap and opposite_hand_hold cannot both be true",
+            ),
+        ] {
+            let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+            let path =
+                std::env::temp_dir().join(format!("rmk-config-hand-policy-{}-{}.toml", std::process::id(), unique));
+            fs::write(&path, toml).unwrap();
+            let config = KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path);
+            let _ = fs::remove_file(&path);
+            let error = match config.behavior() {
+                Ok(_) => panic!("expected mutually exclusive hand policies to be rejected"),
+                Err(error) => error,
+            };
+            assert_eq!(error, expected);
+        }
     }
 
     #[test]
