@@ -26,6 +26,9 @@ pub enum PointingMode {
     /// Drag mode - XY maps to cursor movement, and a device tap latches a
     /// mouse button down until the next tap
     Drag(DragConfig),
+    /// Press mode - XY maps to cursor movement, and a mouse button is held
+    /// for as long as the device reports a finger present (Z axis)
+    Press(PressConfig),
 }
 
 impl Default for PointingMode {
@@ -187,6 +190,33 @@ impl Default for DragConfig {
             cursor: CursorConfig::default(),
             toggled_by: 1,
             latches: 1,
+        }
+    }
+}
+
+/// Configuration for press mode
+///
+/// Dragging without any gesture recognition: the button goes down as soon
+/// as the device reports touch presence on the Z axis and comes back up
+/// with the liftoff event, so a stroke drags for exactly as long as the
+/// finger stays on the pad.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct PressConfig {
+    /// Motion behaves exactly as it does in cursor mode.
+    pub cursor: CursorConfig,
+    /// Button held while a finger is present, as a bit mask in the HID
+    /// mouse report's button order (bit 0 is the primary button).
+    pub holds: u8,
+}
+
+impl Default for PressConfig {
+    fn default() -> Self {
+        Self {
+            cursor: CursorConfig::default(),
+            holds: 1,
         }
     }
 }
