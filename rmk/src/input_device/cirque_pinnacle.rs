@@ -21,6 +21,12 @@
 //!
 //! Like that driver, the wheel byte of the 4-byte Intellimouse packet is
 //! not consumed; only the 3-byte delta/button packet is read.
+//!
+//! Touch presence is published on the Z axis (absolute, 1 while a finger
+//! is on the pad). Relative mode has no explicit liftoff flag, but the pad
+//! is configured to send [`Z_IDLE_COUNT`] all-zero packets after a finger
+//! lifts and stays silent while a resting finger merely stops moving, so
+//! an all-zero packet with no buttons is itself the liftoff signal.
 
 use embassy_time::Timer;
 use embedded_hal::digital::OutputPin;
@@ -180,6 +186,7 @@ pub struct CirquePinnacle<SPI: SpiBus, CS: OutputPin, DR: Wait> {
     config: PinnacleConfig,
     initialized: bool,
     buttons: u8,
+    touching: bool,
 }
 
 impl<SPI: SpiBus, CS: OutputPin, DR: Wait> CirquePinnacle<SPI, CS, DR> {
@@ -193,6 +200,7 @@ impl<SPI: SpiBus, CS: OutputPin, DR: Wait> CirquePinnacle<SPI, CS, DR> {
             config,
             initialized: false,
             buttons: 0,
+            touching: false,
         }
     }
 
@@ -342,8 +350,8 @@ impl<SPI: SpiBus, CS: OutputPin, DR: Wait> CirquePinnacle<SPI, CS, DR> {
     /// Wait for a data-ready edge, then read and acknowledge one packet.
     ///
     /// Returns `None` for packets that carry no change we can report
-    /// (communication glitches, stale DR, or an all-zero idle packet with
-    /// unchanged buttons).
+    /// (communication glitches, stale DR, or a Z-idle packet past the one
+    /// that already reported the liftoff).
     async fn read_packet(&mut self) -> Result<Option<PointingEvent>, PinnacleError> {
         self.dr.wait_for_high().await.map_err(|_| PinnacleError::Spi)?;
 
@@ -361,7 +369,16 @@ impl<SPI: SpiBus, CS: OutputPin, DR: Wait> CirquePinnacle<SPI, CS, DR> {
         self.clear_status().await?;
 
         let (dx, dy, buttons) = decode_relative_packet(packet);
-        if dx == 0 && dy == 0 && buttons == self.buttons {
+        let mut lifted = false;
+        if dx != 0 || dy != 0 {
+            self.touching = true;
+        } else if buttons == 0 {
+            // A resting finger is silent; only the post-liftoff Z-idle
+            // burst produces all-zero packets.
+            lifted = self.touching;
+            self.touching = false;
+        }
+        if dx == 0 && dy == 0 && buttons == self.buttons && !lifted {
             return Ok(None);
         }
         self.buttons = buttons;
@@ -381,9 +398,9 @@ impl<SPI: SpiBus, CS: OutputPin, DR: Wait> CirquePinnacle<SPI, CS, DR> {
                     value: dy,
                 },
                 AxisEvent {
-                    typ: AxisValType::Rel,
+                    typ: AxisValType::Abs,
                     axis: Axis::Z,
-                    value: 0,
+                    value: self.touching as i16,
                 },
             ],
         }))
@@ -618,6 +635,7 @@ mod tests {
             assert_eq!(event.buttons, 0x01);
             assert_eq!(event.axes[0].value, -2);
             assert_eq!(event.axes[1].value, 3);
+            assert_eq!(event.axes[2].value, 1, "motion means a finger is present");
             // Reading the packet acknowledged it.
             assert_eq!(device.spi.regs[REG_STATUS1 as usize], 0);
 
@@ -629,6 +647,7 @@ mod tests {
             let event = device.read_packet().await.unwrap().expect("release event");
             assert_eq!(event.buttons, 0);
             assert_eq!(event.axes[0].value, 0);
+            assert_eq!(event.axes[2].value, 0, "an all-zero packet is the liftoff");
 
             // The next idle packet carries no change and is suppressed.
             device.spi.regs[REG_STATUS1 as usize] = STATUS1_SW_DR;
@@ -636,6 +655,36 @@ mod tests {
 
             // Stale DR without SW_DR is ignored.
             device.spi.regs[REG_STATUS1 as usize] = 0;
+            assert!(device.read_packet().await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn liftoff_without_a_button_edge_is_reported_exactly_once() {
+        let mut device = CirquePinnacle::new(7, FakePinnacle::default(), DummyCs, DummyDr, PinnacleConfig::default());
+        block_on(async {
+            device.init().await.unwrap();
+
+            // Motion with no buttons: presence rides the Z axis.
+            device.spi.regs[REG_STATUS1 as usize] = STATUS1_SW_DR;
+            device.spi.regs[REG_PACKET0 as usize] = 0;
+            device.spi.regs[(REG_PACKET0 + 1) as usize] = 0x01;
+            device.spi.regs[(REG_PACKET0 + 2) as usize] = 0;
+            let event = device.read_packet().await.unwrap().expect("motion event");
+            assert_eq!(event.buttons, 0);
+            assert_eq!(event.axes[2].value, 1);
+
+            // The first Z-idle packet is the liftoff: no motion, no button
+            // edge, but it must still produce an event with Z back at 0.
+            device.spi.regs[REG_STATUS1 as usize] = STATUS1_SW_DR;
+            device.spi.regs[(REG_PACKET0 + 1) as usize] = 0;
+            let event = device.read_packet().await.unwrap().expect("liftoff event");
+            assert_eq!(event.axes[0].value, 0);
+            assert_eq!(event.axes[1].value, 0);
+            assert_eq!(event.axes[2].value, 0);
+
+            // The rest of the Z-idle burst is suppressed.
+            device.spi.regs[REG_STATUS1 as usize] = STATUS1_SW_DR;
             assert!(device.read_packet().await.unwrap().is_none());
         });
     }
