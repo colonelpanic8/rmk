@@ -397,7 +397,41 @@ pub(crate) fn parse_key(
 
     let lower = key.to_lowercase();
 
-    if lower.starts_with("mt(") {
+    if lower.starts_with("lmt(") {
+        let keys = split_top_level(strip_call(&key));
+        if keys.len() != 3 {
+            panic!(
+                "\n\u{274c} keyboard.toml: LMT(layer, modifier, key) invalid, please check the documentation: https://rmk.rs/docs/features/configuration/layout.html"
+            );
+        }
+        let layer = keys[0].parse::<u8>().unwrap_or_else(|_| {
+            panic!("\n\u{274c} keyboard.toml: layer in LMT(layer, modifier, key) is not valid!")
+        });
+        if layer >= 16 {
+            panic!("\n\u{274c} keyboard.toml: layer in LMT(layer, modifier, key) must be 0-15!");
+        }
+        let modifier_name = resolve_alias(&keys[1]);
+        let modifier = match modifier_name {
+            "LCtrl" | "LShift" | "LAlt" | "LGui" | "RCtrl" | "RShift" | "RAlt" | "RGui" => {
+                format_ident!("{}", modifier_name)
+            }
+            _ => panic!(
+                "\n\u{274c} keyboard.toml: modifier in LMT(layer, modifier, key) must be one modifier key!"
+            ),
+        };
+        let tap = as_hid_keycode(&keys[2]).unwrap_or_else(|| {
+            panic!(
+                "\n\u{274c} keyboard.toml: key in LMT(layer, modifier, key) must be a HID keycode!"
+            )
+        });
+        quote! {
+            ::rmk::types::action::KeyAction::LayerModTap(
+                #layer,
+                ::rmk::types::modifier::ModifierKey::#modifier,
+                ::rmk::types::keycode::HidKeyCode::#tap,
+            )
+        }
+    } else if lower.starts_with("mt(") {
         let keys = split_top_level(strip_call(&key));
         if keys.len() < 2 || keys.len() > 3 {
             panic!(
@@ -632,6 +666,22 @@ mod tests {
         assert!(squash(&expand("WM(C,LCtrl)")).contains("Action::KeyWithModifier"));
         assert!(squash(&expand("MOD(LCtrl | LAlt | LGui)")).contains("Action::Modifier"));
         assert!(squash(&expand("OSM(LShift)")).contains("Action::OneShotModifier"));
+        assert!(
+            squash(&expand("LMT(1, LAlt, Tab)"))
+                .contains("KeyAction::LayerModTap(1u8,::rmk::types::modifier::ModifierKey::LAlt")
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "modifier in LMT(layer, modifier, key) must be one modifier key")]
+    fn lmt_rejects_modifier_combinations() {
+        let _ = expand("LMT(1, LAlt | LGui, Tab)");
+    }
+
+    #[test]
+    #[should_panic(expected = "layer in LMT(layer, modifier, key) must be 0-15")]
+    fn lmt_rejects_unencodable_layers() {
+        let _ = expand("LMT(16, LAlt, Tab)");
     }
 
     #[test]
