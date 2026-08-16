@@ -10,10 +10,16 @@
 BootloaderJump reply Ok(())                                             02 04 02 01 01 00
 BootloaderJump request ()                                               02 04 02 01 00
 ConnectionChange topic ConnectionStatus{Configured,{1,Adv},Ble}         03 03 80 03 02 01 02 01 00
+DeleteMorseProfile reply Ok(())                                         04 0e 04 01 01 00
+DeleteMorseProfile request 3                                            05 0e 04 01 03 00
+GetAutoMouseLayerConfigs reply Ok(state)                                04 05 06 01 0b 04 01 01 01 02 f4 03 03 01 01 03 d6 01 01 00
+GetAutoMouseLayerConfigs request ()                                     04 05 06 01 00
 GetBehaviorConfig reply Ok(BehaviorConfig{50,500,200,20})               04 01 06 01 07 32 f4 03 c8 01 14 00
 GetBehaviorConfig request ()                                            04 01 06 01 00
 GetBuildInfo reply Ok(BuildInfo{my-firmware..})                         02 0b 02 01 21 1f 6d 79 2d 66 69 72 6d 77 61 72 65 20 76 34 2e 35 2e 36 20 2f 20 52 4d 4b 20 76 31 2e 32 2e 33 00
 GetBuildInfo request ()                                                 02 0b 02 01 00
+GetBehaviorOptions reply Ok(BehaviorOptions)                            04 03 06 01 08 01 01 02 03 01 28 01 08 01 3c c6 80 80 85 0c 00
+GetBehaviorOptions request ()                                           04 03 06 01 00
 GetCapabilities reply Ok(DeviceCapabilities{1..16})                     02 02 02 01 0c 01 02 03 04 05 06 07 08 09 0a 01 03 01 0b 07 0c 0d 0e 0f 10 01 00
 GetCapabilities request ()                                              02 02 02 01 00
 GetCombo reply Ok(Combo{[Single(A)],Morse(1),L2})                       04 01 03 01 04 01 02 01 06 04 05 01 01 02 00
@@ -50,6 +56,12 @@ GetMorse reply Ok(Morse{TAP->Key(A)})                                   04 01 04
 GetMorse request 0                                                      04 01 04 01 01 00
 GetMorseHoldTriggerPositions reply Ok({16,[(default,1,2),(3,4,5)]})     04 0a 04 01 09 10 02 ff 01 02 03 04 05 00
 GetMorseHoldTriggerPositions request ()                                 04 0a 04 01 00
+GetMorseProfile reply Ok(MorseProfile(Normal,200,150))                  04 06 04 01 06 c8 81 b0 89 0c 00
+GetMorseProfile request 3                                               05 06 04 01 03 00
+GetMorseProfileCount reply Ok(16)                                       04 05 04 01 02 10 00
+GetMorseProfileCount request ()                                         04 05 04 01 00
+GetMorseProfileState reply Ok(state)                                    04 0c 04 01 17 10 01 01 03 0c 68 6f 6d 65 2d 72 6f 77 2d 6d 6f 64 c8 81 b0 89 0c 00
+GetMorseProfileState request {offset:0}                                 04 0c 04 01 01 00
 GetSleepState reply Ok(true)                                            04 06 08 01 02 01 00
 GetSleepState request ()                                                04 06 08 01 00
 GetVersion reply Ok(CURRENT)                                            02 01 02 01 01 02 01 00
@@ -65,8 +77,12 @@ PeripheralBootloaderJump reply Ok(())                                   02 0c 02
 PeripheralBootloaderJump request slot 1                                 02 0c 03 01 01 00
 Reboot reply Ok(())                                                     02 03 02 01 01 00
 Reboot request ()                                                       02 03 02 01 00
+SetAutoMouseLayerConfigs reply Ok(())                                   04 06 06 01 01 00
+SetAutoMouseLayerConfigs request configs                                0d 06 06 01 01 01 01 02 f4 03 03 01 01 03 d6 01 01 00
 SetBehaviorConfig reply Ok(())                                          04 02 06 01 01 00
 SetBehaviorConfig request BehaviorConfig{50,500,200,20}                 0a 02 06 01 32 f4 03 c8 01 14 00
+SetBehaviorOptions reply Ok(())                                         04 04 06 01 01 00
+SetBehaviorOptions request BehaviorOptions                              0b 04 06 01 01 01 02 03 01 28 01 08 01 3c c6 80 80 85 0c 00
 SetCombo reply Ok(())                                                   04 02 03 01 01 00
 SetCombo request SetComboRequest{3,combo}                               08 02 03 01 03 01 02 01 06 04 05 01 01 02 00
 SetDefaultLayer reply Ok(())                                            04 04 01 01 01 00
@@ -85,6 +101,10 @@ SetMorse request SetMorseRequest{0,morse}                               04 02 04
 SetMorseHoldTriggerPositions reply Err(Invalid)                         06 0b 04 01 01 05 00
 SetMorseHoldTriggerPositions reply Ok(())                               04 0b 04 01 01 00
 SetMorseHoldTriggerPositions request {[(default,1,2),(3,4,5)]}          0b 0b 04 01 02 ff 01 02 03 04 05 00
+SetMorseProfile reply Ok(())                                            04 07 04 01 01 00
+SetMorseProfile request SetMorseProfileRequest{3,profile}               0a 07 04 01 03 c8 81 b0 89 0c 00
+SetMorseProfileEntry reply Ok(())                                       04 0d 04 01 01 00
+SetMorseProfileEntry request {entry}                                    17 0d 04 01 03 0c 68 6f 6d 65 2d 72 6f 77 2d 6d 6f 64 c8 81 b0 89 0c 00
 SleepState topic true                                                   03 04 80 02 01 00
 StorageReset reply Ok(())                                               02 05 02 01 01 00
 StorageReset request StorageResetMode::Full                             02 05 02 01 01 00
