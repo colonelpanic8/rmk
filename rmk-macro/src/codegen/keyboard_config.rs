@@ -27,11 +27,16 @@ pub(crate) fn expand_keyboard_info(
     let num_row = keymap.rows as usize;
     let num_layer = keymap.layers as usize;
     let total_num_encoder = keymap.num_encoder;
+    let layer_names = keymap.layer_names.iter().map(|name| match name {
+        Some(name) => quote! { Some(#name) },
+        None => quote! { None },
+    });
     quote! {
         pub(crate) const COL: usize = #num_col;
         pub(crate) const ROW: usize = #num_row;
         pub(crate) const NUM_LAYER: usize = #num_layer;
         pub(crate) const NUM_ENCODER: usize = #total_num_encoder;
+        const LAYER_NAMES: &[Option<&str>] = &[#(#layer_names),*];
         const KEYBOARD_DEVICE_CONFIG: ::rmk::config::DeviceConfig = ::rmk::config::DeviceConfig {
             vid: #vid,
             pid: #pid,
