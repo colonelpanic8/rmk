@@ -127,7 +127,11 @@ impl<'a, const PIN_NUM: usize, const EVENT_NUM: usize> NrfAdc<'a, PIN_NUM, EVENT
                     }
                     let device_id = self.event_device_ids[self.event_state as usize];
                     self.event_state += 1;
-                    return NrfAdcEvent::Pointing(PointingEvent { device_id, axes: e });
+                    return NrfAdcEvent::Pointing(PointingEvent {
+                        device_id,
+                        axes: e,
+                        buttons: 0,
+                    });
                 }
                 AnalogEventType::Battery => {
                     let battery_adc_value = buf[self.channel_state as usize] as u16;
