@@ -10,6 +10,83 @@ use rmk_types::modifier::ModifierCombination;
 use crate::RawMutex;
 use crate::event::{ConnectionStatusChangeEvent, publish_event};
 
+const MAINTENANCE_MODE_INITIALIZED: u8 = 1 << 2;
+const MAINTENANCE_MODE_DEFAULT: u8 = 1 << 1;
+const MAINTENANCE_MODE_ENABLED: u8 = 1;
+
+/// Default and live maintenance state in one atomic snapshot. Keeping
+/// initialization in the same byte prevents concurrent host transports from
+/// exposing a partially initialized policy.
+static MAINTENANCE_MODE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+pub(crate) fn initialize_maintenance_mode(default_enabled: bool) {
+    let bits = MAINTENANCE_MODE_INITIALIZED
+        | if default_enabled {
+            MAINTENANCE_MODE_DEFAULT | MAINTENANCE_MODE_ENABLED
+        } else {
+            0
+        };
+    let _ = MAINTENANCE_MODE.compare_exchange(
+        0,
+        bits,
+        core::sync::atomic::Ordering::AcqRel,
+        core::sync::atomic::Ordering::Acquire,
+    );
+}
+
+fn maintenance_mode_bits() -> u8 {
+    let bits = MAINTENANCE_MODE.load(core::sync::atomic::Ordering::Acquire);
+    if bits == 0 {
+        MAINTENANCE_MODE_INITIALIZED | MAINTENANCE_MODE_DEFAULT | MAINTENANCE_MODE_ENABLED
+    } else {
+        bits
+    }
+}
+
+/// Whether host maintenance operations are currently allowed.
+pub fn maintenance_mode_enabled() -> bool {
+    maintenance_mode_bits() & MAINTENANCE_MODE_ENABLED != 0
+}
+
+/// The compiled value restored at application startup.
+pub fn maintenance_mode_default() -> bool {
+    maintenance_mode_bits() & MAINTENANCE_MODE_DEFAULT != 0
+}
+
+/// Change the live maintenance gate, returning the resulting state.
+pub fn set_maintenance_mode(enabled: bool) -> bool {
+    initialize_maintenance_mode(true);
+    let mut current = maintenance_mode_bits();
+    loop {
+        let next = if enabled {
+            current | MAINTENANCE_MODE_ENABLED
+        } else {
+            current & !MAINTENANCE_MODE_ENABLED
+        };
+        if next == current {
+            return enabled;
+        }
+        match MAINTENANCE_MODE.compare_exchange_weak(
+            current,
+            next,
+            core::sync::atomic::Ordering::AcqRel,
+            core::sync::atomic::Ordering::Acquire,
+        ) {
+            Ok(_) => {
+                publish_event(crate::event::MaintenanceModeEvent(enabled));
+                return enabled;
+            }
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+/// Flip the live maintenance gate, returning the resulting state.
+pub fn toggle_maintenance_mode() -> bool {
+    let enabled = !maintenance_mode_enabled();
+    set_maintenance_mode(enabled)
+}
+
 /// Final modifier bitmap used by the most recently resolved keyboard report.
 ///
 /// This is intentionally distinct from `Keyboard::held_modifiers`: one-shot,
