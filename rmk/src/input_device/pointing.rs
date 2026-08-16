@@ -269,6 +269,9 @@ pub enum PointingMode {
     /// Drag mode - XY maps to cursor movement, and a device tap latches a
     /// mouse button down until the next tap
     Drag(DragConfig),
+    /// Press mode - XY maps to cursor movement, and a mouse button is held
+    /// for as long as the device reports a finger present (Z axis)
+    Press(PressConfig),
 }
 
 impl Default for PointingMode {
@@ -424,6 +427,31 @@ impl Default for DragConfig {
     }
 }
 
+/// Configuration for press mode
+///
+/// Dragging without any gesture recognition: the button goes down as soon
+/// as the device reports touch presence on the Z axis and comes back up
+/// with the liftoff event, so a stroke drags for exactly as long as the
+/// finger stays on the pad.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct PressConfig {
+    /// Motion behaves exactly as it does in cursor mode.
+    pub cursor: CursorConfig,
+    /// Button held while a finger is present, as a bit mask in the HID
+    /// mouse report's button order (bit 0 is the primary button).
+    pub holds: u8,
+}
+
+impl Default for PressConfig {
+    fn default() -> Self {
+        Self {
+            cursor: CursorConfig::default(),
+            holds: 1,
+        }
+    }
+}
+
 /// Accumulator for sub-unit motion deltas (used in Scroll and Sniper modes)
 ///
 /// When dividing motion by a divisor, small movements would be lost.
@@ -543,6 +571,8 @@ pub struct PointingProcessor<'a> {
     device_buttons: u8,
     /// Whether drag mode currently holds its button down
     drag_latched: bool,
+    /// Whether the device last reported a finger present (Z axis)
+    touching: bool,
 }
 
 impl<'a> PointingProcessor<'a> {
@@ -555,25 +585,28 @@ impl<'a> PointingProcessor<'a> {
             current_mode: PointingMode::default(),
             device_buttons: 0,
             drag_latched: false,
+            touching: false,
         }
     }
 
     /// Set the pointing mode
     ///
-    /// A latch belongs to the drag mode that took it, so any mode change
-    /// drops it. Callers switching modes while a drag may be latched should
+    /// A held button belongs to the mode that took it, so any mode change
+    /// drops it. Callers switching modes while a button may be held should
     /// prefer [`Self::on_pointing_processor_event`], which also tells the
     /// host the button came back up.
     pub fn set_pointing_mode(&mut self, mode: PointingMode) -> &mut Self {
         self.current_mode = mode;
         self.drag_latched = false;
+        self.touching = false;
         self
     }
 
-    /// Buttons the latch is currently holding down on its own.
+    /// Buttons the current mode is holding down on its own.
     fn latched_buttons(&self) -> u8 {
         match self.current_mode {
             PointingMode::Drag(drag_config) if self.drag_latched => drag_config.latches,
+            PointingMode::Press(press_config) if self.touching => press_config.holds,
             _ => 0,
         }
     }
@@ -587,11 +620,13 @@ impl<'a> PointingProcessor<'a> {
 
         let mut x = 0i16;
         let mut y = 0i16;
+        let mut z = 0i16;
 
         for axis_event in event.axes.iter() {
             match axis_event.axis {
                 Axis::X => x = axis_event.value,
                 Axis::Y => y = axis_event.value,
+                Axis::Z => z = axis_event.value,
                 _ => {}
             }
         }
@@ -621,15 +656,28 @@ impl<'a> PointingProcessor<'a> {
                 drag_config.toggled_by,
             );
         }
-        let buttons = self.keymap.mouse_buttons() | event.buttons | self.latched_buttons();
+        self.touching = z != 0;
+        let buttons = match self.current_mode {
+            // Presence already delivers the press, and the pad's tap
+            // gestures would only replay it as a stray click after liftoff.
+            PointingMode::Press(_) => self.keymap.mouse_buttons() | self.latched_buttons(),
+            _ => self.keymap.mouse_buttons() | event.buttons | self.latched_buttons(),
+        };
         match self.current_mode {
-            PointingMode::Cursor(_) | PointingMode::Scroll(_) | PointingMode::Sniper(_) | PointingMode::Drag(_) => {
+            PointingMode::Cursor(_)
+            | PointingMode::Scroll(_)
+            | PointingMode::Sniper(_)
+            | PointingMode::Drag(_)
+            | PointingMode::Press(_) => {
                 // modes that generate mouse reports
                 let mouse_report = match self.current_mode {
                     PointingMode::Cursor(cursor_config) => cursor_report(x, y, &cursor_config, buttons),
                     // The latch is already folded into `buttons`, so a drag
                     // is cursor motion with a button that outlives the tap.
                     PointingMode::Drag(drag_config) => cursor_report(x, y, &drag_config.cursor, buttons),
+                    // Likewise the held button: the liftoff event arrives
+                    // with zero motion and produces the release report.
+                    PointingMode::Press(press_config) => cursor_report(x, y, &press_config.cursor, buttons),
                     PointingMode::Scroll(scroll_config) => {
                         let (sx, sy) = self.accumulator.accumulate(
                             x,
