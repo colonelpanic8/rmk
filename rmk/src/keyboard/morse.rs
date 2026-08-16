@@ -2,7 +2,7 @@ use embassy_time::{Duration, Instant};
 use rmk_types::action::{Action, KeyAction};
 use rmk_types::morse::{HOLD, MorseMode, MorsePattern, TAP};
 
-use crate::event::KeyboardEvent;
+use crate::event::{KeyboardEvent, KeyboardEventPos};
 use crate::keyboard::Keyboard;
 use crate::keyboard::held_buffer::{HeldKey, KeyState};
 use crate::keymap::KeyMap;
@@ -459,6 +459,18 @@ impl<'a> Keyboard<'a> {
         per_key
             .map(|t| Duration::from_millis(t as u64))
             .unwrap_or_else(|| keymap.morse_prior_idle_time())
+    /// Whether the key at `other` may trigger the hold of `key_action`.
+    ///
+    /// `None` means the key's profile sets no `hold_trigger_key_positions`, so there is no
+    /// positional restriction. Positions only exist for profile-indexed tap-holds; a morse
+    /// key carries its profile inline with no index to look the position list up by, so it
+    /// is never restricted.
+    pub fn hold_trigger_allows(keymap: &KeyMap, key_action: &KeyAction, other: KeyboardEventPos) -> Option<bool> {
+        let KeyAction::TapHold(_, _, idx) = key_action else {
+            return None;
+        let KeyboardEventPos::Key(pos) = other else {
+            return None;
+        keymap.hold_trigger_allows(*idx, pos.row, pos.col)
     pub fn is_flow_tap_enabled(keymap: &KeyMap, key_action: &KeyAction) -> bool {
         match key_action {
             KeyAction::TapHold(_, _, idx) => keymap
