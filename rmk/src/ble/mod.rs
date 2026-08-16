@@ -69,7 +69,7 @@ where
     config: BleBatteryConfig<'static>,
     /// One matrix region per split peripheral.
     #[cfg(feature = "split")]
-    peripheral_matrices: [PeripheralMatrixConfig; crate::SPLIT_PERIPHERALS_NUM],
+    peripheral_matrices: Option<[PeripheralMatrixConfig; crate::SPLIT_PERIPHERALS_NUM]>,
     #[cfg(feature = "host")]
     host_service: Option<&'a crate::host::HostService<'a>>,
     // Keeps `'a` in the type's parameter list across all feature configurations.
@@ -85,7 +85,7 @@ where
         controller: C,
         address: [u8; 6],
         rmk_config: RmkConfig<'static>,
-        #[cfg(feature = "split")] peripheral_matrices: [PeripheralMatrixConfig; crate::SPLIT_PERIPHERALS_NUM],
+        #[cfg(feature = "split")] peripheral_matrices: Option<[PeripheralMatrixConfig; crate::SPLIT_PERIPHERALS_NUM]>,
     ) -> Self {
         Self {
             controller: Some(controller),
@@ -155,6 +155,22 @@ where
 
         let controller = self.controller.take().expect("BleTransport::run called twice");
 
+        let Some(peripheral_matrices) = self.peripheral_matrices else {
+            let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
+                HostResources::new();
+            let stack = trouble_host::new(controller, &mut resources)
+                .set_random_address(Address::random(self.address))
+                .build();
+            serve(
+                &stack,
+                &self.device_config,
+                &self.config,
+                #[cfg(feature = "host")]
+                self.host_service,
+            )
+            .await;
+        };
+
         // Load the peripherals' stored addresses through the storage task,
         // the same way a peripheral loads its central's address. The scanner
         // and the managers then share the slots; `Cell` is enough because a
@@ -175,7 +191,7 @@ where
 
         let managers =
             embassy_futures::join::join_array(core::array::from_fn::<_, { crate::SPLIT_PERIPHERALS_NUM }, _>(|i| {
-                run_ble_peripheral_manager(i, &addrs[i], &stack, self.peripheral_matrices[i])
+                run_ble_peripheral_manager(i, &addrs[i], &stack, peripheral_matrices[i])
             }));
         join3(
             serve(
