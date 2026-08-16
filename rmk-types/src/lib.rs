@@ -20,6 +20,7 @@
 //! - [`battery`] — `BatteryStatus`, `ChargeState`
 //! - [`ble`] — `BleStatus`, `BleState`
 //! - [`connection`] — `ConnectionType` (USB/BLE), `UsbState`, `ConnectionStatus`
+//! - [`unicode`] — `UnicodeMode`: which OS input method `Action::Unicode` types for
 //!
 //! ### Protocol
 //! - [`protocol::vial`] — Vial/Via protocol types
@@ -54,6 +55,7 @@ pub mod mouse_button;
 pub mod protocol;
 #[cfg(feature = "steno")]
 pub mod steno;
+pub mod unicode;
 
 /// Compute the maximum varint-encoded length for a given max value.
 /// Mirrors `postcard`'s internal `varint_size`.
