@@ -28,10 +28,10 @@ use rmk_types::protocol::rynk::{
     BehaviorOptions, BleName, BuildInfo, ClearLightingOverlayRequest, Cmd, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
     DeviceDataDescriptor, DeviceDataRecord, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
-    GetComboDefinitionBulkResponse, GetEncoderRequest,
-    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerState,
-    LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
+    GetComboDefinitionBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest,
+    GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse,
+    GetMorseProfileStateRequest, KeyPosition, LayerMetadata, LayerState, LightingCapabilities,
+    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
     LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage, LightingExtension,
     LightingExtensionLayers, LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionNamesRequest,
     LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest,
@@ -47,14 +47,13 @@ use rmk_types::protocol::rynk::{
     PutLightingOverlayChunkRequest,
     PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetAutoMouseLayerConfigsRequest,
     SetComboBulkRequest, SetComboDefinitionBulkRequest, SetComboDefinitionRequest, SetComboRequest, SetEncoderRequest,
-    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
+    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLayerMetadataRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
     SetLightingWakeLayersRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest,
-    SetMorseProfileBulkRequest,
-    SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest,
-    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
-    UnsetLightingSceneCellRequest, command,
+    SetMorseProfileBulkRequest, SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest,
+    SetPointingConfigRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
+    UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -218,6 +217,20 @@ impl Client {
     /// Set the default layer.
     pub async fn set_default_layer(&self, layer: u8) -> Result<(), RynkHostError> {
         self.request::<command::SetDefaultLayer>(&layer).await
+    }
+
+    /// Read one fixed layer slot's device-backed logical metadata.
+    pub async fn get_layer_metadata(&self, layer: u8) -> Result<LayerMetadata, RynkHostError> {
+        self.request::<command::GetLayerMetadata>(&layer).await
+    }
+
+    /// Persist one fixed layer slot's logical occupancy and name.
+    pub async fn set_layer_metadata(&self, layer: u8, metadata: LayerMetadata) -> Result<(), RynkHostError> {
+        if !self.capabilities.storage_enabled {
+            return Err(RynkHostError::Unsupported(Cmd::SetLayerMetadata, "storage not enabled"));
+        }
+        self.request::<command::SetLayerMetadata>(&SetLayerMetadataRequest { layer, metadata })
+            .await
     }
 
     /// Read both rotation actions for one encoder on one layer.

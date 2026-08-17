@@ -491,6 +491,10 @@ fn wire_values_locked() {
         template: heapless::String::try_from("Glove80 {slot}").unwrap(),
     };
     let opposite_profile = ex.profile.with_opposite_hand_hold(Some(true));
+    let layer_metadata = LayerMetadata {
+        occupied: true,
+        name: heapless::String::try_from("Navigation").unwrap(),
+    };
 
     let entries: alloc::vec::Vec<(&str, alloc::vec::Vec<u8>)> = alloc::vec![
         // --- Response envelope + connection ---
@@ -633,6 +637,7 @@ fn wire_values_locked() {
             }),
         ),
         ("MacroData{[0x01,0x02,0x03]}", encode(&ex.macro_data)),
+        ("LayerMetadata{true,Navigation}", encode(&layer_metadata)),
         // --- Status / system responses ---
         ("MatrixState{[0x05,0x00,0x20]}", encode(&ex.matrix)),
         ("LayerState{default:2,active:[0x05,..,0x80]}", encode(&layer_state)),
@@ -716,6 +721,13 @@ fn wire_values_locked() {
                 encoder_id: 1,
                 layer: 2,
                 action: ex.encoder
+            }),
+        ),
+        (
+            "SetLayerMetadataRequest{2,{true,Navigation}}",
+            encode(&SetLayerMetadataRequest {
+                layer: 2,
+                metadata: layer_metadata,
             }),
         ),
         ("GetMacroRequest{256}", encode(&GetMacroRequest { offset: 256 })),
@@ -836,6 +848,10 @@ fn wire_frames_locked() {
     let set_key = SetKeyRequest {
         position: key_pos,
         action: KeyAction::Morse(7),
+    };
+    let layer_metadata = LayerMetadata {
+        occupied: true,
+        name: heapless::String::try_from("Navigation").unwrap(),
     };
     let led = LedIndicator::NUM_LOCK | LedIndicator::SCROLL_LOCK;
     let mut unlock_keys = heapless::Vec::new();
@@ -1045,6 +1061,33 @@ fn wire_frames_locked() {
         (
             "SetEncoderAction reply Ok(())",
             encode_frame(Cmd::SetEncoderAction, SEQ, &Ok::<(), RynkError>(())),
+        ),
+        (
+            "GetLayerMetadata request 2",
+            encode_frame(Cmd::GetLayerMetadata, SEQ, &2u8),
+        ),
+        (
+            "GetLayerMetadata reply Ok(LayerMetadata{true,Navigation})",
+            encode_frame(
+                Cmd::GetLayerMetadata,
+                SEQ,
+                &Ok::<LayerMetadata, RynkError>(layer_metadata.clone()),
+            ),
+        ),
+        (
+            "SetLayerMetadata request SetLayerMetadataRequest{2,{true,Navigation}}",
+            encode_frame(
+                Cmd::SetLayerMetadata,
+                SEQ,
+                &SetLayerMetadataRequest {
+                    layer: 2,
+                    metadata: layer_metadata,
+                },
+            ),
+        ),
+        (
+            "SetLayerMetadata reply Ok(())",
+            encode_frame(Cmd::SetLayerMetadata, SEQ, &Ok::<(), RynkError>(())),
         ),
         // Macro (0x02xx).
         (
