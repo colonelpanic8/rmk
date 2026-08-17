@@ -123,6 +123,10 @@ impl<'a> RynkService<'a> {
             Cmd::SwitchBleProfile => serve::<command::SwitchBleProfile, _>(self, msg).await,
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => serve::<command::ClearBleProfile, _>(self, msg).await,
+            #[cfg(feature = "split")]
+            Cmd::GetSplitTransport => serve::<command::GetSplitTransport, _>(self, msg).await,
+            #[cfg(feature = "split")]
+            Cmd::SetSplitTransportForce => serve::<command::SetSplitTransportForce, _>(self, msg).await,
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,

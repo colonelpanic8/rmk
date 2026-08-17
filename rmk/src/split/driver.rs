@@ -251,6 +251,7 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
                     with_feature("display"): e = wpm_sub.next_event().fuse() => SplitMessage::Wpm(e.0),
                     with_feature("display"): e = modifier_sub.next_event().fuse() => SplitMessage::Modifier(e.modifier.into_bits()),
                     with_feature("display"): e = sleep_sub.next_event().fuse() => SplitMessage::SleepState(e.0),
+                    m = crate::channel::SPLIT_TRANSPORT_FORCE_CHANNEL.receive().fuse() => SplitMessage::TransportOverride(m),
                 }
             };
 
@@ -274,6 +275,10 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
                         if self.send(&msg).await.is_err() {
                             return;
                         }
+                        // The peripheral has its copy; now the central may switch.
+                        if let SplitMessage::TransportOverride(mode) = msg {
+                            crate::split::selector::set_forced(mode);
+                        }
                     }
                     Either::Second(_) => {}
                 },
@@ -281,6 +286,10 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
                 Either::Second(msg) => {
                     if self.send(&msg).await.is_err() {
                         return;
+                    }
+                    // The peripheral has its copy; now the central may switch.
+                    if let SplitMessage::TransportOverride(mode) = msg {
+                        crate::split::selector::set_forced(mode);
                     }
                 }
             }
