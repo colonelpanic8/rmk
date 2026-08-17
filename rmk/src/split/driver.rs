@@ -47,6 +47,15 @@ struct PeripheralSlot {
     battery: BatteryStatus,
 }
 
+impl PeripheralSlot {
+    fn set_connected(&mut self, connected: bool) {
+        self.connected = connected;
+        if !connected {
+            self.battery = BatteryStatus::Unavailable;
+        }
+    }
+}
+
 static PERIPHERAL_SLOTS: BlockingMutex<crate::RawMutex, Cell<[PeripheralSlot; crate::SPLIT_PERIPHERALS_NUM]>> =
     BlockingMutex::new(Cell::new(
         [PeripheralSlot {
@@ -55,39 +64,81 @@ static PERIPHERAL_SLOTS: BlockingMutex<crate::RawMutex, Cell<[PeripheralSlot; cr
         }; crate::SPLIT_PERIPHERALS_NUM],
     ));
 
-/// Read-modify-write peripheral `id`'s slot. Returns `false` when `id` is out
-/// of range or the slot didn't change, so callers skip publishing.
-fn update_slot(id: usize, f: impl FnOnce(&mut PeripheralSlot)) -> bool {
+/// Read-modify-write peripheral `id`'s slot, returning its changed states.
+fn update_slot(id: usize, f: impl FnOnce(&mut PeripheralSlot)) -> Option<(PeripheralSlot, PeripheralSlot)> {
     PERIPHERAL_SLOTS.lock(|slots| {
         let mut all = slots.get();
-        let Some(slot) = all.get_mut(id) else {
-            return false;
-        };
+        let slot = all.get_mut(id)?;
         let prev = *slot;
         f(slot);
         if *slot == prev {
-            return false;
+            return None;
         }
+        let next = *slot;
         slots.set(all);
-        true
+        Some((prev, next))
     })
 }
 
 /// Latch peripheral `id`'s connected state and broadcast the change.
 pub(crate) fn set_peripheral_connected(id: usize, connected: bool) {
-    if update_slot(id, |s| s.connected = connected) {
+    let Some((previous, current)) = update_slot(id, |s| s.set_connected(connected)) else {
+        return;
+    };
+    if previous.connected != current.connected {
         publish_event(PeripheralConnectedEvent { id, connected });
+    }
+    #[cfg(feature = "_ble")]
+    if previous.battery != current.battery {
+        publish_event(PeripheralBatteryEvent {
+            id,
+            state: BatteryStatusEvent(current.battery),
+        });
     }
 }
 
 /// Latch peripheral `id`'s battery status and broadcast the change.
 #[cfg(feature = "_ble")]
 pub(crate) fn set_peripheral_battery(id: usize, battery: BatteryStatus) {
-    if update_slot(id, |s| s.battery = battery) {
+    if update_slot(id, |s| s.battery = battery).is_some() {
         publish_event(PeripheralBatteryEvent {
             id,
             state: BatteryStatusEvent(battery),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disconnect_makes_the_peripheral_battery_unavailable() {
+        let mut slot = PeripheralSlot {
+            connected: true,
+            battery: BatteryStatus::Available {
+                charge_state: rmk_types::battery::ChargeState::Discharging,
+                level: Some(73),
+            },
+        };
+
+        slot.set_connected(false);
+
+        assert!(!slot.connected);
+        assert_eq!(slot.battery, BatteryStatus::Unavailable);
+    }
+
+    #[test]
+    fn reconnect_waits_for_a_fresh_battery_report() {
+        let mut slot = PeripheralSlot {
+            connected: false,
+            battery: BatteryStatus::Unavailable,
+        };
+
+        slot.set_connected(true);
+
+        assert!(slot.connected);
+        assert_eq!(slot.battery, BatteryStatus::Unavailable);
     }
 }
 
