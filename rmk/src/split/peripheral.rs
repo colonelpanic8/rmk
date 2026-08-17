@@ -214,6 +214,10 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                 super::update_legacy_effective_layer(layer);
                 publish_event(LayerChangeEvent::new(layer));
             }
+            SplitMessage::TransportOverride(mode) => {
+                info!("Split transport force from central: {}", mode);
+                crate::split::selector::set_forced(mode);
+            }
             SplitMessage::LayerState(state) => {
                 super::update_layer_state(state);
                 publish_event(LayerChangeEvent::new(state.effective));
