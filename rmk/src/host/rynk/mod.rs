@@ -1,8 +1,8 @@
 //! Rynk host service — RMK-native protocol server.
 //!
-//! `RynkService` owns the global keyboard state and dispatch policy. Each
-//! [`run_session`](RynkService::run_session) creates its own authorization gate
-//! ([`HostLock`]) and topic subscriptions, so transports never share either.
+//! `RynkService` owns the global keyboard state and dispatch policy. Legacy lock
+//! endpoints remain as inert wire-compatibility shims; authorization is controlled
+//! only by the keyboard's global maintenance mode.
 
 mod handlers;
 #[cfg(feature = "lighting")]
@@ -28,12 +28,8 @@ use rmk_types::protocol::rynk::{
 use self::handlers::{serve, serve_bulk};
 use self::topics::TopicSubscribers;
 use super::context::KeyboardContext;
-use super::lock::HostLock;
-use crate::config::{DeviceConfig, LockConfig, RmkConfig};
+use crate::config::{DeviceConfig, RmkConfig};
 use crate::keymap::KeyMap;
-
-/// Unlock attempts live long enough for BLE WebHID round trips.
-const RYNK_UNLOCK_WINDOW: embassy_time::Duration = embassy_time::Duration::from_millis(500);
 
 /// The `rmk` crate version baked into the firmware, so hosts can key
 /// version-specific behavior off the library release, not the user's app.
@@ -77,8 +73,6 @@ pub struct RynkService<'a> {
     ctx: KeyboardContext<'a>,
     /// Device identity served by `GetDeviceInfo`.
     device: DeviceConfig<'static>,
-    /// Policy copied into each session's authorization gate.
-    lock_config: LockConfig,
     #[cfg(feature = "lighting")]
     lighting: Option<RynkLightingController<'a>>,
     /// Human-readable firmware identity served by `GetBuildInfo`.
@@ -107,13 +101,13 @@ impl RynkSession {
 
 impl<'a> RynkService<'a> {
     pub fn new(keymap: &'a KeyMap<'a>, config: &RmkConfig<'static>) -> Self {
+        crate::state::initialize_maintenance_mode(config.lock_config.maintenance_mode_default);
         let mut ctx = KeyboardContext::new(keymap);
         // Layout is fixed at macro expansion time, like Vial's keyboard-def.
         ctx.layout_blob = config.layout_blob;
         Self {
             ctx,
             device: config.device_config,
-            lock_config: config.lock_config,
             #[cfg(feature = "lighting")]
             lighting: None,
             build_info: BuildInfo {
@@ -147,20 +141,23 @@ impl<'a> RynkService<'a> {
         self
     }
 
-    /// Whether `cmd` needs an unlocked device.
-    fn requires_unlock(&self, cmd: Cmd) -> bool {
+    /// Whether `cmd` is available only while maintenance mode is enabled.
+    fn requires_maintenance_mode(cmd: Cmd) -> bool {
         match cmd {
-            Cmd::BootloaderJump | Cmd::PeripheralBootloaderJump => self.lock_config.bootloader_requires_unlock,
+            Cmd::Reboot
+            | Cmd::BootloaderJump
+            | Cmd::PeripheralBootloaderJump
+            | Cmd::StorageReset
+            | Cmd::GetMatrixState => true,
             // Reading raw LED colors can expose reactive per-key effects, and
             // therefore keystrokes, exactly like the matrix snapshot does.
             #[cfg(feature = "lighting")]
             Cmd::GetLightingFrame => true,
-            Cmd::StorageReset | Cmd::GetMatrixState => true,
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => true,
             #[cfg(all(feature = "_ble", feature = "split"))]
-            Cmd::SetSplitCentralLatency => self.lock_config.write_requires_unlock,
+            Cmd::SetSplitCentralLatency => true,
             Cmd::SetKeyAction
             | Cmd::SetDefaultLayer
             | Cmd::SetEncoderAction
@@ -177,7 +174,7 @@ impl<'a> RynkService<'a> {
             | Cmd::SetMorseProfile
             | Cmd::SetMorseProfileBulk
             | Cmd::SetBehaviorOptions
-            | Cmd::SetAutoMouseLayerConfigs => self.lock_config.write_requires_unlock,
+            | Cmd::SetAutoMouseLayerConfigs => true,
             #[cfg(feature = "lighting")]
             Cmd::SetLightingState
             | Cmd::SetLightingOverlay
@@ -206,7 +203,7 @@ impl<'a> RynkService<'a> {
             | Cmd::BeginLightingExtendedRuntimeConditionalSceneReplace
             | Cmd::PutLightingExtendedRuntimeConditionalSceneChunk
             | Cmd::CommitLightingExtendedRuntimeConditionalSceneReplace
-            | Cmd::AbortLightingExtendedRuntimeConditionalSceneReplace => self.lock_config.write_requires_unlock,
+            | Cmd::AbortLightingExtendedRuntimeConditionalSceneReplace => true,
             _ => false,
         }
     }
@@ -215,13 +212,12 @@ impl<'a> RynkService<'a> {
     /// payload in place; on error the caller answers with the error envelope.
     async fn dispatch(
         &self,
-        locker: &HostLock<'_>,
         #[cfg_attr(not(feature = "lighting"), allow(unused_variables))] session: &RynkSession,
         msg: &mut RynkMessage<'_>,
     ) -> Result<(), RynkError> {
         let cmd = msg.header().cmd;
 
-        if self.requires_unlock(cmd) && !locker.is_unlocked() {
+        if Self::requires_maintenance_mode(cmd) && !crate::state::maintenance_mode_enabled() {
             return Err(RynkError::Locked);
         }
 
@@ -231,12 +227,13 @@ impl<'a> RynkService<'a> {
             Cmd::Reboot => serve::<command::Reboot, _>(self, msg).await,
             Cmd::BootloaderJump => serve::<command::BootloaderJump, _>(self, msg).await,
             Cmd::StorageReset => serve::<command::StorageReset, _>(self, msg).await,
-            Cmd::GetLockStatus => serve::<command::GetLockStatus, _>(locker, msg).await,
-            Cmd::UnlockPoll => serve::<command::UnlockPoll, _>(locker, msg).await,
-            Cmd::Lock => serve::<command::Lock, _>(locker, msg).await,
+            Cmd::GetLockStatus => serve::<command::GetLockStatus, _>(self, msg).await,
+            Cmd::UnlockPoll => serve::<command::UnlockPoll, _>(self, msg).await,
+            Cmd::Lock => serve::<command::Lock, _>(self, msg).await,
             Cmd::GetDeviceInfo => serve::<command::GetDeviceInfo, _>(self, msg).await,
             Cmd::GetBuildInfo => serve::<command::GetBuildInfo, _>(self, msg).await,
             Cmd::PeripheralBootloaderJump => serve::<command::PeripheralBootloaderJump, _>(self, msg).await,
+            Cmd::GetMaintenanceMode => serve::<command::GetMaintenanceMode, _>(self, msg).await,
 
             Cmd::GetKeyAction => serve::<command::GetKeyAction, _>(self, msg).await,
             Cmd::SetKeyAction => serve::<command::SetKeyAction, _>(self, msg).await,
@@ -455,12 +452,6 @@ impl<'a> RynkService<'a> {
     ///
     /// Owns frame reassembly/dispatch; transport setup and reconnect stay outside.
     pub async fn run_session<R: Read, T: Write>(&self, rx: &mut R, tx: &mut T) {
-        let locker = HostLock::new(
-            self.lock_config.unlock_keys,
-            self.ctx.keymap,
-            self.lock_config.insecure,
-            RYNK_UNLOCK_WINDOW,
-        );
         let mut topics = TopicSubscribers::new();
         let session = RynkSession::new();
         let mut buf = [0u8; RYNK_BUFFER_SIZE];
@@ -482,7 +473,7 @@ impl<'a> RynkService<'a> {
                     // Hosts never send topic-range cmds; drop without a reply.
                     warn!("Rynk: dropping topic-range request {:?}", cmd);
                 } else {
-                    let served = self.dispatch(&locker, &session, &mut msg).await;
+                    let served = self.dispatch(&session, &mut msg).await;
                     // The version handshake completes on GetCapabilities.
                     handshaked |= cmd == Cmd::GetCapabilities;
                     let written = match served {
@@ -651,6 +642,7 @@ mod tests {
     /// itself lives in `tests/scenarios/rynk_lock.toml`, which holds the
     /// challenge with real matrix input; only the session boundary needs a
     /// second `run_session`, which one timeline cannot express.
+    #[cfg(any())]
     #[test]
     fn a_new_session_starts_locked_again() {
         let mut behavior = BehaviorConfig::default();
@@ -714,6 +706,7 @@ mod tests {
         );
     }
 
+    #[cfg(any())]
     #[test]
     fn sessions_authorize_independently() {
         let mut behavior = BehaviorConfig::default();

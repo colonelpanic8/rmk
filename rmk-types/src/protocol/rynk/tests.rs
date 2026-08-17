@@ -541,6 +541,10 @@ fn wire_values_locked() {
             encode(&Action::KeyboardControl(KeyboardAction::Bootloader)),
         ),
         (
+            "Action::KeyboardControl(MaintenanceModeToggle)",
+            encode(&Action::KeyboardControl(KeyboardAction::MaintenanceModeToggle)),
+        ),
+        (
             "Action::Special(GraveEscape)",
             encode(&Action::Special(SpecialKey::GraveEscape))
         ),
@@ -885,6 +889,21 @@ fn wire_frames_locked() {
                 Cmd::GetBuildInfo,
                 SEQ,
                 &Ok::<BuildInfo, RynkError>(ex.build_info.clone())
+            ),
+        ),
+        (
+            "GetMaintenanceMode request ()",
+            encode_frame(Cmd::GetMaintenanceMode, SEQ, &())
+        ),
+        (
+            "GetMaintenanceMode reply Ok(MaintenanceMode{true,false})",
+            encode_frame(
+                Cmd::GetMaintenanceMode,
+                SEQ,
+                &Ok::<MaintenanceMode, RynkError>(MaintenanceMode {
+                    enabled: true,
+                    default_enabled: false,
+                }),
             ),
         ),
         // Keymap / encoder (0x01xx).

@@ -18,10 +18,9 @@ use super::{
     GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse,
     GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest,
     GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerState, LayoutChunk, LockStatus,
-    MacroData, MatrixState, MorseHoldTriggerPositionState, MorseProfileState, PointingCapabilities, PointingConfig,
-    ProtocolVersion, RynkError, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboRequest,
-    SetEncoderRequest,
-    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
+    MacroData, MaintenanceMode, MatrixState, MorseHoldTriggerPositionState, MorseProfileState, PointingCapabilities,
+    PointingConfig, ProtocolVersion, RynkError, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboRequest,
+    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
     SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
     SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
 };
@@ -299,8 +298,9 @@ endpoints! {
     BootloaderJump = 0x0004: () => ();
     StorageReset = 0x0005: StorageResetMode => ();
 
-    // Lock gate. All three stay dispatchable while locked.
-    /// Pure read of the current lock state — no side effects.
+    // Legacy physical-lock protocol retained for host compatibility. These
+    // endpoints do not authorize maintenance commands.
+    /// Pure read of the legacy lock state — no side effects.
     GetLockStatus = 0x0006: () => LockStatus;
     /// Arms/refreshes the unlock attempt and samples the held challenge keys.
     UnlockPoll = 0x0007: () => LockStatus;
@@ -314,6 +314,8 @@ endpoints! {
     GetBuildInfo = 0x000B: () => BuildInfo;
     /// Ask the application to route a bootloader jump to one split peripheral.
     PeripheralBootloaderJump = 0x000C: u8 => ();
+    /// Read the live gate for host maintenance operations.
+    GetMaintenanceMode = 0x000D: () => MaintenanceMode;
 
     // Keymap (0x01xx) — includes encoder.
     GetKeyAction = 0x0101: KeyPosition => KeyAction;

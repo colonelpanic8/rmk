@@ -68,8 +68,8 @@ pub use split::ClearPeerEvent;
 #[cfg(feature = "split")]
 pub use split::{CentralConnectedEvent, PeripheralBatteryEvent, PeripheralConnectedEvent};
 pub use state::{
-    AutoMouseLayerConfigChangeEvent, LayerChangeEvent, LedIndicatorEvent, LightingChangedEvent, SleepStateEvent,
-    WpmUpdateEvent,
+    AutoMouseLayerConfigChangeEvent, LayerChangeEvent, LedIndicatorEvent, LightingChangedEvent, MaintenanceModeEvent,
+    SleepStateEvent, WpmUpdateEvent,
 };
 
 /// Trait for event publishers
