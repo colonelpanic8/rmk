@@ -49,20 +49,20 @@ impl Write for HalfDuplexUarte<'_> {
 }
 
 /// Monitor an active-high or active-low split-cable detect input.
-pub async fn run_wired_detect(input: Input<'_>, active_low: bool) {
-    let detected = || input.is_high() != active_low;
-    let mut current = detected();
+///
+/// Edge-driven: the task sleeps on a GPIO event and wakes only when the
+/// line moves, then debounces by acting on the level once it has settled.
+pub async fn run_wired_detect(mut input: Input<'_>, active_low: bool) {
+    let mut current = input.is_high() != active_low;
     crate::split::selector::update(current);
 
     loop {
+        input.wait_for_any_edge().await;
         Timer::after_millis(10).await;
-        let sample = detected();
-        if sample != current {
-            Timer::after_millis(10).await;
-            if detected() == sample {
-                current = sample;
-                crate::split::selector::update(current);
-            }
+        let settled = input.is_high() != active_low;
+        if settled != current {
+            current = settled;
+            crate::split::selector::update(current);
         }
     }
 }

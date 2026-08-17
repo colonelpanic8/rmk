@@ -1,6 +1,8 @@
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use embassy_time::Timer;
+use embassy_sync::watch::Watch;
+
+use crate::RawMutex;
 
 /// No force: follow the debounced cable-detect input.
 pub const FORCE_AUTO: u8 = 0;
@@ -13,20 +15,36 @@ static AUTO_ENABLED: AtomicBool = AtomicBool::new(false);
 static WIRED_SELECTED: AtomicBool = AtomicBool::new(false);
 static FORCED: AtomicU8 = AtomicU8::new(FORCE_AUTO);
 
+/// Broadcasts every effective-selection change so waiters suspend instead of
+/// polling. Sized for the transport tasks of both halves plus application
+/// observers; receivers free their slot on drop.
+static SELECTION_CHANGED: Watch<RawMutex, bool, 8> = Watch::new();
+
 pub fn initialize(wired: bool) {
     WIRED_SELECTED.store(wired, Ordering::Release);
     AUTO_ENABLED.store(true, Ordering::Release);
+    SELECTION_CHANGED.sender().send(wired);
 }
 
 pub fn update(wired: bool) {
+    let was = effective_wired();
     WIRED_SELECTED.store(wired, Ordering::Release);
+    let now = effective_wired();
+    if now != was {
+        SELECTION_CHANGED.sender().send(now);
+    }
 }
 
 /// Volatile transport force (one of the `FORCE_*` constants). It masks the
 /// detected cable state until the next force or reboot; the detect input
 /// keeps updating underneath and [`detected_wired`] keeps reporting it.
 pub fn set_forced(mode: u8) {
+    let was = effective_wired();
     FORCED.store(mode.min(FORCE_BLE), Ordering::Release);
+    let now = effective_wired();
+    if now != was {
+        SELECTION_CHANGED.sender().send(now);
+    }
 }
 
 pub fn forced_mode() -> u8 {
@@ -60,14 +78,20 @@ pub fn wireless_selected() -> bool {
 }
 
 pub async fn wait_wired_selected() {
+    let mut changed = SELECTION_CHANGED
+        .dyn_receiver()
+        .expect("selection watch sized for all concurrent waiters");
     while !AUTO_ENABLED.load(Ordering::Acquire) || !effective_wired() {
-        Timer::after_millis(5).await;
+        changed.changed().await;
     }
 }
 
 pub async fn wait_wireless_selected() {
+    let mut changed = SELECTION_CHANGED
+        .dyn_receiver()
+        .expect("selection watch sized for all concurrent waiters");
     while !wireless_selected() {
-        Timer::after_millis(5).await;
+        changed.changed().await;
     }
 }
 
