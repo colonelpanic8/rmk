@@ -24,7 +24,7 @@ use crate::connection::{ConnectionStatus, ConnectionType, UsbState};
 use crate::fork::{Fork, StateBits};
 use crate::keycode::{ConsumerKey, HidKeyCode, KeyCode, SpecialKey, SystemControlKey};
 use crate::led_indicator::LedIndicator;
-use crate::modifier::ModifierCombination;
+use crate::modifier::{ModifierCombination, ModifierKey};
 use crate::morse::{Morse, MorseMode, MorseProfile, TAP};
 use crate::mouse_button::MouseButtons;
 
@@ -401,6 +401,10 @@ fn wire_values_locked() {
             )),
         ),
         ("KeyAction::Morse(3)", encode(&KeyAction::Morse(3))),
+        (
+            "KeyAction::LayerModTap(1,LAlt,Tab)",
+            encode(&KeyAction::LayerModTap(1, ModifierKey::LAlt, HidKeyCode::Tab)),
+        ),
         // --- Action: every feature-independent variant tag (positional) ---
         ("Action::No", encode(&Action::No)),
         ("Action::Key(Hid(A))", encode(&Action::Key(KeyCode::Hid(HidKeyCode::A)))),
@@ -455,6 +459,14 @@ fn wire_values_locked() {
             "ModifierCombination(LCtrl|RGui)",
             encode(&(ModifierCombination::LCTRL | ModifierCombination::RGUI)),
         ),
+        ("ModifierKey::LAlt", encode(&ModifierKey::LAlt)),
+        ("ModifierKey::LCtrl", encode(&ModifierKey::LCtrl)),
+        ("ModifierKey::LGui", encode(&ModifierKey::LGui)),
+        ("ModifierKey::LShift", encode(&ModifierKey::LShift)),
+        ("ModifierKey::RAlt", encode(&ModifierKey::RAlt)),
+        ("ModifierKey::RCtrl", encode(&ModifierKey::RCtrl)),
+        ("ModifierKey::RGui", encode(&ModifierKey::RGui)),
+        ("ModifierKey::RShift", encode(&ModifierKey::RShift)),
         (
             "LedIndicator(Num|Scroll)",
             encode(&(LedIndicator::NUM_LOCK | LedIndicator::SCROLL_LOCK))
