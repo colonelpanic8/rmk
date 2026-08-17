@@ -182,6 +182,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
             output_mode: self.output_mode,
             powered: self.powered,
             wake_active: self.wake_active,
+            wake_layers: self.controls.wake_layers,
             output_brightness: self.output_brightness,
             background: self.background.state(),
             overlay_len: self.overlay.active_len(),
@@ -347,6 +348,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
             revision: self.revision,
             mutable: self.mutable_state(),
             output_mode: self.output_mode,
+            wake_layers: self.controls.wake_layers,
             overlay,
             scenes: self.scenes,
             runtime_conditional_scenes: self.runtime_conditional_scenes,
@@ -395,6 +397,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         self.overlay = overlay;
         self.set_mutable_state(replica.mutable);
         self.output_mode = replica.output_mode;
+        self.controls.wake_layers = replica.wake_layers;
         self.scenes = replica.scenes;
         self.runtime_conditional_scenes = replica.runtime_conditional_scenes;
         self.revision = replica.revision;
