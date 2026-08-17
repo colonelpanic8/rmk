@@ -1200,7 +1200,10 @@ pub(crate) struct CombosConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ComboConfig {
+    #[serde(default)]
     pub actions: Vec<String>,
+    #[serde(default)]
+    pub positions: Vec<[u8; 2]>,
     pub output: String,
     pub layer: Option<u8>,
 }
