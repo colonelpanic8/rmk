@@ -330,3 +330,20 @@ behavior.combo = {
 }
 steps = [{ tap = { pos = [0, 8], duration = 120 } }, { delay = 300 }]
 expect = [{ mouse = { wheel = -1 } }, { mouse = {} }]
+
+[[test]]
+name = "combo_layer_mod_tap_taps_once_and_holds"
+behavior.combo = {
+  timeout = "40ms",
+  combos = [{ actions = ["E", "R"], output = "LMT(1, LAlt, Tab)", layer = 0 }]
+}
+steps = [
+  { press = [1, 4] },
+  { press = [1, 5] },
+  { delay = 500 },
+  { tap = { pos = [0, 11], duration = 50 } },
+  { release = [1, 4] },
+  { delay = 100 },
+  { release = [1, 5] },
+]
+expect = [["LAlt"], ["LAlt", "Tab"], ["LAlt"], ["LAlt", "B"], ["LAlt"], []]
