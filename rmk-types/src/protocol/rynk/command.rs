@@ -17,9 +17,10 @@ use super::{
     BehaviorConfig, BuildInfo, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
     GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest,
     GetMorseBulkResponse, KeyPosition, LayerState, LayoutChunk, LockStatus, MacroData, MatrixState,
-    MorseHoldTriggerPositionState, ProtocolVersion, RynkError, SetComboBulkRequest, SetComboRequest, SetEncoderRequest,
+    MorseHoldTriggerPositionState, PointingConfig, ProtocolVersion, RynkError, SetComboBulkRequest, SetComboRequest,
+    SetEncoderRequest,
     SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
-    SetMorseHoldTriggerPositionsRequest, SetMorseRequest, StorageResetMode,
+    SetMorseHoldTriggerPositionsRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -537,6 +538,12 @@ endpoints! {
     /// fresh peripheral report is required.
     #[cfg(feature = "lighting")]
     GetLightingReplicaStatus = 0x0937: () => LightingReplicaStatusResult;
+
+    // Pointing (0x0Axx). 0x09xx is left to lighting.
+    /// Every pad's behavior in one read, including its layer overrides.
+    GetPointingConfig = 0x0A01: () => PointingConfig;
+    /// Replace the whole arrangement, if `revision` still matches.
+    SetPointingConfig = 0x0A02: SetPointingConfigRequest => PointingConfig;
 }
 
 // Define topics: `Name = value: Payload;`

@@ -40,14 +40,14 @@ use rmk_types::protocol::rynk::{
     LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
     LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZone, LightingZoneId,
     LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState, MorseHoldTriggerPositionState,
-    PeripheralStatus, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    PeripheralStatus, PointingConfig, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
     PutLightingOverlayChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
     SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
     SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
     SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
     SetLightingSceneCellRequest, SetLightingStateRequest, SetMacroRequest, SetMorseBulkRequest,
-    SetMorseHoldTriggerPositionsRequest, SetMorseRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState,
-    StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
+    SetMorseHoldTriggerPositionsRequest, SetMorseRequest, SetPointingConfigRequest, SplitCentralLatencyPolicy,
+    SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -382,6 +382,19 @@ impl Client {
     /// Write the global behavior config.
     pub async fn set_behavior(&self, config: BehaviorConfig) -> Result<(), RynkHostError> {
         self.request::<command::SetBehaviorConfig>(&config).await
+    }
+
+    /// Read every pointing device's configuration, layer overrides included.
+    pub async fn get_pointing_config(&self) -> Result<PointingConfig, RynkHostError> {
+        self.request::<command::GetPointingConfig>(&()).await
+    }
+
+    /// Replace the pointing configuration and return what the device now
+    /// holds. The write is rejected unless `config.revision` still matches
+    /// the device's, so read before writing and retry on rejection.
+    pub async fn set_pointing_config(&self, config: PointingConfig) -> Result<PointingConfig, RynkHostError> {
+        self.request::<command::SetPointingConfig>(&SetPointingConfigRequest { config })
+            .await
     }
 
     /// Read the currently active layer.
