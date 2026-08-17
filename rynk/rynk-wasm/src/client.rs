@@ -46,9 +46,9 @@ use rynk::rmk_types::protocol::rynk::{
     SetComboBulkRequest, SetComboDefinitionBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
-    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
-    UnsetLightingSceneCellRequest,
+    SetLightingWakeLayersRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest,
+    SetMorseProfileEntryRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
+    UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -248,6 +248,7 @@ endpoints! {
     get_lighting_state() -> LightingState,
     get_lighting_output_mode() -> LightingOutputModeState,
     set_lighting_output_mode(request: SetLightingOutputModeRequest) -> LightingOutputModeState,
+    set_lighting_wake_layers(request: SetLightingWakeLayersRequest) -> LightingOutputModeState,
     set_lighting_state(request: SetLightingStateRequest) -> LightingState,
     get_lighting_keys(request: LightingPageRequest) -> LightingKeysPage,
     get_lighting_physical_keys(request: LightingPageRequest) -> LightingPhysicalKeysPage,
