@@ -541,16 +541,12 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use embassy_futures::join::join;
     use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
     use rmk_types::action::KeyAction;
-    use rmk_types::protocol::rynk::{
-        LockStatus, MatrixState, ProtocolVersion, RYNK_HEADER_SIZE, RynkHeader, encode_frame,
-    };
+    use rmk_types::protocol::rynk::{ProtocolVersion, RYNK_HEADER_SIZE, RynkHeader, encode_frame};
 
     use super::*;
-    use crate::config::{BehaviorConfig, LockConfig, PositionalConfig, RmkConfig};
-    use crate::event::KeyboardEvent;
+    use crate::config::{BehaviorConfig, PositionalConfig, RmkConfig};
     use crate::keymap::{KeyMap, KeymapData};
     use crate::test_support::test_block_on as block_on;
 
@@ -636,146 +632,6 @@ mod tests {
             ));
         }
         out
-    }
-
-    /// A second session over the same service starts locked again. The gate
-    /// itself lives in `tests/scenarios/rynk_lock.toml`, which holds the
-    /// challenge with real matrix input; only the session boundary needs a
-    /// second `run_session`, which one timeline cannot express.
-    #[cfg(any())]
-    #[test]
-    fn a_new_session_starts_locked_again() {
-        let mut behavior = BehaviorConfig::default();
-        let positional: PositionalConfig<2, 2> = PositionalConfig::default();
-        let mut data: KeymapData<2, 2, 1, 0> =
-            KeymapData::new([[[KeyAction::No, KeyAction::No], [KeyAction::No, KeyAction::No]]]);
-        let keymap = block_on(KeyMap::new(&mut data, &mut behavior, &positional));
-
-        const UNLOCK_KEYS: &[(u8, u8)] = &[(0, 0)];
-        let mut config = RmkConfig {
-            lock_config: LockConfig {
-                unlock_keys: UNLOCK_KEYS,
-                insecure: false,
-                write_requires_unlock: false,
-                bootloader_requires_unlock: true,
-            },
-            ..Default::default()
-        };
-        let service = RynkService::new(&keymap, &config);
-        assert!(service.requires_unlock(Cmd::BootloaderJump));
-        assert!(service.requires_unlock(Cmd::PeripheralBootloaderJump));
-
-        config.lock_config.bootloader_requires_unlock = false;
-        let deployment_service = RynkService::new(&keymap, &config);
-        assert!(!deployment_service.requires_unlock(Cmd::BootloaderJump));
-        assert!(!deployment_service.requires_unlock(Cmd::PeripheralBootloaderJump));
-        assert!(deployment_service.requires_unlock(Cmd::StorageReset));
-        assert!(deployment_service.requires_unlock(Cmd::GetMatrixState));
-
-        // Hold the challenge key throughout, so only the session boundary can
-        // account for the second session being locked.
-        keymap.update_matrix_state(&KeyboardEvent::key(0, 0, true));
-
-        let mut chunks = VecDeque::new();
-        chunks.push_back(req(Cmd::UnlockPoll.raw(), 0));
-        chunks.push_back(req(Cmd::GetMatrixState.raw(), 1));
-        let mut rx = ChunkRead { chunks };
-        let mut tx = VecWrite { captured: Vec::new() };
-        block_on(service.run_session(&mut rx, &mut tx));
-
-        let resp = decode_frames(&tx.captured);
-        assert!(
-            postcard::from_bytes::<Result<MatrixState, RynkError>>(&resp[1].2)
-                .unwrap()
-                .is_ok(),
-            "gated command served once unlocked"
-        );
-
-        let mut chunks2 = VecDeque::new();
-        chunks2.push_back(req(Cmd::GetMatrixState.raw(), 0));
-        let mut rx2 = ChunkRead { chunks: chunks2 };
-        let mut tx2 = VecWrite { captured: Vec::new() };
-        block_on(service.run_session(&mut rx2, &mut tx2));
-
-        let resp2 = decode_frames(&tx2.captured);
-        assert_eq!(resp2.len(), 1);
-        assert_eq!(
-            postcard::from_bytes::<Result<MatrixState, RynkError>>(&resp2[0].2).unwrap(),
-            Err(RynkError::Locked),
-            "a fresh session has independent locked state"
-        );
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn sessions_authorize_independently() {
-        let mut behavior = BehaviorConfig::default();
-        let positional: PositionalConfig<2, 2> = PositionalConfig::default();
-        let mut data: KeymapData<2, 2, 1, 0> =
-            KeymapData::new([[[KeyAction::No, KeyAction::No], [KeyAction::No, KeyAction::No]]]);
-        let keymap = block_on(KeyMap::new(&mut data, &mut behavior, &positional));
-
-        const UNLOCK_KEYS: &[(u8, u8)] = &[(0, 0)];
-        let mut config = RmkConfig::default();
-        config.lock_config.unlock_keys = UNLOCK_KEYS;
-        let service = RynkService::new(&keymap, &config);
-        keymap.update_matrix_state(&KeyboardEvent::key(0, 0, true));
-
-        let mut chunks_a = VecDeque::new();
-        chunks_a.push_back(req(Cmd::UnlockPoll.raw(), 0x11));
-        chunks_a.push_back(req(Cmd::GetLockStatus.raw(), 0x12));
-        chunks_a.push_back(req(Cmd::Lock.raw(), 0x13));
-        chunks_a.push_back(req(Cmd::GetMatrixState.raw(), 0x14));
-        let mut rx_a = ChunkRead { chunks: chunks_a };
-        let mut tx_a = VecWrite { captured: Vec::new() };
-
-        let mut chunks_b = VecDeque::new();
-        chunks_b.push_back(req(Cmd::GetLockStatus.raw(), 0x21));
-        chunks_b.push_back(req(Cmd::UnlockPoll.raw(), 0x22));
-        chunks_b.push_back(req(Cmd::GetMatrixState.raw(), 0x23));
-        let mut rx_b = ChunkRead { chunks: chunks_b };
-        let mut tx_b = VecWrite { captured: Vec::new() };
-
-        block_on(join(
-            service.run_session(&mut rx_a, &mut tx_a),
-            service.run_session(&mut rx_b, &mut tx_b),
-        ));
-
-        let responses_a = decode_frames(&tx_a.captured);
-        assert_eq!(responses_a.len(), 4);
-        let unlocked_a = postcard::from_bytes::<Result<LockStatus, RynkError>>(&responses_a[0].2)
-            .unwrap()
-            .unwrap();
-        assert!(!unlocked_a.locked);
-        let status_a = postcard::from_bytes::<Result<LockStatus, RynkError>>(&responses_a[1].2)
-            .unwrap()
-            .unwrap();
-        assert!(!status_a.locked);
-        assert_eq!(
-            postcard::from_bytes::<Result<(), RynkError>>(&responses_a[2].2).unwrap(),
-            Ok(())
-        );
-        assert_eq!(
-            postcard::from_bytes::<Result<MatrixState, RynkError>>(&responses_a[3].2).unwrap(),
-            Err(RynkError::Locked),
-        );
-
-        let responses_b = decode_frames(&tx_b.captured);
-        assert_eq!(responses_b.len(), 3);
-        let locked_b = postcard::from_bytes::<Result<LockStatus, RynkError>>(&responses_b[0].2)
-            .unwrap()
-            .unwrap();
-        assert!(locked_b.locked, "session A does not unlock session B");
-        let unlocked_b = postcard::from_bytes::<Result<LockStatus, RynkError>>(&responses_b[1].2)
-            .unwrap()
-            .unwrap();
-        assert!(!unlocked_b.locked);
-        assert!(
-            postcard::from_bytes::<Result<MatrixState, RynkError>>(&responses_b[2].2)
-                .unwrap()
-                .is_ok(),
-            "locking session A does not relock session B"
-        );
     }
 
     /// A read carrying more than one frame serves them all, in order: the
