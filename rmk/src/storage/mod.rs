@@ -1903,7 +1903,10 @@ mod tests {
 
             storage.read_boot_data(&mut keymap, &mut behavior).await.unwrap();
 
-            assert_eq!(behavior.combo.combos[0].as_ref().unwrap().config, combo);
+            assert_eq!(
+                behavior.combo.combos[0].as_ref().unwrap().definition,
+                rmk_types::combo::ComboDefinition::Actions(combo)
+            );
             assert_eq!(behavior.fork.forks[0], fork);
             assert_eq!(behavior.morse.morses[0], morse);
         });
