@@ -26,6 +26,16 @@ pub(crate) fn current_battery_status() -> BatteryStatus {
     BATTERY_STATUS.lock(|c| c.get())
 }
 
+/// Apply a charge-state transition without discarding the last measured level.
+#[cfg(feature = "_ble")]
+pub(crate) const fn with_charge_state(status: BatteryStatus, charge_state: ChargeState) -> BatteryStatus {
+    let level = match status {
+        BatteryStatus::Available { level, .. } => level,
+        BatteryStatus::Unavailable => None,
+    };
+    BatteryStatus::Available { charge_state, level }
+}
+
 /// Reads charging state from a GPIO pin and publishes ChargingStateEvent.
 ///
 /// This input device monitors a charging state pin and publishes events when
@@ -198,25 +208,39 @@ impl BatteryProcessor {
 
         #[cfg(feature = "_ble")]
         {
-            let status = if charging {
-                // Keep current level when charging
-                let level = match self.battery_status {
-                    BatteryStatus::Available { level, .. } => level,
-                    BatteryStatus::Unavailable => None,
-                };
-                BatteryStatus::Available {
-                    charge_state: ChargeState::Charging,
-                    level,
-                }
-            } else {
-                // When unplugged, mark the level unknown and mark status as discharging
-                BatteryStatus::Available {
-                    charge_state: ChargeState::Discharging,
-                    level: None,
-                }
-            };
-
-            self.commit(status);
+            self.commit(with_charge_state(self.battery_status, charging.into()));
         }
+    }
+}
+
+#[cfg(all(test, feature = "_ble"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn charge_transitions_preserve_the_last_measured_level() {
+        let measured = BatteryStatus::Available {
+            charge_state: ChargeState::Charging,
+            level: Some(73),
+        };
+
+        assert_eq!(
+            with_charge_state(measured, ChargeState::Discharging),
+            BatteryStatus::Available {
+                charge_state: ChargeState::Discharging,
+                level: Some(73),
+            }
+        );
+    }
+
+    #[test]
+    fn charge_state_before_the_first_measurement_keeps_the_level_unknown() {
+        assert_eq!(
+            with_charge_state(BatteryStatus::Unavailable, ChargeState::Charging),
+            BatteryStatus::Available {
+                charge_state: ChargeState::Charging,
+                level: None,
+            }
+        );
     }
 }
