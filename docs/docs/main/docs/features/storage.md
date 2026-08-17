@@ -41,6 +41,6 @@ Ensure you allocate sufficient storage space for your keymap and bonding informa
 
 ## Storage Is Cleared on Firmware Updates
 
-Every firmware build embeds a unique build hash (computed in `rmk`'s build script from the git commit and build time). The hash is written to storage when storage is first initialized, and checked on every boot: if the stored hash doesn't match the running firmware's hash, RMK erases the storage and re-initializes it from the firmware's defaults.
+Every firmware build embeds a unique build hash (computed in `rmk`'s build script from the git commit and build time). Reproducible build systems can instead set `RMK_BUILD_HASH_SEED`; identical non-empty seed values produce identical hashes. The hash is written to storage when storage is first initialized, and checked on every boot: if the stored hash doesn't match the running firmware's hash, RMK erases the storage and re-initializes it from the firmware's defaults.
 
 This guard keeps storage consistent with the firmware — stored keymaps and configs always match the layout compiled into the running build. The consequence: **flashing new firmware clears all stored data**, including keymap edits made via Vial/Rynk and BLE bonding information, so you'll need to re-pair BLE hosts after a firmware update.
