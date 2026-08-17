@@ -118,6 +118,7 @@ impl<'a> RynkService<'a> {
 
             Cmd::GetPointingConfig => serve::<command::GetPointingConfig, _>(self, msg).await,
             Cmd::SetPointingConfig => serve::<command::SetPointingConfig, _>(self, msg).await,
+            Cmd::GetPointingCapabilities => serve::<command::GetPointingCapabilities, _>(self, msg).await,
 
             Cmd::GetConnectionType => serve::<command::GetConnectionType, _>(self, msg).await,
             Cmd::GetConnectionStatus => serve::<command::GetConnectionStatus, _>(self, msg).await,

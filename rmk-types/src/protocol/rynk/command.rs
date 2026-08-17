@@ -16,9 +16,10 @@ use super::message::{RynkHeader, encode_frame};
 use super::{
     BehaviorConfig, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    KeyPosition, LayoutChunk, LockStatus, MacroData, MatrixState, PointingConfig, ProtocolVersion, RynkError,
-    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
-    SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
+    KeyPosition, LayoutChunk, LockStatus, MacroData, MatrixState, PointingCapabilities, PointingConfig,
+    ProtocolVersion, RynkError, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest,
+    SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, SetPointingConfigRequest,
+    StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -345,6 +346,8 @@ endpoints! {
     GetPointingConfig = 0x0A01: () => PointingConfig;
     /// Replace the whole arrangement, if `revision` still matches.
     SetPointingConfig = 0x0A02: SetPointingConfigRequest => PointingConfig;
+    /// Optional pointing modes supported by this firmware.
+    GetPointingCapabilities = 0x0A03: () => PointingCapabilities;
 }
 
 // Define topics: `Name = value: Payload;`

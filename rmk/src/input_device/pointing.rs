@@ -7,9 +7,9 @@ use futures::future::pending;
 use rmk_macro::{input_device, processor};
 use rmk_types::keycode::HidKeyCode;
 pub use rmk_types::pointing::{
-    CaretConfig, CursorConfig, DragConfig, PointingMode, PressConfig, ScrollConfig, SniperConfig,
+    CaretConfig, CursorConfig, DragConfig, KeypadConfig, PointingMode, PressConfig, ScrollConfig, SniperConfig,
 };
-use usbd_hid::descriptor::MouseReport;
+use usbd_hid::descriptor::{MediaKeyboardReport, MouseReport, SystemControlReport};
 
 use crate::channel::send_hid_report;
 use crate::event::{Axis, AxisEvent, AxisValType, PointingEvent, PointingProcessorEvent, PointingSetCpiEvent};
@@ -540,6 +540,16 @@ impl<'a> PointingProcessor<'a> {
                     }
                 }
             }
+            PointingMode::Keypad(keypad_config) => {
+                if let Some(keycode) = keypad_tap_key(previous_device_buttons, event.buttons, &keypad_config) {
+                    tap_key(keycode).await;
+                }
+                if let Some((keycode, count)) = compute_keypad_taps(x, y, &mut self.accumulator, &keypad_config) {
+                    for _ in 0..count {
+                        tap_key(keycode).await;
+                    }
+                }
+            }
         };
     }
 
@@ -598,29 +608,43 @@ fn drag_latch_after(latched: bool, previous: u8, current: u8, toggled_by: u8) ->
     }
 }
 
-/// Tap a key (press and release with a short delay) - used for caret mode
+/// Keypad mode treats the primary device button as a tap gesture and emits
+/// only on its rising edge.
+fn keypad_tap_key(previous: u8, current: u8, cfg: &KeypadConfig) -> Option<HidKeyCode> {
+    const PRIMARY_BUTTON: u8 = 1;
+    let pressed_now = current & PRIMARY_BUTTON != 0;
+    let pressed_before = previous & PRIMARY_BUTTON != 0;
+    (pressed_now && !pressed_before && cfg.keycode_tap != HidKeyCode::No).then_some(cfg.keycode_tap)
+}
+
+/// Tap a key (press and release with a short delay) - used for caret and keypad modes
 /// NOTE: This is a basic implementation because at the current state Keyboard (in keyboard.rs) does not support
 /// sending in KeyActions from the processor layer. If that changes in the future, this can be updated to use KeyActions and support more complex behavior (e.g. modifiers, macros).
 /// For the time being, this sends only simple key taps without modifiers.
 async fn tap_key(keycode: HidKeyCode) {
-    // Press
-    send_hid_report(Report::KeyboardReport(KeyboardReport {
-        modifier: 0,
-        reserved: 0,
-        leds: 0,
-        keycodes: [keycode as u8, 0, 0, 0, 0, 0],
-    }))
-    .await;
+    send_hid_report(report_for_keycode(keycode, true)).await;
     Timer::after_millis(5).await;
-    // Release
-    send_hid_report(Report::KeyboardReport(KeyboardReport {
-        modifier: 0,
-        reserved: 0,
-        leds: 0,
-        keycodes: [0, 0, 0, 0, 0, 0],
-    }))
-    .await;
+    send_hid_report(report_for_keycode(keycode, false)).await;
     Timer::after_millis(5).await;
+}
+
+fn report_for_keycode(keycode: HidKeyCode, pressed: bool) -> Report {
+    if let Some(consumer) = keycode.process_as_consumer() {
+        Report::MediaKeyboardReport(MediaKeyboardReport {
+            usage_id: if pressed { consumer.into() } else { 0 },
+        })
+    } else if let Some(system) = keycode.process_as_system_control() {
+        Report::SystemControlReport(SystemControlReport {
+            usage_id: if pressed { system as u8 } else { 0 },
+        })
+    } else {
+        Report::KeyboardReport(KeyboardReport {
+            modifier: 0,
+            reserved: 0,
+            leds: 0,
+            keycodes: [if pressed { keycode as u8 } else { 0 }, 0, 0, 0, 0, 0],
+        })
+    }
 }
 
 /// Pure function: given a (x, y) motion delta, decide whether caret mode
@@ -695,6 +719,76 @@ fn compute_caret_taps(
     }
 
     if count == 0 { None } else { Some((keycode, count)) }
+}
+
+/// Map independently-thresholded motion to one keypad direction.
+///
+/// If both axes have crossed their thresholds, the axis furthest past its
+/// threshold proportionally wins. The non-dominant total is discarded so a
+/// diagonal gesture cannot leak into a later action.
+fn compute_keypad_taps(
+    x: i16,
+    y: i16,
+    accumulator: &mut MotionAccumulator,
+    cfg: &KeypadConfig,
+) -> Option<(HidKeyCode, u8)> {
+    let divisor_x = if cfg.disable_x { 0 } else { 1 };
+    let divisor_y = if cfg.disable_y { 0 } else { 1 };
+    let (dx, dy) = accumulator.accumulate_persistent(x, y, (1, divisor_x), (1, divisor_y));
+    let threshold_x = i32::from(cfg.threshold_x.max(1));
+    let threshold_y = i32::from(cfg.threshold_y.max(1));
+    let distance_x = i32::from(dx).abs();
+    let distance_y = i32::from(dy).abs();
+    let x_ready = distance_x > threshold_x;
+    let y_ready = distance_y > threshold_y;
+
+    #[derive(Clone, Copy)]
+    enum AxisChoice {
+        X,
+        Y,
+    }
+
+    let axis = match (x_ready, y_ready) {
+        (false, false) => return None,
+        (true, false) => AxisChoice::X,
+        (false, true) => AxisChoice::Y,
+        (true, true) if distance_x * threshold_y >= distance_y * threshold_x => AxisChoice::X,
+        (true, true) => AxisChoice::Y,
+    };
+
+    let (distance, threshold, keycode) = match axis {
+        AxisChoice::X => {
+            let keycode = match (dx > 0, cfg.invert_x) {
+                (true, false) | (false, true) => cfg.keycode_right,
+                (true, true) | (false, false) => cfg.keycode_left,
+            };
+            (distance_x, threshold_x, keycode)
+        }
+        AxisChoice::Y => {
+            let keycode = match (dy > 0, cfg.invert_y) {
+                (true, false) | (false, true) => cfg.keycode_down,
+                (true, true) | (false, false) => cfg.keycode_up,
+            };
+            (distance_y, threshold_y, keycode)
+        }
+    };
+
+    let count = ((distance - 1) / threshold).min(i32::from(u8::MAX)) as u8;
+    let consumed = i32::from(count) * threshold;
+    match axis {
+        AxisChoice::X => {
+            let reduction = (if dx > 0 { -consumed } else { consumed }) as i16;
+            accumulator.accumulate_persistent(reduction, 0, (1, divisor_x), (1, divisor_y));
+            accumulator.reset_y();
+        }
+        AxisChoice::Y => {
+            let reduction = (if dy > 0 { -consumed } else { consumed }) as i16;
+            accumulator.accumulate_persistent(0, reduction, (1, divisor_x), (1, divisor_y));
+            accumulator.reset_x();
+        }
+    }
+
+    Some((keycode, count))
 }
 
 #[cfg(test)]
@@ -1365,6 +1459,143 @@ mod tests {
         assert_eq!(result, Some((HidKeyCode::Right, 2)));
         assert_eq!(a.remainder_x, 50);
         assert_eq!(a.remainder_y, 0);
+    }
+
+    // === compute_keypad_taps tests ===
+
+    fn keypad_cfg() -> KeypadConfig {
+        KeypadConfig {
+            threshold_x: 120,
+            threshold_y: 30,
+            keycode_up: HidKeyCode::KbVolumeUp,
+            keycode_down: HidKeyCode::KbVolumeDown,
+            keycode_left: HidKeyCode::MediaPrevTrack,
+            keycode_right: HidKeyCode::MediaNextTrack,
+            keycode_tap: HidKeyCode::MediaPlayPause,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_compute_keypad_taps_uses_independent_thresholds() {
+        let mut a = acc();
+        assert!(compute_keypad_taps(100, 0, &mut a, &keypad_cfg()).is_none());
+        assert_eq!(
+            compute_keypad_taps(0, 31, &mut a, &keypad_cfg()),
+            Some((HidKeyCode::KbVolumeDown, 1))
+        );
+        assert_eq!(a.remainder_x, 0);
+        assert_eq!(a.remainder_y, 1);
+
+        assert_eq!(
+            compute_keypad_taps(121, 0, &mut a, &keypad_cfg()),
+            Some((HidKeyCode::MediaNextTrack, 1))
+        );
+    }
+
+    #[test]
+    fn test_compute_keypad_taps_normalizes_diagonal_motion() {
+        let mut a = acc();
+        // X is larger in raw units, but Y is twice its threshold while X is
+        // only 1.67 times its threshold, so Y wins.
+        assert_eq!(
+            compute_keypad_taps(200, 60, &mut a, &keypad_cfg()),
+            Some((HidKeyCode::KbVolumeDown, 1))
+        );
+        assert_eq!(a.remainder_x, 0);
+        assert_eq!(a.remainder_y, 30);
+    }
+
+    #[test]
+    fn test_compute_keypad_taps_repeats_and_keeps_remainder() {
+        let mut a = acc();
+        assert_eq!(
+            compute_keypad_taps(361, 0, &mut a, &keypad_cfg()),
+            Some((HidKeyCode::MediaNextTrack, 3))
+        );
+        assert_eq!(a.remainder_x, 1);
+    }
+
+    #[test]
+    fn test_compute_keypad_taps_disables_an_axis() {
+        let mut a = acc();
+        let mut cfg = keypad_cfg();
+        cfg.disable_x = true;
+        assert!(compute_keypad_taps(1_000, 0, &mut a, &cfg).is_none());
+        assert_eq!(a.remainder_x, 0);
+    }
+
+    #[test]
+    fn test_compute_keypad_taps_inverts_directions() {
+        let mut a = acc();
+        let mut cfg = keypad_cfg();
+        cfg.invert_x = true;
+        assert_eq!(
+            compute_keypad_taps(121, 0, &mut a, &cfg),
+            Some((HidKeyCode::MediaPrevTrack, 1))
+        );
+    }
+
+    #[test]
+    fn test_compute_keypad_taps_reverses_direction() {
+        let mut a = acc();
+        assert_eq!(
+            compute_keypad_taps(121, 0, &mut a, &keypad_cfg()),
+            Some((HidKeyCode::MediaNextTrack, 1))
+        );
+        assert_eq!(
+            compute_keypad_taps(-122, 0, &mut a, &keypad_cfg()),
+            Some((HidKeyCode::MediaPrevTrack, 1))
+        );
+    }
+
+    #[test]
+    fn test_compute_keypad_taps_clamps_invalid_wire_threshold() {
+        let mut a = acc();
+        let mut cfg = keypad_cfg();
+        cfg.threshold_x = 0;
+        assert_eq!(
+            compute_keypad_taps(2, 0, &mut a, &cfg),
+            Some((HidKeyCode::MediaNextTrack, 1))
+        );
+    }
+
+    #[test]
+    fn test_keypad_tap_fires_once_on_primary_rising_edge() {
+        let cfg = keypad_cfg();
+        assert_eq!(keypad_tap_key(0, 1, &cfg), Some(HidKeyCode::MediaPlayPause));
+        assert_eq!(keypad_tap_key(1, 1, &cfg), None);
+        assert_eq!(keypad_tap_key(1, 0, &cfg), None);
+
+        let mut disabled = cfg;
+        disabled.keycode_tap = HidKeyCode::No;
+        assert_eq!(keypad_tap_key(0, 1, &disabled), None);
+    }
+
+    #[test]
+    fn test_keypad_media_keycodes_use_consumer_reports() {
+        match report_for_keycode(HidKeyCode::MediaNextTrack, true) {
+            Report::MediaKeyboardReport(report) => {
+                let usage_id = report.usage_id;
+                assert_eq!(usage_id, rmk_types::keycode::ConsumerKey::NextTrack.into());
+            }
+            _ => panic!("media key did not produce a consumer report"),
+        }
+        match report_for_keycode(HidKeyCode::MediaNextTrack, false) {
+            Report::MediaKeyboardReport(report) => {
+                let usage_id = report.usage_id;
+                assert_eq!(usage_id, 0);
+            }
+            _ => panic!("media release did not produce a consumer report"),
+        }
+    }
+
+    #[test]
+    fn test_keypad_keyboard_page_volume_stays_a_keyboard_report() {
+        match report_for_keycode(HidKeyCode::KbVolumeUp, true) {
+            Report::KeyboardReport(report) => assert_eq!(report.keycodes[0], HidKeyCode::KbVolumeUp as u8),
+            _ => panic!("keyboard-page volume did not produce a keyboard report"),
+        }
     }
 
     // === PointingMode tests ===
