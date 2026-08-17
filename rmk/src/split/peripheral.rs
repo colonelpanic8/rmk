@@ -123,6 +123,25 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                         SplitMessage::ConnectionStatus(status) => {
                             trace!("Received central connection status: {:?}", status);
                             update_status(|c| *c = status);
+                            // Replay the cached status onto this session.
+                            // `battery_sub` only sees levels published after
+                            // it subscribed, but the first reading lands
+                            // milliseconds into boot and the next one waits
+                            // for the level to move -- which never happens
+                            // on a battery resting at the 100% clamp. The
+                            // central sends this message right after
+                            // subscribing, so it is the earliest deliverable
+                            // moment.
+                            #[cfg(feature = "_ble")]
+                            {
+                                let battery = crate::input_device::battery::current_battery_status();
+                                if battery != BatteryStatus::Unavailable {
+                                    self.split_driver
+                                        .write(&SplitMessage::BatteryStatus(battery.into()))
+                                        .await
+                                        .ok();
+                                }
+                            }
                         }
                         #[cfg(all(feature = "_ble", feature = "storage"))]
                         SplitMessage::ClearPeer => {
