@@ -20,13 +20,13 @@ use super::{
     DeviceDataRecord, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetComboDefinitionBulkResponse,
     GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest,
     GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, GetMorseProfileStateRequest,
-    KeyPosition, LayerState, LayoutChunk, LockStatus, MacroData, MaintenanceMode, MatrixState,
+    KeyPosition, LayerMetadata, LayerState, LayoutChunk, LockStatus, MacroData, MaintenanceMode, MatrixState,
     MorseHoldTriggerPositionState, MorseProfileState, PointingCapabilities, PointingConfig, ProtocolVersion,
     RynkError,
     SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboDefinitionBulkRequest, SetComboDefinitionRequest,
-    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
-    SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
+    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLayerMetadataRequest,
+    SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest,
+    SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -335,6 +335,10 @@ endpoints! {
     SetEncoderAction = 0x0106: SetEncoderRequest => ();
     GetKeymapBulk = 0x0107: GetKeymapBulkRequest => GetKeymapBulkResponse;
     SetKeymapBulk = 0x0108: SetKeymapBulkRequest => ();
+    /// Read one fixed layer slot's persistent name and logical occupancy.
+    GetLayerMetadata = 0x0109: u8 => LayerMetadata;
+    /// Rename, occupy, or vacate one fixed layer slot.
+    SetLayerMetadata = 0x010A: SetLayerMetadataRequest => ();
 
     // Macro (0x02xx).
     GetMacro = 0x0201: GetMacroRequest => MacroData;
