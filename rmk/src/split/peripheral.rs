@@ -185,8 +185,12 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                 publish_event(LedIndicatorEvent::new(indicator));
             }
             SplitMessage::Layer(layer) => {
-                // Publish Layer event
+                super::update_legacy_effective_layer(layer);
                 publish_event(LayerChangeEvent::new(layer));
+            }
+            SplitMessage::LayerState(state) => {
+                super::update_layer_state(state);
+                publish_event(LayerChangeEvent::new(state.effective));
             }
             #[cfg(feature = "display")]
             SplitMessage::Wpm(wpm) => publish_event(WpmUpdateEvent::new(wpm)),
