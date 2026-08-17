@@ -27,7 +27,8 @@ use rmk_types::protocol::rynk::{
     BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig,
     BehaviorOptions, BleName, BuildInfo, ClearLightingOverlayRequest, Cmd, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
-    DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetComboDefinitionBulkResponse, GetEncoderRequest,
+    DeviceDataDescriptor, DeviceDataRecord, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
+    GetComboDefinitionBulkResponse, GetEncoderRequest,
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
     GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerState,
     LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
@@ -110,6 +111,16 @@ impl Client {
     /// Read the firmware's protocol version.
     pub async fn get_version(&self) -> Result<ProtocolVersion, RynkHostError> {
         self.request::<command::GetVersion>(&()).await
+    }
+
+    /// Describe the board-defined, machine-readable device-data namespace.
+    pub async fn get_device_data_descriptor(&self) -> Result<DeviceDataDescriptor, RynkHostError> {
+        self.request::<command::GetDeviceDataDescriptor>(&()).await
+    }
+
+    /// Read one typed record from the board-defined device-data namespace.
+    pub async fn get_device_data_record(&self, index: u8) -> Result<DeviceDataRecord, RynkHostError> {
+        self.request::<command::GetDeviceDataRecord>(&index).await
     }
 
     /// Return the capability set saved during the connect handshake.

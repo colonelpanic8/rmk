@@ -207,6 +207,8 @@ struct Exemplars {
     capabilities: DeviceCapabilities,
     device_info: DeviceInfo,
     build_info: BuildInfo,
+    device_data_descriptor: DeviceDataDescriptor,
+    device_data_record: DeviceDataRecord,
     behavior: BehaviorConfig,
     behavior_options: BehaviorOptions,
     auto_mouse: AutoMouseLayerConfigState,
@@ -306,6 +308,16 @@ fn exemplars() -> Exemplars {
     let build_info = BuildInfo {
         label: heapless::String::try_from("my-firmware v4.5.6 / RMK v1.2.3").unwrap(),
     };
+    let device_data_descriptor = DeviceDataDescriptor {
+        namespace: heapless::String::try_from("com.example.keyboard").unwrap(),
+        schema_version: 1,
+        record_count: 2,
+    };
+    let device_data_record = DeviceDataRecord {
+        key: heapless::String::try_from("split.activeTransport").unwrap(),
+        volatility: DeviceDataVolatility::Live,
+        value: DeviceDataValue::Text(heapless::String::try_from("wired").unwrap()),
+    };
     let behavior = BehaviorConfig {
         combo_timeout_ms: 50,
         oneshot_timeout_ms: 500,
@@ -404,6 +416,8 @@ fn exemplars() -> Exemplars {
         capabilities,
         device_info,
         build_info,
+        device_data_descriptor,
+        device_data_record,
         behavior,
         behavior_options,
         auto_mouse,
@@ -625,6 +639,17 @@ fn wire_values_locked() {
         ("DeviceCapabilities{1..16}", encode(&ex.capabilities)),
         ("DeviceInfo{1.2.3,4,5,RMK,..}", encode(&ex.device_info)),
         ("BuildInfo{my-firmware..}", encode(&ex.build_info)),
+        (
+            "DeviceDataDescriptor{com.example.keyboard,1,2}",
+            encode(&ex.device_data_descriptor),
+        ),
+        (
+            "DeviceDataRecord{split.activeTransport,Live,Text(wired)}",
+            encode(&ex.device_data_record),
+        ),
+        ("DeviceDataValue::Bool(true)", encode(&DeviceDataValue::Bool(true))),
+        ("DeviceDataValue::Unsigned(42)", encode(&DeviceDataValue::Unsigned(42)),),
+        ("DeviceDataValue::Signed(-42)", encode(&DeviceDataValue::Signed(-42)),),
         ("BehaviorConfig{50,500,200,20}", encode(&ex.behavior)),
         ("SplitLatencyPolicy{0,4,Some(2)}", encode(&split_latency_policy),),
         ("SplitLatencyState{policy,true,2}", encode(&split_latency_state),),
@@ -927,6 +952,30 @@ fn wire_frames_locked() {
                     enabled: true,
                     default_enabled: false,
                 }),
+            ),
+        ),
+        (
+            "GetDeviceDataDescriptor request ()",
+            encode_frame(Cmd::GetDeviceDataDescriptor, SEQ, &()),
+        ),
+        (
+            "GetDeviceDataDescriptor reply Ok(com.example.keyboard,1,2)",
+            encode_frame(
+                Cmd::GetDeviceDataDescriptor,
+                SEQ,
+                &Ok::<DeviceDataDescriptor, RynkError>(ex.device_data_descriptor.clone()),
+            ),
+        ),
+        (
+            "GetDeviceDataRecord request 1",
+            encode_frame(Cmd::GetDeviceDataRecord, SEQ, &1_u8),
+        ),
+        (
+            "GetDeviceDataRecord reply Ok(split.activeTransport,Live,Text(wired))",
+            encode_frame(
+                Cmd::GetDeviceDataRecord,
+                SEQ,
+                &Ok::<DeviceDataRecord, RynkError>(ex.device_data_record.clone()),
             ),
         ),
         // Keymap / encoder (0x01xx).
