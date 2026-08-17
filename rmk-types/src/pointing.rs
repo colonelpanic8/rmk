@@ -29,6 +29,8 @@ pub enum PointingMode {
     /// Press mode - XY maps to cursor movement, and a mouse button is held
     /// for as long as the device reports a finger present (Z axis)
     Press(PressConfig),
+    /// Keypad mode - XY motion and a primary tap emit configurable keycodes.
+    Keypad(KeypadConfig),
 }
 
 impl Default for PointingMode {
@@ -106,6 +108,59 @@ impl Default for CaretConfig {
         }
     }
 }
+
+/// Configuration for keypad mode
+///
+/// Each axis accumulates against its own threshold, allowing infrequent
+/// horizontal actions alongside more responsive vertical actions. A primary
+/// device tap can emit a fifth keycode independently of motion.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct KeypadConfig {
+    /// Disable X-axis key output.
+    pub disable_x: bool,
+    /// Disable Y-axis key output.
+    pub disable_y: bool,
+    /// Invert X-axis direction.
+    pub invert_x: bool,
+    /// Invert Y-axis direction.
+    pub invert_y: bool,
+    /// Accumulated X motion required per emitted key tap.
+    pub threshold_x: i16,
+    /// Accumulated Y motion required per emitted key tap.
+    pub threshold_y: i16,
+    /// Keycode emitted by upward motion.
+    pub keycode_up: HidKeyCode,
+    /// Keycode emitted by downward motion.
+    pub keycode_down: HidKeyCode,
+    /// Keycode emitted by leftward motion.
+    pub keycode_left: HidKeyCode,
+    /// Keycode emitted by rightward motion.
+    pub keycode_right: HidKeyCode,
+    /// Keycode emitted on a primary device tap. [`HidKeyCode::No`] disables it.
+    pub keycode_tap: HidKeyCode,
+}
+
+impl Default for KeypadConfig {
+    fn default() -> Self {
+        Self {
+            disable_x: false,
+            disable_y: false,
+            invert_x: false,
+            invert_y: false,
+            threshold_x: 100,
+            threshold_y: 100,
+            keycode_up: HidKeyCode::Up,
+            keycode_down: HidKeyCode::Down,
+            keycode_left: HidKeyCode::Left,
+            keycode_right: HidKeyCode::Right,
+            keycode_tap: HidKeyCode::No,
+        }
+    }
+}
+
 /// Configuration for scroll mode
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

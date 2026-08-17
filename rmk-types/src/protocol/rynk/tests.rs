@@ -27,6 +27,7 @@ use crate::led_indicator::LedIndicator;
 use crate::modifier::ModifierCombination;
 use crate::morse::{Morse, MorseMode, MorseProfile, TAP};
 use crate::mouse_button::MouseButtons;
+use crate::pointing::{KeypadConfig, PointingMode};
 
 /// Buffer size used by round-trip / max-size helpers.
 ///
@@ -217,6 +218,8 @@ struct Exemplars {
     encoder: EncoderAction,
     battery: BatteryStatus,
     layout: LayoutChunk,
+    pointing_capabilities: PointingCapabilities,
+    keypad: KeypadConfig,
 }
 
 fn exemplars() -> Exemplars {
@@ -321,6 +324,22 @@ fn exemplars() -> Exemplars {
         total_len: 300,
         bytes: layout_bytes,
     };
+    let pointing_capabilities = PointingCapabilities {
+        mode_flags: POINTING_MODE_KEYPAD,
+    };
+    let keypad = KeypadConfig {
+        disable_x: false,
+        disable_y: true,
+        invert_x: true,
+        invert_y: false,
+        threshold_x: 120,
+        threshold_y: 30,
+        keycode_up: HidKeyCode::KbVolumeUp,
+        keycode_down: HidKeyCode::KbVolumeDown,
+        keycode_left: HidKeyCode::MediaPrevTrack,
+        keycode_right: HidKeyCode::MediaNextTrack,
+        keycode_tap: HidKeyCode::MediaPlayPause,
+    };
 
     Exemplars {
         matrix,
@@ -339,6 +358,8 @@ fn exemplars() -> Exemplars {
             level: Some(85),
         },
         layout,
+        pointing_capabilities,
+        keypad,
     }
 }
 
@@ -492,6 +513,8 @@ fn wire_values_locked() {
         ("ConnectionStatus{Configured,{1,Adv},Ble}", encode(&ex.connection)),
         ("ProtocolVersion{1,0}", encode(&ProtocolVersion { major: 1, minor: 0 })),
         ("ProtocolVersion::CURRENT", encode(&ProtocolVersion::CURRENT)),
+        ("PointingCapabilities{Keypad}", encode(&ex.pointing_capabilities),),
+        ("PointingMode::Keypad", encode(&PointingMode::Keypad(ex.keypad))),
         ("LockStatus{true,false,2,[(1,2),(3,4)]}", encode(&lock_status),),
         ("BatteryStatus::Unavailable", encode(&BatteryStatus::Unavailable)),
         ("BatteryStatus::Available{Discharging,85}", encode(&ex.battery)),
@@ -983,6 +1006,19 @@ fn wire_frames_locked() {
                     connected: true,
                     battery: ex.battery,
                 }),
+            ),
+        ),
+        // Pointing (0x0Axx).
+        (
+            "GetPointingCapabilities request ()",
+            encode_frame(Cmd::GetPointingCapabilities, SEQ, &()),
+        ),
+        (
+            "GetPointingCapabilities reply Ok(PointingCapabilities{Keypad})",
+            encode_frame(
+                Cmd::GetPointingCapabilities,
+                SEQ,
+                &Ok::<PointingCapabilities, RynkError>(ex.pointing_capabilities),
             ),
         ),
         // Topics (0x80xx, server→host push, SEQ 0).
