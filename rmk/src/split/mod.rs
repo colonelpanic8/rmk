@@ -76,10 +76,12 @@ pub mod ble;
 pub mod central;
 /// Common abstraction layer of split driver
 pub(crate) mod driver;
+#[cfg(feature = "_nrf_ble")]
+pub mod nrf;
 pub mod peripheral;
 #[cfg(feature = "rp2040")]
 pub mod rp;
-#[cfg(not(feature = "_ble"))]
+pub mod selector;
 pub mod serial;
 
 /// Maximum size of a split message
@@ -172,6 +174,10 @@ pub(crate) enum SplitMessage {
     /// Complete central layer state, including lower active layers hidden by
     /// a higher effective layer.
     LayerState(SplitLayerState),
+    /// Half-duplex central request for one queued peripheral message.
+    HalfDuplexPoll,
+    /// Half-duplex response when the peripheral has nothing queued.
+    HalfDuplexIdle,
 }
 
 // -----------------------------------------------------------------------
