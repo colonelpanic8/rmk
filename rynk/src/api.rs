@@ -48,7 +48,8 @@ use rmk_types::protocol::rynk::{
     SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest,
+    SetLightingWakeLayersRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest,
+    SetMorseProfileBulkRequest,
     SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest,
     SplitCentralLatencyPolicy, SplitCentralLatencyState, SplitTransportForce, SplitTransportState, StorageResetMode,
     UnsetLightingOverlayRequest,
@@ -634,6 +635,15 @@ impl Client {
     ) -> Result<LightingOutputModeState, RynkHostError> {
         self.require_lighting(Cmd::SetLightingOutputMode)?;
         Self::flatten_lighting(self.request::<command::SetLightingOutputMode>(&request).await?)
+    }
+
+    /// Replace the layer mask that temporarily wakes otherwise-disabled lighting.
+    pub async fn set_lighting_wake_layers(
+        &self,
+        request: SetLightingWakeLayersRequest,
+    ) -> Result<LightingOutputModeState, RynkHostError> {
+        self.require_lighting(Cmd::SetLightingWakeLayers)?;
+        Self::flatten_lighting(self.request::<command::SetLightingWakeLayers>(&request).await?)
     }
 
     /// Atomically replace standard mutable state when the revision still matches.
