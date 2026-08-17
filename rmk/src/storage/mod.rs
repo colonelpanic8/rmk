@@ -12,6 +12,8 @@ use rmk_types::morse::{MorseProfile, MorseProfileName};
 use rmk_types::protocol::rynk::BehaviorOptions;
 #[cfg(feature = "_ble")]
 use rmk_types::protocol::rynk::BleName;
+#[cfg(all(feature = "host", feature = "rynk"))]
+use rmk_types::protocol::rynk::LayerMetadata;
 #[cfg(feature = "rynk")]
 use rmk_types::protocol::rynk::PointingConfig;
 #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -61,6 +63,8 @@ static CONNECTION_TYPE_RESPONSE: Signal<crate::RawMutex, Option<ConnectionType>>
 static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();
 #[cfg(feature = "_ble")]
 static BLE_NAME_RESPONSE: Signal<crate::RawMutex, Option<BleName>> = Signal::new();
+#[cfg(all(feature = "host", feature = "rynk"))]
+static LAYER_METADATA_RESPONSE: Signal<crate::RawMutex, Option<LayerMetadata>> = Signal::new();
 
 #[cfg(feature = "_ble")]
 async fn request_read<T: Send>(msg: FlashOperationMessage, response: &Signal<crate::RawMutex, T>) -> T {
@@ -96,6 +100,15 @@ pub(crate) async fn read_active_ble_profile() -> Option<u8> {
 #[cfg(feature = "_ble")]
 pub(crate) async fn read_ble_name() -> Option<BleName> {
     request_read(FlashOperationMessage::ReadBleName, &BLE_NAME_RESPONSE).await
+}
+
+#[cfg(all(feature = "host", feature = "rynk"))]
+pub(crate) async fn read_layer_metadata(layer: u8) -> Option<LayerMetadata> {
+    LAYER_METADATA_RESPONSE.reset();
+    FLASH_CHANNEL
+        .send(FlashOperationMessage::ReadLayerMetadata(layer))
+        .await;
+    LAYER_METADATA_RESPONSE.wait().await
 }
 
 /// Send a peer address to be persisted; wait for the storage task to finish.
@@ -248,6 +261,13 @@ pub(crate) enum FlashOperationMessage {
     BleName(BleName),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers(u64),
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    ReadLayerMetadata(u8),
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    LayerMetadata {
+        layer: u8,
+        metadata: LayerMetadata,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -322,6 +342,8 @@ pub(crate) enum StorageKey {
     // Append-only: postcard encodes enum variants by ordinal.
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers,
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    LayerMetadata(u8),
 }
 
 impl StorageKey {
@@ -368,6 +390,11 @@ impl StorageKey {
     #[cfg(feature = "host")]
     pub(crate) const fn morse_profile_name(idx: u8) -> Self {
         Self::MorseProfileName(idx)
+    }
+
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    pub(crate) const fn layer_metadata(layer: u8) -> Self {
+        Self::LayerMetadata(layer)
     }
 }
 
@@ -457,6 +484,8 @@ pub(crate) enum StorageData {
     PositionCombo(PositionComboConfig),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers(u64),
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    LayerMetadata(LayerMetadata),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -1250,6 +1279,15 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     BLE_NAME_RESPONSE.signal(resp);
                     continue;
                 }
+                #[cfg(all(feature = "host", feature = "rynk"))]
+                FlashOperationMessage::ReadLayerMetadata(layer) => {
+                    let response = match self.fetch_data(StorageKey::layer_metadata(layer)).await {
+                        Some(StorageData::LayerMetadata(metadata)) => Some(metadata),
+                        _ => None,
+                    };
+                    LAYER_METADATA_RESPONSE.signal(response);
+                    continue;
+                }
 
                 FlashOperationMessage::LayoutOptions(layout_option) => {
                     update_storage_field!(&mut self.flash, &mut self.buffer, LayoutConfig, layout_option)
@@ -1503,6 +1541,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     )
                     .await
                 }
+                #[cfg(all(feature = "host", feature = "rynk"))]
+                FlashOperationMessage::LayerMetadata { layer, metadata } => {
+                    self.store_data(StorageKey::layer_metadata(layer), &StorageData::LayerMetadata(metadata))
+                        .await
+                }
             };
 
             match write_result {
@@ -1713,6 +1756,8 @@ mod tests {
             StorageKey::MorseProfile(9),
             #[cfg(feature = "_ble")]
             StorageKey::BleName,
+            #[cfg(all(feature = "host", feature = "rynk"))]
+            StorageKey::LayerMetadata(9),
         ];
 
         let mut buffer = [0u8; 64];
@@ -1722,6 +1767,42 @@ mod tests {
             assert_eq!(decoded, key);
             assert_eq!(used, size);
         }
+    }
+
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    #[test]
+    fn layer_metadata_survives_flash_map_reopen() {
+        block_on(async {
+            type Flash = TestFlash<16_384, 4_096, 1>;
+
+            let range = (16_384 - 2 * 4_096) as u32..16_384u32;
+            let metadata = LayerMetadata {
+                occupied: true,
+                name: heapless::String::try_from("Navigation").unwrap(),
+            };
+            let mut map =
+                MapStorage::<StorageKey, _, _>::new(Flash::new(), MapConfig::new(range.clone()), Cache::new_uncached());
+            let mut buffer = [0u8; 256];
+            map.store_item(
+                &mut buffer,
+                &StorageKey::LayerMetadata(2),
+                &StorageData::LayerMetadata(metadata.clone()),
+            )
+            .await
+            .unwrap();
+
+            let (flash, _) = map.destroy();
+            let mut reopened = MapStorage::<StorageKey, _, _>::new(flash, MapConfig::new(range), Cache::new_uncached());
+            let stored = reopened
+                .fetch_item(&mut buffer, &StorageKey::LayerMetadata(2))
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                stored,
+                Some(StorageData::LayerMetadata(stored_metadata)) if stored_metadata == metadata
+            ));
+        });
     }
 
     #[cfg(all(feature = "lighting", feature = "rynk"))]
