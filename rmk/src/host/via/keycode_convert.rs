@@ -1,6 +1,6 @@
 use rmk_types::action::{Action, KeyAction, KeyboardAction};
 use rmk_types::keycode::{HidKeyCode, KeyCode, SpecialKey};
-use rmk_types::modifier::ModifierCombination;
+use rmk_types::modifier::{ModifierCombination, ModifierKey};
 
 pub(crate) fn to_via_keycode(key_action: KeyAction) -> u16 {
     match key_action {
@@ -133,6 +133,14 @@ pub(crate) fn to_via_keycode(key_action: KeyAction) -> u16 {
         KeyAction::Morse(index) => {
             // Tap dance keycodes: 0x5700..=0x57FF
             0x5700 | (index as u16)
+        }
+        KeyAction::LayerModTap(layer, modifier, tap) => {
+            if layer < 16 {
+                // RMK extension: marker | 4-bit layer | 3-bit modifier | 8-bit tap key.
+                0x8000 | ((layer as u16) << 11) | ((modifier as u16) << 8) | tap as u16
+            } else {
+                0
+            }
         }
         _ => {
             warn!("KeyAction variant {:?} not supported by via", key_action);
@@ -288,6 +296,11 @@ pub(crate) fn from_via_keycode(via_keycode: u16) -> KeyAction {
             // QK_KB_N, aka UserN
             KeyAction::Single(Action::User(via_keycode as u8 & 0x1F))
         }
+        0x8000..=0xFFFF => KeyAction::LayerModTap(
+            ((via_keycode >> 11) & 0x0F) as u8,
+            ModifierKey::from_repr(((via_keycode >> 8) & 0x07) as u8).expect("three-bit modifier index is valid"),
+            (via_keycode as u8).into(),
+        ),
         _ => {
             warn!("Via keycode {:#X} is not processed", via_keycode);
             KeyAction::No
@@ -851,6 +864,37 @@ mod test {
         // WakeUp (SystemControlKey::WakeUp) -> HidKeyCode::SystemWake (0xA7)
         let a = KeyAction::Single(Action::Key(KeyCode::SystemControl(SystemControlKey::WakeUp)));
         assert_eq!(0xA7, to_via_keycode(a));
+    }
+
+    #[test]
+    fn layer_mod_tap_keycode_round_trips() {
+        let modifiers = [
+            ModifierKey::LCtrl,
+            ModifierKey::LShift,
+            ModifierKey::LAlt,
+            ModifierKey::LGui,
+            ModifierKey::RCtrl,
+            ModifierKey::RShift,
+            ModifierKey::RAlt,
+            ModifierKey::RGui,
+        ];
+        for layer in [0, 15] {
+            for modifier in modifiers {
+                for tap in [HidKeyCode::No, HidKeyCode::Tab, HidKeyCode::RGui] {
+                    let action = KeyAction::LayerModTap(layer, modifier, tap);
+                    assert_eq!(from_via_keycode(to_via_keycode(action)), action);
+                }
+            }
+        }
+
+        assert_eq!(
+            0x8A2B,
+            to_via_keycode(KeyAction::LayerModTap(1, ModifierKey::LAlt, HidKeyCode::Tab))
+        );
+        assert_eq!(
+            0,
+            to_via_keycode(KeyAction::LayerModTap(16, ModifierKey::LAlt, HidKeyCode::Tab))
+        );
     }
 
     #[test]
