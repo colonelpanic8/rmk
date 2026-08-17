@@ -44,13 +44,14 @@ pub enum MorseMode {
 ///
 /// Bit layout of the inner `u64`:
 /// ```text
-/// 63    62 | 61      | 60           48 | 47  46    | 45      | 44           32 | 31  30  | 29       17 | 16  15 | 14  13   | 12       0
-/// reserved | mode_hi | prior_idle_time | retro_tap | qt_set  | quick_tap_tm    | mode_lo | gap_timeout | uni_tap| flow_tap | hold_timeout
-///   (2b)   |  (1b)   |    (13b ms)     |   (2b)    |  (1b)   |   (13b ms)      |   (2b)  |   (13b ms)  |  (2b)  |   (2b)   |  (13b ms)
+///     63  62     | 61      | 60           48 | 47  46    | 45      | 44           32 | 31  30  | 29       17 | 16  15 | 14  13   | 12       0
+/// ht_on_release | mode_hi | prior_idle_time | retro_tap | qt_set  | quick_tap_tm    | mode_lo | gap_timeout | uni_tap| flow_tap | hold_timeout
+///     (2b)      |  (1b)   |    (13b ms)     |   (2b)    |  (1b)   |   (13b ms)      |   (2b)  |   (13b ms)  |  (2b)  |   (2b)   |  (13b ms)
 /// ```
 ///
 /// - `retro_tap` (bits 47, 46): `00`/`01` = None, `10` = Some(false), `11` = Some(true)
 /// - `prior_idle_time` (bits 60-48): flow-tap idle window in ms (0 = None, max 8191).
+/// - `ht_on_release` (bits 63, 62): `00`/`01` = None, `10` = Some(false), `11` = Some(true)
 /// - `qt_set` (bit 45): when set, `quick_tap_timeout` is explicitly configured
 ///   (even if 0, which means "disabled"). When clear, the field is unset and
 ///   callers should fall back to the global default.
@@ -89,6 +90,9 @@ const RETRO_TAP_HIGH_BIT: u64 = 1 << 47;
 const RETRO_TAP_MASK: u64 = RETRO_TAP_LOW_BIT | RETRO_TAP_HIGH_BIT;
 const PRIOR_IDLE_SHIFT: u32 = 48;
 const PRIOR_IDLE_MASK: u64 = TIMEOUT_MASK << PRIOR_IDLE_SHIFT;
+const HT_ON_RELEASE_LOW_BIT: u64 = 1 << 62;
+const HT_ON_RELEASE_HIGH_BIT: u64 = 1 << 63;
+const HT_ON_RELEASE_MASK: u64 = HT_ON_RELEASE_LOW_BIT | HT_ON_RELEASE_HIGH_BIT;
 
 const fn encode_timeout_ms(t: u16) -> u64 {
     if t > TIMEOUT_MAX_MS {
@@ -160,6 +164,30 @@ impl MorseProfile {
                 | match b {
                     Some(true) => RETRO_TAP_MASK,
                     Some(false) => RETRO_TAP_HIGH_BIT,
+                    None => 0,
+                },
+        )
+    }
+
+    /// A key outside `hold_trigger_key_positions` settles the tap-hold as a tap when it is
+    /// released rather than when it is pressed. Same as ZMK's `hold-trigger-on-release`: a
+    /// next key that is merely tapped still resolves this key as a tap, while a next key that
+    /// is held leaves the hold reachable, which is what lets same-hand modifiers combine.
+    /// `None` inherits the global default.
+    pub fn hold_trigger_on_release(self) -> Option<bool> {
+        match (self.0 & HT_ON_RELEASE_MASK) >> 62 {
+            3 => Some(true),
+            2 => Some(false),
+            _ => None,
+        }
+    }
+
+    pub const fn with_hold_trigger_on_release(self, b: Option<bool>) -> Self {
+        Self(
+            (self.0 & !HT_ON_RELEASE_MASK)
+                | match b {
+                    Some(true) => HT_ON_RELEASE_MASK,
+                    Some(false) => HT_ON_RELEASE_HIGH_BIT,
                     None => 0,
                 },
         )
@@ -312,6 +340,7 @@ impl Serialize for MorseProfile {
                 quick_tap_timeout_ms: Option<u16>,
                 retro_tap: Option<bool>,
                 prior_idle_time_ms: Option<u16>,
+                hold_trigger_on_release: Option<bool>,
             }
             Repr {
                 unilateral_tap: self.unilateral_tap(),
@@ -322,6 +351,7 @@ impl Serialize for MorseProfile {
                 quick_tap_timeout_ms: self.quick_tap_timeout_ms(),
                 retro_tap: self.retro_tap(),
                 prior_idle_time_ms: self.prior_idle_time_ms(),
+                hold_trigger_on_release: self.hold_trigger_on_release(),
             }
             .serialize(serializer)
         } else {
@@ -345,6 +375,7 @@ impl<'de> Deserialize<'de> for MorseProfile {
                 #[serde(default)]
                 retro_tap: Option<bool>,
                 prior_idle_time_ms: Option<u16>,
+                hold_trigger_on_release: Option<bool>,
             }
             let r = Repr::deserialize(deserializer)?;
             Ok(
@@ -352,7 +383,8 @@ impl<'de> Deserialize<'de> for MorseProfile {
                     .with_enable_flow_tap(r.enable_flow_tap)
                     .with_quick_tap_timeout_ms(r.quick_tap_timeout_ms)
                     .with_retro_tap(r.retro_tap)
-                    .with_prior_idle_time_ms(r.prior_idle_time_ms),
+                    .with_prior_idle_time_ms(r.prior_idle_time_ms)
+                    .with_hold_trigger_on_release(r.hold_trigger_on_release),
             )
         } else {
             Ok(MorseProfile(u64::deserialize(deserializer)?))
@@ -364,7 +396,7 @@ impl<'de> Deserialize<'de> for MorseProfile {
 #[cfg(feature = "wasm")]
 const _: () = {
     #[::wasm_bindgen::prelude::wasm_bindgen(typescript_custom_section)]
-    const TS_APPEND_CONTENT: &'static str = "export type MorseProfile = { unilateral_tap: boolean | undefined; enable_flow_tap: boolean | undefined; mode: MorseMode | undefined; hold_timeout_ms: number | undefined; gap_timeout_ms: number | undefined; quick_tap_timeout_ms: number | undefined; retro_tap: boolean | undefined; prior_idle_time_ms: number | undefined; };";
+    const TS_APPEND_CONTENT: &'static str = "export type MorseProfile = { unilateral_tap: boolean | undefined; enable_flow_tap: boolean | undefined; mode: MorseMode | undefined; hold_timeout_ms: number | undefined; gap_timeout_ms: number | undefined; quick_tap_timeout_ms: number | undefined; retro_tap: boolean | undefined; prior_idle_time_ms: number | undefined; hold_trigger_on_release: boolean | undefined; };";
 };
 crate::wasm_object_abi!(MorseProfile, "MorseProfile");
 
@@ -970,6 +1002,28 @@ mod tests {
         assert_eq!(core::mem::size_of::<MorseProfile>(), 8);
     }
 
+    #[test]
+    fn hold_trigger_on_release_accessors_preserve_packed_fields() {
+        assert_eq!(MorseProfile::const_default().hold_trigger_on_release(), None);
+
+        let base = MorseProfile::new(Some(true), Some(MorseMode::PermissiveHold), Some(1000), Some(2000))
+            .with_enable_flow_tap(Some(true))
+            .with_quick_tap_timeout_ms(Some(150));
+
+        for value in [Some(true), Some(false), None] {
+            let p = base.with_hold_trigger_on_release(value);
+            assert_eq!(p.hold_trigger_on_release(), value);
+            assert_eq!(p.hold_timeout_ms(), Some(1000));
+            assert_eq!(p.gap_timeout_ms(), Some(2000));
+            assert_eq!(p.unilateral_tap(), Some(true));
+            assert_eq!(p.enable_flow_tap(), Some(true));
+            assert_eq!(p.quick_tap_timeout_ms(), Some(150));
+            assert_eq!(p.mode(), Some(MorseMode::PermissiveHold));
+        }
+
+        assert_eq!(core::mem::size_of::<MorseProfile>(), 8);
+    }
+
     /// The human-readable serde goes `MorseProfile` -> decoded parts -> `new()`.
     /// Every occupied bit is covered by the decoded fields, so that path must be lossless.
     #[test]
@@ -987,14 +1041,16 @@ mod tests {
                 .with_enable_flow_tap(Some(true))
                 .with_quick_tap_timeout_ms(Some(180))
                 .with_retro_tap(Some(true))
-                .with_prior_idle_time_ms(Some(90)),
+                .with_prior_idle_time_ms(Some(90))
+                .with_hold_trigger_on_release(Some(true)),
             MorseProfile::const_default(),
         ] {
             let parts = MorseProfile::new(p.unilateral_tap(), p.mode(), p.hold_timeout_ms(), p.gap_timeout_ms())
                 .with_enable_flow_tap(p.enable_flow_tap())
                 .with_quick_tap_timeout_ms(p.quick_tap_timeout_ms())
                 .with_retro_tap(p.retro_tap())
-                .with_prior_idle_time_ms(p.prior_idle_time_ms());
+                .with_prior_idle_time_ms(p.prior_idle_time_ms())
+                .with_hold_trigger_on_release(p.hold_trigger_on_release());
             assert_eq!(p, parts);
         }
     }
