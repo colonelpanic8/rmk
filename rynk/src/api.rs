@@ -24,9 +24,9 @@ use rmk_types::morse::Morse;
 use rmk_types::protocol::rynk::{
     BehaviorConfig, Cmd, DeviceCapabilities, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest,
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LockStatus,
-    MatrixState, PeripheralStatus, PointingConfig, ProtocolVersion, SetComboBulkRequest, SetComboRequest,
-    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
-    SetMorseRequest, SetPointingConfigRequest, StorageResetMode, command,
+    MatrixState, PeripheralStatus, PointingCapabilities, PointingConfig, ProtocolVersion, SetComboBulkRequest,
+    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
+    SetMorseBulkRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -324,6 +324,12 @@ impl Client {
     /// Read every pointing device's configuration, layer overrides included.
     pub async fn get_pointing_config(&self) -> Result<PointingConfig, RynkHostError> {
         self.request::<command::GetPointingConfig>(&()).await
+    }
+
+    /// Discover optional pointing modes supported by the running firmware.
+    /// Older firmware reports [`RynkError::UnknownCmd`].
+    pub async fn get_pointing_capabilities(&self) -> Result<PointingCapabilities, RynkHostError> {
+        self.request::<command::GetPointingCapabilities>(&()).await
     }
 
     /// Replace the pointing configuration and return what the device now
