@@ -24,6 +24,8 @@ use super::{
     SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
     SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
 };
+#[cfg(feature = "_ble")]
+use super::BleName;
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
 use crate::battery::BatteryStatus;
@@ -393,6 +395,12 @@ endpoints! {
     #[cfg(all(feature = "_ble", feature = "split"))]
     /// Replace the volatile policy. Each connection-event count must be `0..=499`.
     SetSplitCentralLatency = 0x0707: SplitCentralLatencyPolicy => SplitCentralLatencyState;
+    #[cfg(feature = "_ble")]
+    /// Read the persistent BLE advertising-name template.
+    GetBleName = 0x0708: () => BleName;
+    #[cfg(feature = "_ble")]
+    /// Replace the persistent BLE advertising-name template.
+    SetBleName = 0x0709: BleName => ();
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
