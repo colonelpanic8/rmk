@@ -457,7 +457,7 @@ impl From<LayoutConfig> for StorageData {
 
 impl From<&config::BehaviorConfig> for StorageData {
     fn from(behavior: &config::BehaviorConfig) -> Self {
-        // Note: default_layer persists via LayoutConfig (restored in read_keymap), not this struct.
+        // Note: default_layer persists via LayoutConfig (restored in read_boot_data), not this struct.
         Self::BehaviorConfig(BehaviorConfig {
             prior_idle_time: behavior.morse.prior_idle_time.as_millis() as u16,
             morse_default_profile: behavior.morse.default_profile,
@@ -1216,12 +1216,22 @@ const fn get_buffer_size() -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "host")]
+    use rmk_types::action::Action;
+    #[cfg(feature = "host")]
+    use rmk_types::fork::StateBits;
+    #[cfg(feature = "host")]
+    use rmk_types::keycode::{HidKeyCode, KeyCode};
+    #[cfg(feature = "host")]
+    use rmk_types::modifier::ModifierCombination;
     use sequential_storage::cache::Cache;
     use sequential_storage::map::{MapConfig, MapStorage};
 
     use super::*;
     use crate::config::{BehaviorConfig as RuntimeBehaviorConfig, StorageConfig as RuntimeStorageConfig};
     use crate::test_support::test_block_on as block_on;
+    #[cfg(feature = "host")]
+    use crate::{COMBO_MAX_NUM, FORK_MAX_NUM, MORSE_MAX_NUM, keymap::KeymapData, keymap::fill_vec};
 
     #[derive(Debug, Clone, Copy)]
     struct TestFlashError;
@@ -1514,6 +1524,72 @@ mod tests {
             storage.read_lighting_runtime_conditional_scenes(&mut loaded).await;
 
             assert_eq!(loaded.as_slice(), &[cell]);
+        });
+    }
+
+    #[cfg(feature = "host")]
+    #[test]
+    fn boot_read_restores_behavior_tables_and_skips_oversized_indices() {
+        block_on(async {
+            type Flash = TestFlash<16_384, 4_096, 1>;
+
+            let storage_range = (16_384 - 2 * 4_096) as u32..16_384u32;
+            let mut map =
+                MapStorage::<StorageKey, _, _>::new(Flash::new(), MapConfig::new(storage_range), Cache::new_uncached());
+            let mut buffer = [0u8; get_buffer_size()];
+
+            let key_a = KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A)));
+            let key_b = KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::B)));
+            let key_c = KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::C)));
+            let combo = ComboConfig::new([key_a, key_b], key_c, Some(1));
+            let fork = Fork::new(
+                key_a,
+                key_b,
+                key_c,
+                StateBits::default(),
+                StateBits::default(),
+                ModifierCombination::default(),
+                true,
+            );
+            let morse = Morse::new_from_vial(
+                Action::Key(KeyCode::Hid(HidKeyCode::A)),
+                Action::Key(KeyCode::Hid(HidKeyCode::B)),
+                Action::Key(KeyCode::Hid(HidKeyCode::C)),
+                Action::Key(KeyCode::Hid(HidKeyCode::D)),
+                MorseProfile::default(),
+            );
+
+            for (key, data) in [
+                (StorageKey::combo(0), StorageData::Combo(combo.clone())),
+                (StorageKey::fork(0), StorageData::Fork(fork)),
+                (StorageKey::morse(0), StorageData::Morse(morse.clone())),
+                (
+                    StorageKey::combo(COMBO_MAX_NUM as u8),
+                    StorageData::Combo(ComboConfig::empty()),
+                ),
+                (StorageKey::fork(FORK_MAX_NUM as u8), StorageData::Fork(Fork::default())),
+                (
+                    StorageKey::morse(MORSE_MAX_NUM as u8),
+                    StorageData::Morse(Morse::default()),
+                ),
+            ] {
+                map.store_item(&mut buffer, &key, &data).await.unwrap();
+            }
+
+            let mut storage = Storage::<Flash, 1, 1, 1, 0> {
+                flash: map,
+                buffer: [0; get_buffer_size()],
+            };
+            let mut keymap = KeymapData::new([[[KeyAction::No]]]);
+            let mut behavior = RuntimeBehaviorConfig::default();
+            fill_vec(&mut behavior.fork.forks);
+            fill_vec(&mut behavior.morse.morses);
+
+            storage.read_boot_data(&mut keymap, &mut behavior).await.unwrap();
+
+            assert_eq!(behavior.combo.combos[0].as_ref().unwrap().config, combo);
+            assert_eq!(behavior.fork.forks[0], fork);
+            assert_eq!(behavior.morse.morses[0], morse);
         });
     }
 
