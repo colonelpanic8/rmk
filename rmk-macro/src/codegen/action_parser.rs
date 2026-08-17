@@ -93,6 +93,10 @@ pub(crate) fn expand_profile(profile: &MorseProfile) -> proc_macro2::TokenStream
         && enable
     {
         quote! { ::core::option::Option::Some(rmk::types::morse::MorseMode::HoldOnOtherPress) }
+    } else if let Some(enable) = profile.tap_unless_interrupted
+        && enable
+    {
+        quote! { ::core::option::Option::Some(rmk::types::morse::MorseMode::TapUnlessInterrupted) }
     } else if let Some(enable) = profile.normal_mode
         && enable
     {
@@ -577,6 +581,7 @@ mod tests {
             unilateral_tap: Some(true),
             permissive_hold: None,
             hold_on_other_press: None,
+            tap_unless_interrupted: None,
             normal_mode: Some(true),
             hold_timeout_ms: Some(250),
             gap_timeout_ms: Some(250),
