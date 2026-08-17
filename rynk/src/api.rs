@@ -25,7 +25,7 @@ use rmk_types::protocol::rynk::{
     GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
     KeyPosition, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion, SetComboBulkRequest,
     SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest,
-    SetMorseBulkRequest, SetMorseRequest, StorageResetMode, command,
+    SetMorseBulkRequest, SetMorseRequest, SplitTransportForce, SplitTransportState, StorageResetMode, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -343,6 +343,35 @@ impl Client {
             ));
         }
         self.request::<command::GetPeripheralStatus>(&slot).await
+    }
+
+    /// Read the split-transport selector: automatic policy, force, cable
+    /// detect, and the active selection. Requires
+    /// [`DeviceCapabilities::is_split`]; nothing is sent otherwise.
+    pub async fn get_split_transport(&self) -> Result<SplitTransportState, RynkHostError> {
+        if !self.capabilities.is_split {
+            return Err(RynkHostError::Unsupported(
+                Cmd::GetSplitTransport,
+                "not a split keyboard",
+            ));
+        }
+        self.request::<command::GetSplitTransport>(&()).await
+    }
+
+    /// Force the split transport (volatile until the next force or reboot);
+    /// echoes the selector state. Requires [`DeviceCapabilities::is_split`];
+    /// nothing is sent otherwise.
+    pub async fn set_split_transport_force(
+        &self,
+        force: SplitTransportForce,
+    ) -> Result<SplitTransportState, RynkHostError> {
+        if !self.capabilities.is_split {
+            return Err(RynkHostError::Unsupported(
+                Cmd::SetSplitTransportForce,
+                "not a split keyboard",
+            ));
+        }
+        self.request::<command::SetSplitTransportForce>(&force).await
     }
 
     /// Read the current words-per-minute estimate.

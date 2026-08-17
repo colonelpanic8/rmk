@@ -108,6 +108,12 @@ pub(crate) enum SplitMessage {
     HalfDuplexPoll,
     /// Half-duplex response when the peripheral has nothing queued.
     HalfDuplexIdle,
+
+    /// Central → Peripheral: volatile split-transport force
+    /// (`selector::FORCE_*`), applied to the peripheral's selector. Sent to
+    /// the peripheral before the central applies the same force to itself so
+    /// both halves rendezvous on the forced transport.
+    TransportOverride(u8),
 }
 
 // -----------------------------------------------------------------------

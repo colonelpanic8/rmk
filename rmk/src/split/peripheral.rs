@@ -180,6 +180,10 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                             // Publish Layer event
                             publish_event(LayerChangeEvent::new(layer));
                         }
+                        SplitMessage::TransportOverride(mode) => {
+                            info!("Split transport force from central: {}", mode);
+                            crate::split::selector::set_forced(mode);
+                        }
                         #[cfg(feature = "display")]
                         SplitMessage::Wpm(wpm) => publish_event(WpmUpdateEvent::new(wpm)),
                         #[cfg(feature = "display")]
