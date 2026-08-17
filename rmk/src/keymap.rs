@@ -157,7 +157,6 @@ impl KeyMapInner<'_> {
         if before != after {
             publish_event(LayerChangeEvent::new(after));
         }
-        publish_event(LayerChangeEvent::new(self.get_activated_layer()));
     }
 
     fn get_action_at(&self, pos: KeyboardEventPos, layer_num: usize) -> KeyAction {
