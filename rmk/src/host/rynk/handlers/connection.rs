@@ -118,14 +118,8 @@ impl Handle<SetSplitTransportForce> for RynkService<'_> {
             SplitTransportForce::Wired => selector::FORCE_WIRED,
             SplitTransportForce::Ble => selector::FORCE_BLE,
         };
-        let connected = (0..crate::SPLIT_PERIPHERALS_NUM)
-            .any(|id| crate::split::driver::current_peripheral_status(id).is_some_and(|s| s.connected));
-        if connected {
-            crate::channel::SPLIT_TRANSPORT_FORCE_CHANNEL
-                .try_send(mode)
-                .map_err(|_| RynkError::NotReady)?;
-        } else {
-            selector::set_forced(mode);
+        if !crate::split::request_transport_force(mode) {
+            return Err(RynkError::NotReady);
         }
         Ok(split_transport_state())
     }

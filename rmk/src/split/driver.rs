@@ -97,6 +97,11 @@ pub(crate) fn current_peripheral_battery_status(id: usize) -> Option<BatteryStat
     PERIPHERAL_SLOTS.lock(|slots| slots.get().get(id).map(|slot| slot.battery))
 }
 
+/// Any peripheral session currently up.
+pub(crate) fn any_peripheral_connected() -> bool {
+    PERIPHERAL_SLOTS.lock(|slots| slots.get().iter().any(|s| s.connected))
+}
+
 /// Latest snapshot for peripheral `id`, or `None` when `id` is out of range.
 #[cfg(feature = "rynk")]
 pub(crate) fn current_peripheral_status(id: usize) -> Option<PeripheralStatus> {
