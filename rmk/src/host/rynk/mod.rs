@@ -81,6 +81,8 @@ pub struct RynkService<'a> {
     peripheral_bootloader: Option<fn(u8) -> Result<(), RynkError>>,
     /// Optional board-defined, machine-readable data source.
     device_data: Option<(DeviceDataDescriptor, fn(u8) -> Option<DeviceDataRecord>)>,
+    /// Compiled fallback metadata; persistent per-slot records override it.
+    layer_names: &'static [Option<&'static str>],
 }
 
 /// Per-session state that has to outlive a single dispatch. The authorization
@@ -119,6 +121,7 @@ impl<'a> RynkService<'a> {
             },
             peripheral_bootloader: None,
             device_data: None,
+            layer_names: config.layer_names,
         }
     }
 
@@ -184,6 +187,7 @@ impl<'a> RynkService<'a> {
             | Cmd::SetMorse
             | Cmd::SetFork
             | Cmd::SetBehaviorConfig
+            | Cmd::SetLayerMetadata
             | Cmd::SetPointingConfig
             | Cmd::SetKeymapBulk
             | Cmd::SetComboBulk
@@ -264,6 +268,8 @@ impl<'a> RynkService<'a> {
             Cmd::SetEncoderAction => serve::<command::SetEncoderAction, _>(self, msg).await,
             Cmd::GetKeymapBulk => serve_bulk::<command::GetKeymapBulk, _>(self, msg).await,
             Cmd::SetKeymapBulk => serve_bulk::<command::SetKeymapBulk, _>(self, msg).await,
+            Cmd::GetLayerMetadata => serve::<command::GetLayerMetadata, _>(self, msg).await,
+            Cmd::SetLayerMetadata => serve::<command::SetLayerMetadata, _>(self, msg).await,
 
             Cmd::GetMacro => serve::<command::GetMacro, _>(self, msg).await,
             Cmd::SetMacro => serve::<command::SetMacro, _>(self, msg).await,
