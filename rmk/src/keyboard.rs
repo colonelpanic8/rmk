@@ -13,7 +13,7 @@ use rmk_types::fork::StateBits;
 use rmk_types::keycode::{ConsumerKey, HidKeyCode, KeyCode, SpecialKey, SystemControlKey};
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::modifier::ModifierCombination;
-use rmk_types::morse::{MorseMode, MorsePattern, TAP};
+use rmk_types::morse::{HOLD, MorseMode, MorsePattern, TAP};
 use rmk_types::mouse_button::MouseButtons;
 use rmk_types::unicode::UnicodeMode;
 use usbd_hid::descriptor::{MediaKeyboardReport, SystemControlReport};
@@ -832,7 +832,16 @@ impl<'a> Keyboard<'a> {
                                 // Normal mode: resolve a same-hand HRM as tap on press when
                                 // unilateral_tap is enabled, so the roll fires in the correct
                                 // order (HRM tap first, then the new key).
-                                let unilateral_tap = Self::is_unilateral_tap_enabled(self.keymap, &held_key.action);
+                                //
+                                // A key whose hold is exactly a modifier is exempt: two mods on one
+                                // hand must still be able to chord (Ctrl+Shift). Nothing is lost if
+                                // the press was a roll after all, because the held key still
+                                // resolves as a tap when it is released before its hold timeout.
+                                let unilateral_tap = Self::is_unilateral_tap_enabled(self.keymap, &held_key.action)
+                                    && !matches!(
+                                        Self::action_from_pattern(self.keymap, key_action, HOLD),
+                                        Action::Modifier(_)
+                                    );
                                 if unilateral_tap
                                     && matches!(held_key.state, KeyState::Pressed(_))
                                     && let KeyboardEventPos::Key(pos1) = held_key.event.pos
