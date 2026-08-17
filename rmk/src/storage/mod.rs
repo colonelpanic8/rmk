@@ -26,7 +26,11 @@ use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
 #[cfg(feature = "host")]
 use {
-    crate::{MACRO_SPACE_SIZE, config::HoldTriggerPositions, keyboard::combo::ComboConfig},
+    crate::{
+        MACRO_SPACE_SIZE,
+        config::HoldTriggerPositions,
+        keyboard::combo::{ComboConfig, PositionComboConfig},
+    },
     rmk_types::action::{EncoderAction, KeyAction},
     rmk_types::fork::Fork,
     rmk_types::morse::Morse,
@@ -147,6 +151,11 @@ pub(crate) enum FlashOperationMessage {
     Combo {
         idx: u8,
         config: ComboConfig,
+    },
+    #[cfg(feature = "host")]
+    PositionCombo {
+        idx: u8,
+        config: PositionComboConfig,
     },
     #[cfg(feature = "host")]
     Fork {
@@ -438,6 +447,9 @@ pub(crate) enum StorageData {
     // New variants go last, matching `StorageKey`.
     #[cfg(feature = "_ble")]
     BleName(BleName),
+    /// Appended to preserve every existing postcard enum discriminant.
+    #[cfg(feature = "host")]
+    PositionCombo(PositionComboConfig),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -1260,6 +1272,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 #[cfg(feature = "host")]
                 FlashOperationMessage::Combo { idx, config } => {
                     self.store_data(StorageKey::combo(idx), &StorageData::Combo(config))
+                        .await
+                }
+                #[cfg(feature = "host")]
+                FlashOperationMessage::PositionCombo { idx, config } => {
+                    self.store_data(StorageKey::combo(idx), &StorageData::PositionCombo(config))
                         .await
                 }
                 #[cfg(feature = "host")]
