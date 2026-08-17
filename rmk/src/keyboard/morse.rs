@@ -456,9 +456,12 @@ impl<'a> Keyboard<'a> {
                 .and_then(|m| m.profile.prior_idle_time_ms()),
             _ => None,
         };
+
         per_key
             .map(|t| Duration::from_millis(t as u64))
             .unwrap_or_else(|| keymap.morse_prior_idle_time())
+    }
+
     /// Whether the key at `other` may trigger the hold of `key_action`.
     ///
     /// `None` means the key's profile sets no `hold_trigger_key_positions`, so there is no
@@ -468,9 +471,29 @@ impl<'a> Keyboard<'a> {
     pub fn hold_trigger_allows(keymap: &KeyMap, key_action: &KeyAction, other: KeyboardEventPos) -> Option<bool> {
         let KeyAction::TapHold(_, _, idx) = key_action else {
             return None;
+        };
         let KeyboardEventPos::Key(pos) = other else {
             return None;
+        };
+
         keymap.hold_trigger_allows(*idx, pos.row, pos.col)
+    }
+
+    /// Whether a key outside `hold_trigger_key_positions` settles this tap-hold as a tap when
+    /// it is released rather than when it is pressed. Same as ZMK's `hold-trigger-on-release`.
+    pub fn is_hold_trigger_on_release(keymap: &KeyMap, key_action: &KeyAction) -> bool {
+        if let KeyAction::TapHold(_, _, idx) = key_action
+            && let Some(enabled) = keymap.morse_profile(*idx).hold_trigger_on_release()
+        {
+            return enabled;
+        }
+
+        keymap
+            .morse_default_profile()
+            .hold_trigger_on_release()
+            .unwrap_or(false)
+    }
+
     pub fn is_flow_tap_enabled(keymap: &KeyMap, key_action: &KeyAction) -> bool {
         match key_action {
             KeyAction::TapHold(_, _, idx) => keymap
