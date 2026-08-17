@@ -184,23 +184,11 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
         #[cfg(feature = "_render_state")]
         let mut sleep_sub = crate::event::SleepStateEvent::subscriber();
 
-        // Expose the split-link state to the application. This
-        // manager runs exactly while the peripheral session is up; the
-        // `false → true` edge is the application's resync trigger.
-        //
-        // The link-down edge MUST be sent from a drop guard: on connection
-        // loss the outer `select3` in `split/ble/central.rs` resolves via its
-        // connection-monitor arm and this future is *cancelled*, so any
-        // `send(false)` written on an error path here would never run.
-        struct LinkDownGuard;
-        impl Drop for LinkDownGuard {
-            fn drop(&mut self) {
-                crate::split_app::SPLIT_APP_LINK.sender().send(false);
-            }
-        }
-        let _link_guard = LinkDownGuard;
-        let app_link = crate::split_app::SPLIT_APP_LINK.sender();
-        app_link.send(true);
+        // This manager runs exactly while the peripheral session is up. On
+        // connection loss the outer session future cancels this one, so the
+        // guard's `Drop` supplies the link-down edge.
+        let mut app_link = crate::split_app::LinkGuard::new();
+        app_link.mark_up();
 
         // Send the current state once on startup so the peripheral matches us
         // even when no transition has happened since the central booted.
@@ -305,14 +293,7 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
             },
             // Non-key events are drop-on-full to keep the split read loop responsive.
             SplitMessage::Pointing(e) => publish_event(e),
-            // Forward peripheral → central application
-            // payloads into the (symmetric) inbox; drop-on-full so a slow
-            // consumer can never stall the split read loop.
-            SplitMessage::Application(data) => {
-                if crate::split_app::SPLIT_APP_RX.try_send(data).is_err() {
-                    warn!("split app message dropped (inbox full)");
-                }
-            }
+            SplitMessage::Application(data) => crate::split_app::deliver_received(data),
             #[cfg(feature = "_ble")]
             SplitMessage::BatteryStatus(state) => set_peripheral_battery(self.id, state.0),
             #[cfg(feature = "dfu_split")]
