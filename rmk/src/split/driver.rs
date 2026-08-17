@@ -108,6 +108,11 @@ pub(crate) fn set_peripheral_battery(id: usize, battery: BatteryStatus) {
     }
 }
 
+/// Any peripheral session currently up.
+pub(crate) fn any_peripheral_connected() -> bool {
+    PERIPHERAL_SLOTS.lock(|slots| slots.get().iter().any(|s| s.connected))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,7 +223,7 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
     /// The manager receives from the peripheral and publishes input events.
     /// It also syncs the central's `ConnectionStatus` to the peripheral on every
     /// change as an informational signal
-    pub(crate) async fn run(mut self) {
+    pub(crate) async fn run(&mut self) {
         use crate::event::EventSubscriber;
 
         let mut indicator_sub = crate::event::LedIndicatorEvent::subscriber();
@@ -288,6 +293,7 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
                     with_feature("display"): e = wpm_sub.next_event().fuse() => SplitMessage::Wpm(e.0),
                     with_feature("display"): e = modifier_sub.next_event().fuse() => SplitMessage::Modifier(e.modifier.into_bits()),
                     with_feature("_render_state"): e = sleep_sub.next_event().fuse() => SplitMessage::SleepState(e.0),
+                    m = crate::channel::SPLIT_TRANSPORT_FORCE_CHANNEL.receive().fuse() => SplitMessage::TransportOverride(m),
                     // Application messages, deliberately the
                     // last (lowest-priority) outgoing arm; the read arm of the
                     // outer select still beats all outgoing traffic.
@@ -315,6 +321,10 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
                         if self.send(&msg).await.is_err() {
                             return;
                         }
+                        // The peripheral has its copy; now the central may switch.
+                        if let SplitMessage::TransportOverride(mode) = msg {
+                            crate::split::selector::set_forced(mode);
+                        }
                     }
                     Either::Second(_) => {}
                 },
@@ -322,6 +332,10 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
                 Either::Second(msg) => {
                     if self.send(&msg).await.is_err() {
                         return; // guard sends the link-down edge
+                    }
+                    // The peripheral has its copy; now the central may switch.
+                    if let SplitMessage::TransportOverride(mode) = msg {
+                        crate::split::selector::set_forced(mode);
                     }
                 }
             }

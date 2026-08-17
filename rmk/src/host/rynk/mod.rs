@@ -306,6 +306,10 @@ impl<'a> RynkService<'a> {
             Cmd::GetSplitCentralLatency => serve::<command::GetSplitCentralLatency, _>(self, msg).await,
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::SetSplitCentralLatency => serve::<command::SetSplitCentralLatency, _>(self, msg).await,
+            #[cfg(feature = "split")]
+            Cmd::GetSplitTransport => serve::<command::GetSplitTransport, _>(self, msg).await,
+            #[cfg(feature = "split")]
+            Cmd::SetSplitTransportForce => serve::<command::SetSplitTransportForce, _>(self, msg).await,
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,
