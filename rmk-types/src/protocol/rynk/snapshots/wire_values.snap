@@ -32,6 +32,7 @@ BatteryStatus::Available{Discharging,85}                01 01 01 55
 BatteryStatus::Unavailable                              00
 BehaviorConfig{50,500,200,20}                           32 f4 03 c8 01 14
 BehaviorOptions{[1,2,3],40,true,false,true,60,profile}  01 01 02 03 01 28 01 00 01 3c c6 80 80 85 0c
+BleName{Glove80 {slot}}                                 0e 47 6c 6f 76 65 38 30 20 7b 73 6c 6f 74 7d
 BleState::Advertising                                   00
 BleState::Connected                                     01
 BleState::Inactive                                      02
