@@ -4,6 +4,7 @@
 use bt_hci::{cmd::le::LeSetPhy, controller::ControllerCmdAsync};
 use embassy_futures::select::{Either3, select3};
 use embassy_sync::signal::Signal;
+use rmk_types::connection::ConnectionType;
 use trouble_host::prelude::*;
 use trouble_host::{BondInformation, LongTermKey};
 #[cfg(feature = "storage")]
@@ -12,7 +13,7 @@ use {crate::channel::FLASH_CHANNEL, crate::storage::FLASH_OPERATION_FINISHED};
 use super::ble_server::CCCD_TABLE_SIZE;
 use crate::NUM_BLE_PROFILE;
 use crate::channel::BLE_PROFILE_CHANNEL;
-use crate::state::{current_profile, set_ble_profile};
+use crate::state::{current_profile, set_ble_profile, set_preferred};
 
 pub(crate) static UPDATED_PROFILE: Signal<crate::RawMutex, ProfileInfo> = Signal::new();
 pub(crate) static UPDATED_CCCD_TABLE: Signal<crate::RawMutex, heapless::Vec<u8, CCCD_TABLE_SIZE>> = Signal::new();
@@ -312,12 +313,14 @@ where
                     FLASH_OPERATION_FINISHED.reset();
                     match action {
                         BleProfileAction::Switch(profile) => {
+                            set_preferred(ConnectionType::Ble).await;
                             if !self.switch_profile(profile).await {
                                 // If the profile is the same as the current profile, do nothing
                                 continue;
                             }
                         }
                         BleProfileAction::Previous => {
+                            set_preferred(ConnectionType::Ble).await;
                             let mut profile = current_profile();
                             profile = if profile == 0 {
                                 NUM_BLE_PROFILE as u8 - 1
@@ -328,6 +331,7 @@ where
                             self.switch_profile(profile).await;
                         }
                         BleProfileAction::Next => {
+                            set_preferred(ConnectionType::Ble).await;
                             let mut profile = current_profile() + 1;
                             profile %= NUM_BLE_PROFILE as u8;
 

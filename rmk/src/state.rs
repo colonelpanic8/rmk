@@ -85,7 +85,8 @@ pub(crate) fn active_transport() -> Option<ConnectionType> {
     CONNECTION_STATUS.lock(|c| c.get().decide_active())
 }
 
-pub(crate) fn current_connection_status() -> ConnectionStatus {
+/// Returns a snapshot of the keyboard's current connection status.
+pub fn current_connection_status() -> ConnectionStatus {
     CONNECTION_STATUS.lock(|c| c.get())
 }
 
@@ -156,6 +157,20 @@ pub(crate) fn set_preferred_connection(t: ConnectionType) {
     update_status(|c| c.preferred = t);
 }
 
+pub(crate) async fn set_preferred(preferred: ConnectionType) {
+    // Profile-select keys call this on every press; skip the flash write when
+    // the preference is already set to avoid needless wear.
+    if CONNECTION_STATUS.lock(|c| c.get().preferred) == preferred {
+        return;
+    }
+    set_preferred_connection(preferred);
+    info!("Switching preferred transport to: {:?}", preferred);
+    #[cfg(feature = "storage")]
+    crate::channel::FLASH_CHANNEL
+        .send(crate::storage::FlashOperationMessage::ConnectionType(preferred))
+        .await;
+}
+
 /// Load the preferred connection type at startup.
 ///
 /// With the `storage` feature, reads the persisted `ConnectionType` from flash;
@@ -177,19 +192,11 @@ pub(crate) async fn load_preferred_connection() -> ConnectionType {
 
 #[cfg(all(feature = "_ble", not(feature = "_no_usb")))]
 pub(crate) async fn toggle_preferred() {
-    let mut new = ConnectionType::Usb;
-    update_status(|c| {
-        c.preferred = match c.preferred {
-            ConnectionType::Usb => ConnectionType::Ble,
-            ConnectionType::Ble => ConnectionType::Usb,
-        };
-        new = c.preferred;
+    let preferred = CONNECTION_STATUS.lock(|c| match c.get().preferred {
+        ConnectionType::Usb => ConnectionType::Ble,
+        ConnectionType::Ble => ConnectionType::Usb,
     });
-    info!("Switching preferred transport to: {:?}", new);
-    #[cfg(feature = "storage")]
-    crate::channel::FLASH_CHANNEL
-        .send(crate::storage::FlashOperationMessage::ConnectionType(new))
-        .await;
+    set_preferred(preferred).await;
 }
 
 #[cfg(feature = "_ble")]
