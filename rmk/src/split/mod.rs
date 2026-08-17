@@ -24,6 +24,21 @@ pub mod serial;
 /// Maximum size of a split message
 pub const SPLIT_MESSAGE_MAX_SIZE: usize = SplitMessage::POSTCARD_MAX_SIZE + 4;
 
+/// Volatile split-transport force from the application (one of
+/// `selector::FORCE_*`). While a peripheral is connected the force travels
+/// to it over the split link first and the central applies it only after
+/// that send, so both halves rendezvous on the forced transport; with no
+/// peripheral connected it applies locally at once. Returns `false` when a
+/// previous request is still queued.
+pub fn request_transport_force(mode: u8) -> bool {
+    if driver::any_peripheral_connected() {
+        crate::channel::SPLIT_TRANSPORT_FORCE_CHANNEL.try_send(mode).is_ok()
+    } else {
+        selector::set_forced(mode);
+        true
+    }
+}
+
 /// The rectangular region of the central's keymap covered by one split
 /// peripheral: its matrix size, and where it sits.
 #[derive(Debug, Clone, Copy)]
