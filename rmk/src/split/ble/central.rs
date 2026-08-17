@@ -34,6 +34,27 @@ const SPLIT_SERVICE_UUID: [u8; 16] = [
     70u8, 153u8, 101u8, 152u8, 54u8, 53u8, 10u8, 191u8, 7u8, 75u8, 229u8, 24u8, 170u8, 251u8, 213u8, 77u8,
 ];
 
+#[derive(Default)]
+struct KnownPeerRecovery {
+    missed_attempts: u8,
+}
+
+impl KnownPeerRecovery {
+    fn reset(&mut self) {
+        self.missed_attempts = 0;
+    }
+
+    fn missed(&mut self) -> bool {
+        self.missed_attempts = self.missed_attempts.saturating_add(1);
+        if self.missed_attempts >= super::KNOWN_PEER_CONNECT_RESCAN_ATTEMPTS {
+            self.reset();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 pub(crate) async fn scan_peripherals<
     C: Controller
         + ControllerCmdSync<LeSetScanParams>
@@ -61,10 +82,14 @@ pub(crate) async fn scan_peripherals<
                         ..Default::default()
                     };
                     let _guard = SCANNING_MUTEX.lock().await;
-                    if let Ok(_session) = scanner.scan(&scan_config).await {
-                        info!("Start scanning peripherals");
-                        STOP_SCANNING.wait().await;
-                        info!("Stop scanning");
+                    match scanner.scan(&scan_config).await {
+                        Ok(_session) => {
+                            info!("Start scanning peripherals");
+                            STOP_SCANNING.wait().await;
+                            info!("Stop scanning");
+                        }
+                        // Throttle retries while the controller refuses to scan
+                        Err(_) => embassy_time::Timer::after_millis(500).await,
                     }
                 }
             };
@@ -145,9 +170,11 @@ pub(crate) async fn run_ble_peripheral_manager<
     matrix_config: PeripheralMatrixConfig,
 ) {
     trace!("SPLIT_MESSAGE_MAX_SIZE: {}", SPLIT_MESSAGE_MAX_SIZE);
+    let mut recovery = KnownPeerRecovery::default();
 
     loop {
         // Check until the address is available
+        let discovering = slot.get().is_none();
         let address = loop {
             if let Some(addr) = slot.get() {
                 break Address::random(addr);
@@ -158,6 +185,9 @@ pub(crate) async fn run_ble_peripheral_manager<
             // Check again after 500ms
             Timer::after_millis(500).await;
         };
+        if discovering {
+            recovery.reset();
+        }
         info!("Peripheral peer address: {:?}", address);
 
         let mut central = stack.central();
@@ -176,7 +206,7 @@ pub(crate) async fn run_ble_peripheral_manager<
         set_peripheral_connected(peri_id, false);
 
         // Connect to peripheral
-        match with_timeout(Duration::from_secs(15), async {
+        match with_timeout(Duration::from_millis(super::KNOWN_PEER_CONNECT_REARM_MS), async {
             if let Ok(_guard) = SCANNING_MUTEX.try_lock() {
                 info!("Start connecting to peripheral {}", peri_id);
                 central.connect(&config).await
@@ -193,6 +223,7 @@ pub(crate) async fn run_ble_peripheral_manager<
         {
             Ok(Ok(conn)) => {
                 info!("Connected to peripheral {}", peri_id);
+                recovery.reset();
 
                 set_peripheral_connected(peri_id, true);
 
@@ -208,13 +239,45 @@ pub(crate) async fn run_ble_peripheral_manager<
                 error!("Connect to peripheral {} error: {:?}", peri_id, e);
             }
             Err(_) => {
-                // Connect to peripheral timeout
-                warn!("Connect to peripheral {} timeout, clearing", peri_id);
-                slot.set(None);
+                if recovery.missed() {
+                    warn!("Connect to peripheral {} repeatedly timed out, rescanning", peri_id);
+                    slot.set(None);
+                    FLASH_CHANNEL
+                        .send(FlashOperationMessage::PeerAddress(PeerAddress::new(
+                            peri_id as u8,
+                            false,
+                            [0; 6],
+                        )))
+                        .await;
+                } else {
+                    debug!("Connect to peripheral {} timed out, re-arming", peri_id);
+                    continue;
+                }
             }
         }
         // Reconnect after 500ms
         Timer::after_millis(500).await;
+    }
+}
+
+#[cfg(test)]
+mod known_peer_recovery_tests {
+    use super::KnownPeerRecovery;
+
+    #[test]
+    fn rescans_after_the_bounded_number_of_misses() {
+        let mut recovery = KnownPeerRecovery::default();
+        assert!(!recovery.missed());
+        assert!(recovery.missed());
+        assert!(!recovery.missed());
+    }
+
+    #[test]
+    fn a_success_resets_the_miss_streak() {
+        let mut recovery = KnownPeerRecovery::default();
+        assert!(!recovery.missed());
+        recovery.reset();
+        assert!(!recovery.missed());
     }
 }
 
@@ -400,13 +463,11 @@ impl<'a, 'b, 'c, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool> Sp
     }
 }
 
-/// Wait until the BLE stack's runner is up (latched by `serve`), plus a 500ms
-/// grace period. Polled because the one-shot latch has multiple waiters.
+/// Wait until the BLE stack's runner is up (latched by `serve`).
 async fn wait_for_stack_started() {
     while !STACK_STARTED.signaled() {
         Timer::after_millis(500).await;
     }
-    Timer::after_millis(500).await;
 }
 
 /// Keep one peripheral link's connection parameters in sync with the keyboard's
