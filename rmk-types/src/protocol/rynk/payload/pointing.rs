@@ -10,6 +10,26 @@ use serde::{Deserialize, Serialize};
 
 use crate::pointing::PointingMode;
 
+/// Pointing-mode feature bits returned by [`PointingCapabilities`].
+pub const POINTING_MODE_KEYPAD: u16 = 1 << 0;
+
+/// Optional pointing features supported by the running firmware.
+///
+/// The bit field can grow without changing this payload's postcard layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct PointingCapabilities {
+    pub mode_flags: u16,
+}
+
+impl PointingCapabilities {
+    pub const fn supports_keypad(self) -> bool {
+        self.mode_flags & POINTING_MODE_KEYPAD != 0
+    }
+}
+
 /// Pointing devices one [`PointingConfig`] can describe.
 pub const POINTING_DEVICE_CAPACITY: usize = 4;
 
@@ -125,7 +145,7 @@ pub struct SetPointingConfigRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pointing::{CursorConfig, DragConfig, ScrollConfig};
+    use crate::pointing::{CursorConfig, KeypadConfig, ScrollConfig};
     use crate::protocol::rynk::message::RYNK_MAX_PAYLOAD_SIZE;
     use crate::protocol::rynk::tests::{assert_max_size_bound, round_trip};
 
@@ -152,7 +172,7 @@ mod tests {
         config.overrides[1] = PointingLayerOverride {
             layer: 2,
             device_id: 1,
-            mode: PointingMode::Drag(DragConfig::default()),
+            mode: PointingMode::Keypad(KeypadConfig::default()),
         };
         config
     }
@@ -163,6 +183,9 @@ mod tests {
         round_trip(&PointingConfig::default());
         assert_max_size_bound(&populated());
         assert_max_size_bound(&SetPointingConfigRequest { config: populated() });
+        round_trip(&PointingCapabilities {
+            mode_flags: POINTING_MODE_KEYPAD,
+        });
     }
 
     /// The whole arrangement travels in one message, so it has to fit in one.
@@ -180,12 +203,26 @@ mod tests {
     fn override_wins_over_the_device_default() {
         let config = populated();
         // Layer 2 is overridden for both pads; layer 0 falls back.
-        assert_eq!(config.mode_for(1, 2), Some(PointingMode::Drag(DragConfig::default())));
+        assert_eq!(
+            config.mode_for(1, 2),
+            Some(PointingMode::Keypad(KeypadConfig::default()))
+        );
         assert_eq!(
             config.mode_for(1, 0),
             Some(PointingMode::Cursor(CursorConfig::default()))
         );
         // A device nobody configured is left alone.
         assert_eq!(config.mode_for(3, 0), None);
+    }
+
+    #[test]
+    fn keypad_capability_is_discoverable() {
+        assert!(
+            PointingCapabilities {
+                mode_flags: POINTING_MODE_KEYPAD,
+            }
+            .supports_keypad()
+        );
+        assert!(!PointingCapabilities { mode_flags: 0 }.supports_keypad());
     }
 }

@@ -42,6 +42,8 @@ GetMatrixState reply Ok(MatrixState{[0x05,0x00,0x20]})                  04 02 08
 GetMatrixState request ()                                               04 02 08 01 00
 GetMorse reply Ok(Morse{TAP->Key(A)})                                   04 01 04 01 01 04 01 02 01 02 04 00
 GetMorse request 0                                                      04 01 04 01 01 00
+GetPointingCapabilities reply Ok(PointingCapabilities{Keypad})          04 03 0a 01 02 01 00
+GetPointingCapabilities request ()                                      04 03 0a 01 00
 GetSleepState reply Ok(true)                                            04 06 08 01 02 01 00
 GetSleepState request ()                                                04 06 08 01 00
 GetVersion reply Ok(CURRENT)                                            02 01 02 01 01 02 01 00
