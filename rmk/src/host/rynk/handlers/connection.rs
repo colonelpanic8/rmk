@@ -7,6 +7,10 @@ use rmk_types::protocol::rynk::RynkError;
 #[cfg(feature = "_ble")]
 use rmk_types::protocol::rynk::command::{ClearBleProfile, GetBleStatus, SwitchBleProfile};
 use rmk_types::protocol::rynk::command::{GetConnectionStatus, GetConnectionType};
+#[cfg(feature = "split")]
+use rmk_types::protocol::rynk::command::{GetSplitTransport, SetSplitTransportForce};
+#[cfg(feature = "split")]
+use rmk_types::protocol::rynk::{SplitTransportForce, SplitTransportState};
 
 use super::super::RynkService;
 use super::Handle;
@@ -67,5 +71,62 @@ impl RynkService<'_> {
         } else {
             Ok(())
         }
+    }
+}
+
+#[cfg(feature = "split")]
+fn split_transport_state() -> SplitTransportState {
+    use crate::split::selector;
+    SplitTransportState {
+        auto: selector::auto_enabled(),
+        forced: match selector::forced_mode() {
+            selector::FORCE_WIRED => SplitTransportForce::Wired,
+            selector::FORCE_BLE => SplitTransportForce::Ble,
+            _ => SplitTransportForce::Auto,
+        },
+        cable_detected: selector::detected_wired(),
+        wired_active: selector::auto_enabled() && selector::wired_selected(),
+    }
+}
+
+/// `Cmd::GetSplitTransport` — selector snapshot; meaningful only on boards
+/// with an automatic split transport (`auto` is false otherwise).
+#[cfg(feature = "split")]
+impl Handle<GetSplitTransport> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<SplitTransportState, RynkError> {
+        Ok(split_transport_state())
+    }
+}
+
+/// `Cmd::SetSplitTransportForce` — volatile transport force. While a
+/// peripheral is connected the force travels to it over the split link
+/// first and the central applies it only after that send, so both halves
+/// rendezvous on the forced transport; with no peripheral connected it
+/// applies locally at once so a stranded central can still be steered.
+/// The echoed state reads the selector immediately and may still show the
+/// pre-force selection while the handoff is in flight — poll
+/// `GetSplitTransport` for the settled state.
+#[cfg(feature = "split")]
+impl Handle<SetSplitTransportForce> for RynkService<'_> {
+    async fn handle(&self, force: SplitTransportForce) -> Result<SplitTransportState, RynkError> {
+        use crate::split::selector;
+        if !selector::auto_enabled() {
+            return Err(RynkError::Invalid);
+        }
+        let mode = match force {
+            SplitTransportForce::Auto => selector::FORCE_AUTO,
+            SplitTransportForce::Wired => selector::FORCE_WIRED,
+            SplitTransportForce::Ble => selector::FORCE_BLE,
+        };
+        let connected = (0..crate::SPLIT_PERIPHERALS_NUM)
+            .any(|id| crate::split::driver::current_peripheral_status(id).is_some_and(|s| s.connected));
+        if connected {
+            crate::channel::SPLIT_TRANSPORT_FORCE_CHANNEL
+                .try_send(mode)
+                .map_err(|_| RynkError::NotReady)?;
+        } else {
+            selector::set_forced(mode);
+        }
+        Ok(split_transport_state())
     }
 }
