@@ -93,6 +93,14 @@ impl KeyboardTomlConfig {
             None
         };
         let ble_config = self.ble.clone();
+        if let Some(name) = ble_config.as_ref().and_then(|ble| ble.name.as_deref())
+            && (name.is_empty() || name.len() > 16)
+        {
+            return Err(format!(
+                "`[ble].name` must contain 1..=16 UTF-8 bytes, got {}",
+                name.len()
+            ));
+        }
 
         match (usb_info, ble_config) {
             (Some(usb_info), None) => Ok(CommunicationConfig::Usb(usb_info)),
