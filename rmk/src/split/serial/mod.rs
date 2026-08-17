@@ -1,4 +1,6 @@
+use embassy_time::{Duration, Timer, with_timeout};
 use embedded_io_async::{Read, Write};
+use heapless::Deque;
 
 use super::driver::SplitDriverError;
 use crate::split::driver::{PeripheralManager, SplitReader, SplitWriter, set_peripheral_connected};
@@ -19,7 +21,7 @@ pub(crate) async fn run_serial_peripheral_manager<S: Read + Write>(
     #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) {
     let split_serial_driver: SerialSplitDriver<S> = SerialSplitDriver::new(receiver);
-    let peripheral_manager = PeripheralManager::new(
+    let mut peripheral_manager = PeripheralManager::new(
         split_serial_driver,
         id,
         matrix_config,
@@ -31,6 +33,59 @@ pub(crate) async fn run_serial_peripheral_manager<S: Read + Write>(
     // A wired peripheral is connected for as long as its manager runs.
     set_peripheral_connected(id, true);
     peripheral_manager.run().await;
+}
+
+/// Run one central-side manager over a polled half-duplex serial bus.
+pub(crate) async fn run_half_duplex_peripheral_manager<S: Read + Write>(
+    id: usize,
+    serial: S,
+    matrix_config: crate::split::PeripheralMatrixConfig,
+    #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
+) {
+    let driver = HalfDuplexCentralDriver::new(serial);
+    let mut peripheral_manager = PeripheralManager::new(
+        driver,
+        id,
+        matrix_config,
+        #[cfg(feature = "dfu_split")]
+        policy,
+    );
+    info!("Running half-duplex peripheral manager {}", id);
+    set_peripheral_connected(id, true);
+    peripheral_manager.run().await;
+}
+
+/// Run one central-side manager only while automatic selection prefers wired.
+pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
+    id: usize,
+    serial: S,
+    matrix_config: crate::split::PeripheralMatrixConfig,
+    #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
+) {
+    let driver = HalfDuplexCentralDriver::new(serial);
+    let mut peripheral_manager = PeripheralManager::new(
+        driver,
+        id,
+        matrix_config,
+        #[cfg(feature = "dfu_split")]
+        policy,
+    );
+
+    loop {
+        crate::split::selector::wait_wired_selected().await;
+        set_peripheral_connected(id, true);
+        match embassy_futures::select::select(
+            peripheral_manager.run(),
+            crate::split::selector::wait_wireless_selected(),
+        )
+        .await
+        {
+            embassy_futures::select::Either::First(_) => {}
+            embassy_futures::select::Either::Second(_) => {
+                set_peripheral_connected(id, false);
+            }
+        }
+    }
 }
 
 /// Serial driver for BOTH split central and peripheral
@@ -113,6 +168,80 @@ impl<S: Write> SplitWriter for SerialSplitDriver<S> {
     }
 }
 
+const HALF_DUPLEX_POLL_INTERVAL: Duration = Duration::from_millis(1);
+const HALF_DUPLEX_RESPONSE_TIMEOUT: Duration = Duration::from_millis(5);
+const HALF_DUPLEX_QUEUE_CAPACITY: usize = 4;
+
+pub(crate) struct HalfDuplexCentralDriver<S> {
+    serial: SerialSplitDriver<S>,
+}
+
+impl<S> HalfDuplexCentralDriver<S> {
+    pub(crate) fn new(serial: S) -> Self {
+        Self {
+            serial: SerialSplitDriver::new(serial),
+        }
+    }
+}
+
+impl<S: Read + Write> SplitReader for HalfDuplexCentralDriver<S> {
+    async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
+        loop {
+            self.serial.write(&SplitMessage::HalfDuplexPoll).await?;
+            if let Ok(message) = with_timeout(HALF_DUPLEX_RESPONSE_TIMEOUT, self.serial.read()).await {
+                let message = message?;
+                if !matches!(message, SplitMessage::HalfDuplexIdle) {
+                    return Ok(message);
+                }
+            }
+            Timer::after(HALF_DUPLEX_POLL_INTERVAL).await;
+        }
+    }
+}
+
+impl<S: Write> SplitWriter for HalfDuplexCentralDriver<S> {
+    async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
+        self.serial.write(message).await
+    }
+}
+
+pub(crate) struct HalfDuplexPeripheralDriver<S> {
+    serial: SerialSplitDriver<S>,
+    pending: Deque<SplitMessage, HALF_DUPLEX_QUEUE_CAPACITY>,
+}
+
+impl<S> HalfDuplexPeripheralDriver<S> {
+    pub(crate) fn new(serial: S) -> Self {
+        Self {
+            serial: SerialSplitDriver::new(serial),
+            pending: Deque::new(),
+        }
+    }
+}
+
+impl<S: Read + Write> SplitReader for HalfDuplexPeripheralDriver<S> {
+    async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
+        loop {
+            let message = self.serial.read().await?;
+            if matches!(message, SplitMessage::HalfDuplexPoll) {
+                let response = self.pending.pop_front().unwrap_or(SplitMessage::HalfDuplexIdle);
+                self.serial.write(&response).await?;
+            } else {
+                return Ok(message);
+            }
+        }
+    }
+}
+
+impl<S> SplitWriter for HalfDuplexPeripheralDriver<S> {
+    async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
+        self.pending
+            .push_back(*message)
+            .map_err(|_| SplitDriverError::SerialError)?;
+        Ok(SPLIT_MESSAGE_MAX_SIZE)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -130,6 +259,7 @@ mod tests {
     struct FakeSerial {
         chunks: VecDeque<Vec<u8>>,
         read_calls: usize,
+        writes: Vec<Vec<u8>>,
     }
 
     impl FakeSerial {
@@ -137,6 +267,7 @@ mod tests {
             Self {
                 chunks: chunks.into_iter().collect(),
                 read_calls: 0,
+                writes: Vec::new(),
             }
         }
     }
@@ -161,10 +292,61 @@ mod tests {
         }
     }
 
+    impl Write for FakeSerial {
+        async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+            self.writes.push(buf.to_vec());
+            Ok(buf.len())
+        }
+
+        async fn flush(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
     fn encode(msg: &SplitMessage) -> Vec<u8> {
         let mut buf = [0u8; SPLIT_MESSAGE_MAX_SIZE];
         let encoded = postcard::to_slice_cobs(msg, &mut buf).unwrap();
         encoded.to_vec()
+    }
+
+    fn decode(bytes: &[u8]) -> SplitMessage {
+        let mut bytes = bytes.to_vec();
+        postcard::from_bytes_cobs(&mut bytes).unwrap()
+    }
+
+    #[test]
+    fn half_duplex_central_polls_before_reading() {
+        let fake = FakeSerial::new([encode(&SplitMessage::LedState(true))]);
+        let mut driver = HalfDuplexCentralDriver::new(fake);
+
+        let message = block_on(driver.read()).unwrap();
+
+        assert!(matches!(message, SplitMessage::LedState(true)));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[0]),
+            SplitMessage::HalfDuplexPoll
+        ));
+    }
+
+    #[test]
+    fn half_duplex_peripheral_only_transmits_in_response_to_poll() {
+        let status = rmk_types::connection::ConnectionStatus::default();
+        let fake = FakeSerial::new([
+            encode(&SplitMessage::HalfDuplexPoll),
+            encode(&SplitMessage::ConnectionStatus(status)),
+        ]);
+        let mut driver = HalfDuplexPeripheralDriver::new(fake);
+
+        block_on(driver.write(&SplitMessage::LedState(true))).unwrap();
+        assert!(driver.serial.serial.writes.is_empty());
+
+        let message = block_on(driver.read()).unwrap();
+
+        assert!(matches!(message, SplitMessage::ConnectionStatus(_)));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[0]),
+            SplitMessage::LedState(true)
+        ));
     }
 
     #[test]

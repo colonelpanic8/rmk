@@ -133,6 +133,66 @@ serial = [
 serial = [{ instance = "PIO0", tx_pin = "PIN_0", rx_pin = "PIN_0" }]
 ```
 
+An nRF52 keyboard whose split bus uses a direction-controlled half-duplex
+transceiver can configure UARTE directly. RMK polls the peripheral so only one
+half drives the bus at a time:
+
+```toml
+[split]
+connection = "serial"
+
+[split.central]
+..
+serial = [{
+    instance = "UARTE0",
+    tx_pin = "P1_08",
+    rx_pin = "P1_09",
+    half_duplex = true,
+    direction_pin = "P0_11",
+    baudrate = 921600,
+    timer = "TIMER2",
+    ppi_channels = ["PPI_CH0", "PPI_CH1"],
+}]
+
+[[split.peripheral]]
+..
+serial = [{
+    instance = "UARTE0",
+    tx_pin = "P1_08",
+    rx_pin = "P1_09",
+    half_duplex = true,
+    direction_pin = "P0_11",
+    baudrate = 921600,
+    timer = "TIMER2",
+    ppi_channels = ["PPI_CH0", "PPI_CH1"],
+}]
+```
+
+`timer` and `ppi_channels` are optional together; they default to `TIMER2`,
+`PPI_CH0`, and `PPI_CH1`. Choose different resources if the board already uses
+those peripherals.
+
+To prefer that wired link while a cable is present and otherwise use BLE
+between the halves, select `auto` and add the cable-detect GPIO to both boards:
+
+```toml
+[split]
+connection = "auto"
+
+[split.central]
+ble_addr = [0x01, 0x30, 0x36, 0x4f, 0x47, 0xc7]
+detect_pin = "P1_10"
+serial = [{ instance = "UARTE0", tx_pin = "P1_08", rx_pin = "P1_09", half_duplex = true, direction_pin = "P0_11", baudrate = 921600 }]
+
+[[split.peripheral]]
+ble_addr = [0x02, 0x30, 0x36, 0x4f, 0x47, 0xc7]
+detect_pin = "P1_10"
+serial = [{ instance = "UARTE0", tx_pin = "P1_08", rx_pin = "P1_09", half_duplex = true, direction_pin = "P0_11", baudrate = 921600 }]
+```
+
+Cable detection is active-high by default. Set `detect_active_low = true` on
+both boards when the hardware asserts the pin low instead.
+
 ## Define central and peripherals via Rust
 
 ::: info
@@ -181,12 +241,12 @@ let mut ble_transport = BleTransport::new(
     controller,
     ble_addr,
     rmk_config,
-    [PeripheralMatrixConfig {
+    Some([PeripheralMatrixConfig {
         rows: 2,
         cols: 1,
         row_offset: 2,
         col_offset: 2,
-    }],
+    }]),
 );
 run_all!(matrix, storage, ble_transport, keyboard).await;
 ```
@@ -236,7 +296,7 @@ let mut matrix = Matrix::<_, _, _, 4, 7, true>::new(row_pins, col_pins, debounce
 let uart_instance = BufferedUart::new(p.UART0, p.PIN_0, p.PIN_1, Irqs, tx_buf, rx_buf, uart::Config::default());
 
 // UART split peripheral, arguments might be different for other microcontrollers, check the API docs or examples for other usages.
-run_rmk_split_peripheral(uart_instance),
+run_rmk_split_peripheral_serial(uart_instance),
 ```
 
 </Tab>
