@@ -9,6 +9,7 @@ use {super::ble::PeerAddress, crate::channel::FLASH_CHANNEL};
 #[cfg(feature = "_ble")]
 use {
     crate::event::{BatteryStatusEvent, ChargingStateEvent, EventSubscriber},
+    rmk_types::battery::BatteryStatus,
     trouble_host::prelude::*,
 };
 
