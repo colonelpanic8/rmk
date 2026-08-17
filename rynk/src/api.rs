@@ -20,16 +20,17 @@ use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::modifier::ModifierCombination;
-use rmk_types::morse::Morse;
+use rmk_types::morse::{Morse, MorseProfile};
 use rmk_types::protocol::rynk::{
     AbortLightingOverlayReplaceRequest, AbortLightingRuntimeConditionalSceneReplaceRequest,
-    AbortLightingSceneReplaceRequest, BeginLightingOverlayReplaceRequest,
-    BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig, BuildInfo,
-    ClearLightingOverlayRequest, Cmd, CommitLightingOverlayReplaceRequest,
+    AbortLightingSceneReplaceRequest, AutoMouseLayerConfigState, BeginLightingOverlayReplaceRequest,
+    BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig,
+    BehaviorOptions, BuildInfo, ClearLightingOverlayRequest, Cmd, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
     DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest,
-    GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LayerState,
-    LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
+    GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest,
+    GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerState, LightingCapabilities,
+    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
     LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage, LightingExtension,
     LightingExtensionLayers, LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionNamesRequest,
     LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest,
@@ -40,15 +41,16 @@ use rmk_types::protocol::rynk::{
     LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
     LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZone, LightingZoneId,
     LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState, MorseHoldTriggerPositionState,
-    PeripheralStatus, PointingCapabilities, PointingConfig, ProtocolVersion,
+    MorseProfileEntry, MorseProfileState, PeripheralStatus, PointingCapabilities, PointingConfig, ProtocolVersion,
     PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
-    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest, SetComboRequest,
-    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
-    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
-    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseRequest,
-    SetPointingConfigRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
-    UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
+    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetAutoMouseLayerConfigsRequest,
+    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
+    SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
+    SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
+    SetLightingSceneCellRequest, SetLightingStateRequest, SetMacroRequest, SetMorseBulkRequest,
+    SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
+    SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, SplitCentralLatencyPolicy,
+    SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -361,6 +363,62 @@ impl Client {
         self.request::<command::SetMorseHoldTriggerPositions>(&request).await
     }
 
+    /// Read how many morse profile slots the device has.
+    ///
+    /// Doubles as the feature probe: firmware built before the profile
+    /// endpoints answers [`RynkHostError::Rejected`] with
+    /// [`RynkError::UnknownCmd`](rmk_types::protocol::rynk::RynkError::UnknownCmd),
+    /// and none of the calls below will work against it.
+    pub async fn get_morse_profile_count(&self) -> Result<u8, RynkHostError> {
+        self.request::<command::GetMorseProfileCount>(&()).await
+    }
+
+    /// Read the profile a tap-hold key bound to `index` resolves to. A slot
+    /// nothing has written reads as the device's default profile.
+    pub async fn get_morse_profile(&self, index: u8) -> Result<MorseProfile, RynkHostError> {
+        self.request::<command::GetMorseProfile>(&index).await
+    }
+
+    /// Write one morse profile by index. Every tap-hold key bound to that index
+    /// picks the new timings up on its next press.
+    pub async fn set_morse_profile(&self, index: u8, profile: MorseProfile) -> Result<(), RynkHostError> {
+        self.request::<command::SetMorseProfile>(&SetMorseProfileRequest { index, profile })
+            .await
+    }
+
+    /// Read one page of morse profiles starting at slot `start_index`, with the
+    /// same paging rules as [`get_morse_bulk`](Self::get_morse_bulk).
+    /// Requires [`DeviceCapabilities::bulk_transfer_supported`]; nothing is sent otherwise.
+    pub async fn get_morse_profile_bulk(&self, start_index: u8) -> Result<GetMorseProfileBulkResponse, RynkHostError> {
+        self.require_bulk_transfer(Cmd::GetMorseProfileBulk)?;
+        self.request::<command::GetMorseProfileBulk>(&GetMorseProfileBulkRequest { start_index })
+            .await
+    }
+
+    /// Write `request.profiles` into consecutive profile slots starting at
+    /// `request.start_index`.
+    /// Requires [`DeviceCapabilities::bulk_transfer_supported`]; nothing is sent otherwise.
+    pub async fn set_morse_profile_bulk(&self, request: SetMorseProfileBulkRequest) -> Result<(), RynkHostError> {
+        self.require_bulk_transfer(Cmd::SetMorseProfileBulk)?;
+        self.request::<command::SetMorseProfileBulk>(&request).await
+    }
+
+    /// Read the sparse set of occupied profile slots and their persistent names.
+    pub async fn get_morse_profile_state(&self, offset: u8) -> Result<MorseProfileState, RynkHostError> {
+        self.request::<command::GetMorseProfileState>(&GetMorseProfileStateRequest { offset })
+            .await
+    }
+
+    /// Create, rename, or update one stable profile slot.
+    pub async fn set_morse_profile_entry(&self, request: SetMorseProfileEntryRequest) -> Result<(), RynkHostError> {
+        self.request::<command::SetMorseProfileEntry>(&request).await
+    }
+
+    /// Vacate one profile slot without renumbering later bindings.
+    pub async fn delete_morse_profile(&self, index: u8) -> Result<(), RynkHostError> {
+        self.request::<command::DeleteMorseProfile>(&index).await
+    }
+
     /// Read one chunk of macro data starting at byte `offset`. Chunks are always full
     /// size, zero-filled past the end of macro space, so find the end by parsing the
     /// macro encoding rather than waiting for a short chunk.
@@ -391,15 +449,41 @@ impl Client {
         self.request::<command::GetPointingCapabilities>(&()).await
     }
 
-    /// Read the complete pointing-device arrangement.
+    /// Read every pointing device's configuration, layer overrides included.
     pub async fn get_pointing_config(&self) -> Result<PointingConfig, RynkHostError> {
         self.request::<command::GetPointingConfig>(&()).await
     }
 
-    /// Replace the complete pointing-device arrangement.
+    /// Replace the pointing configuration and return what the device now
+    /// holds. The write is rejected unless `config.revision` still matches
+    /// the device's, so read before writing and retry on rejection.
     pub async fn set_pointing_config(&self, config: PointingConfig) -> Result<PointingConfig, RynkHostError> {
         self.request::<command::SetPointingConfig>(&SetPointingConfigRequest { config })
             .await
+    }
+
+    /// Read the global behavior settings added after [`BehaviorConfig`].
+    /// Firmware predating the endpoint rejects this with `UnknownCmd`.
+    pub async fn get_behavior_options(&self) -> Result<BehaviorOptions, RynkHostError> {
+        self.request::<command::GetBehaviorOptions>(&()).await
+    }
+
+    /// Replace the global behavior settings added after [`BehaviorConfig`].
+    pub async fn set_behavior_options(&self, options: BehaviorOptions) -> Result<(), RynkHostError> {
+        self.request::<command::SetBehaviorOptions>(&options).await
+    }
+
+    /// Read the complete auto mouse layer table and the firmware's capacity.
+    pub async fn get_auto_mouse_layer_configs(&self) -> Result<AutoMouseLayerConfigState, RynkHostError> {
+        self.request::<command::GetAutoMouseLayerConfigs>(&()).await
+    }
+
+    /// Atomically replace the complete auto mouse layer table.
+    pub async fn set_auto_mouse_layer_configs(
+        &self,
+        request: SetAutoMouseLayerConfigsRequest,
+    ) -> Result<(), RynkHostError> {
+        self.request::<command::SetAutoMouseLayerConfigs>(&request).await
     }
 
     /// Read the currently active layer.
@@ -1001,6 +1085,36 @@ impl Client {
             c.get_morse_bulk(start as u8).await.map(|r| r.configs)
         })
         .await
+    }
+
+    /// Read every morse profile slot with concurrent paged reads. The slot count
+    /// is not in [`DeviceCapabilities`], so this asks the device for it first.
+    pub async fn read_all_morse_profiles(&self) -> Result<Vec<MorseProfile>, RynkHostError> {
+        let total = self.get_morse_profile_count().await? as usize;
+        self.read_all(total, self.capabilities.max_bulk_items, async |c, start| {
+            c.get_morse_profile_bulk(start as u8).await.map(|r| r.profiles)
+        })
+        .await
+    }
+
+    /// Read the complete sparse named-profile catalog a page at a time.
+    pub async fn read_morse_profile_state(&self) -> Result<MorseProfileState, RynkHostError> {
+        let first = self.get_morse_profile_state(0).await?;
+        let capacity = first.capacity;
+        let total = first.total;
+        let mut entries: Vec<MorseProfileEntry> = first.entries;
+        while entries.len() < total as usize {
+            let page = self.get_morse_profile_state(entries.len() as u8).await?;
+            if page.entries.is_empty() {
+                break;
+            }
+            entries.extend(page.entries);
+        }
+        Ok(MorseProfileState {
+            capacity,
+            total: entries.len() as u8,
+            entries,
+        })
     }
 
     /// Write the whole keymap with concurrent paged writes, each page filled up to the
@@ -1646,6 +1760,20 @@ impl Client {
             c.set_morse_bulk(SetMorseBulkRequest {
                 start_index: start as u8,
                 configs,
+            })
+            .await
+        })
+        .await
+    }
+
+    /// Write every morse profile with concurrent paged writes, each page filled
+    /// up to the device's payload limit. A failure leaves the earlier pages applied.
+    pub async fn write_all_morse_profiles(&self, profiles: Vec<MorseProfile>) -> Result<(), RynkHostError> {
+        // 1 fixed byte before the items: start_index.
+        self.write_all(Cmd::SetMorseProfileBulk, 1, profiles, async |c, start, profiles| {
+            c.set_morse_profile_bulk(SetMorseProfileBulkRequest {
+                start_index: start as u8,
+                profiles,
             })
             .await
         })
