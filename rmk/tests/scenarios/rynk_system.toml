@@ -12,11 +12,6 @@ map = """
 [[keymap.layer]]
 keys = "A  No"
 
-# `BootloaderJump` and `StorageReset` are gated unconditionally, so the file
-# carries a challenge the scenarios can complete.
-[host]
-unlock_keys = [[0, 1]]
-
 [[test]]
 name = "version_is_the_frozen_handshake"
 steps = [
@@ -50,6 +45,12 @@ steps = [
 ]
 
 [[test]]
+name = "maintenance_mode_defaults_enabled"
+steps = [
+  { rynk = { cmd = "GetMaintenanceMode", reply = { enabled = true, default_enabled = true } } },
+]
+
+[[test]]
 name = "layout_blob_pages_from_an_offset"
 steps = [
   # The blob is rmk-config's compressed layout format, not rynk's; if its
@@ -71,12 +72,8 @@ steps = [
 ]
 
 [[test]]
-name = "bootloader_jump_needs_an_unlock"
+name = "bootloader_jump_runs_when_maintenance_mode_is_enabled"
 steps = [
-  { rynk = { cmd = "BootloaderJump", error = "Locked" } },
-  { press = [0, 1] },
-  { rynk = { cmd = "UnlockPoll", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [[0, 1]] } } },
-  { release = [0, 1] },
   { rynk = { cmd = "BootloaderJump" } },
 ]
 
@@ -84,9 +81,6 @@ steps = [
 name = "storage_reset_clears_the_whole_store"
 features = ["storage"]
 steps = [
-  { press = [0, 1] },
-  { rynk = { cmd = "UnlockPoll", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [[0, 1]] } } },
-  { release = [0, 1] },
   { rynk = { cmd = "StorageReset", payload = "Full" } },
 ]
 
@@ -95,8 +89,5 @@ steps = [
 [[test]]
 name = "layout_only_reset_is_unimplemented"
 steps = [
-  { press = [0, 1] },
-  { rynk = { cmd = "UnlockPoll", reply = { locked = false, unlocking = false, remaining_keys = 0, key_positions = [[0, 1]] } } },
-  { release = [0, 1] },
   { rynk = { cmd = "StorageReset", payload = "LayoutOnly", error = "Unimplemented" } },
 ]
