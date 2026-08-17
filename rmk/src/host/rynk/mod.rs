@@ -101,6 +101,8 @@ impl RynkSession {
 
 impl<'a> RynkService<'a> {
     pub fn new(keymap: &'a KeyMap<'a>, config: &RmkConfig<'static>) -> Self {
+        #[cfg(feature = "_ble")]
+        crate::ble::name::initialize(config.ble_name.unwrap_or(config.device_config.product_name));
         crate::state::initialize_maintenance_mode(config.lock_config.maintenance_mode_default);
         let mut ctx = KeyboardContext::new(keymap);
         // Layout is fixed at macro expansion time, like Vial's keyboard-def.
@@ -156,6 +158,8 @@ impl<'a> RynkService<'a> {
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => true,
+            #[cfg(feature = "_ble")]
+            Cmd::SetBleName => true,
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::SetSplitCentralLatency => true,
             Cmd::SetKeyAction
@@ -288,6 +292,10 @@ impl<'a> RynkService<'a> {
             Cmd::SwitchBleProfile => serve::<command::SwitchBleProfile, _>(self, msg).await,
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => serve::<command::ClearBleProfile, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::GetBleName => serve::<command::GetBleName, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::SetBleName => serve::<command::SetBleName, _>(self, msg).await,
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::GetSplitCentralLatency => serve::<command::GetSplitCentralLatency, _>(self, msg).await,
             #[cfg(all(feature = "_ble", feature = "split"))]
