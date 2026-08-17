@@ -10,6 +10,7 @@ pub struct Behavior {
     pub forks: Option<Forks>,
     pub morse: Option<Morse>,
     pub auto_mouse_layer: Vec<AutoMouseLayer>,
+    pub mouse_layer_scale: Vec<MouseLayerScale>,
 }
 
 pub struct AutoMouseLayer {
@@ -22,6 +23,12 @@ pub struct AutoMouseLayer {
     pub reset_timeout_on_key: bool,
 }
 
+pub struct MouseLayerScale {
+    pub layer: u8,
+    pub move_scale: [u16; 2],
+    pub scroll_scale: [u16; 2],
+}
+
 /// Default idle timeout (in milliseconds) for [`AutoMouseLayer`] when not specified in `keyboard.toml`.
 pub const DEFAULT_AUTO_MOUSE_LAYER_TIMEOUT_MS: u64 = 500;
 
@@ -30,6 +37,9 @@ pub const DEFAULT_AUTO_MOUSE_LAYER_THRESHOLD: u16 = 1;
 
 /// Fallback for `auto_mouse_layer_max_num` when no `keyboard.toml` is loaded.
 pub const DEFAULT_AUTO_MOUSE_LAYER_MAX_NUM: usize = 2;
+
+/// Fallback for `mouse_layer_scale_max_num` when no `keyboard.toml` is loaded.
+pub const DEFAULT_MOUSE_LAYER_SCALE_MAX_NUM: usize = 2;
 
 pub struct OneShot {
     pub activate_on_keypress: Option<bool>,
@@ -252,6 +262,17 @@ impl crate::KeyboardTomlConfig {
             })
             .collect();
 
+        let mouse_layer_scale = toml_behavior
+            .mouse_layer_scale
+            .unwrap_or_default()
+            .into_iter()
+            .map(|scale| MouseLayerScale {
+                layer: scale.layer,
+                move_scale: scale.r#move.unwrap_or([1, 1]),
+                scroll_scale: scale.scroll.unwrap_or([1, 1]),
+            })
+            .collect();
+
         Ok(Behavior {
             tri_layer,
             one_shot_timeout_ms,
@@ -261,6 +282,7 @@ impl crate::KeyboardTomlConfig {
             forks,
             morse,
             auto_mouse_layer,
+            mouse_layer_scale,
         })
     }
 }
