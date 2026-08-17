@@ -102,3 +102,9 @@ pub(crate) fn clear_and_release_report_channel(transport: ConnectionType) {
 
 #[cfg(feature = "_ble")]
 pub(crate) static BLE_PROFILE_CHANNEL: Channel<RawMutex, BleProfileAction, 1> = Channel::new();
+
+/// Split-transport force requests (`selector::FORCE_*`), pushed by the Rynk
+/// handler and drained by the central's `PeripheralManager`, which forwards
+/// the force to the peripheral before applying it locally.
+#[cfg(feature = "split")]
+pub(crate) static SPLIT_TRANSPORT_FORCE_CHANNEL: Channel<RawMutex, u8, 1> = Channel::new();

@@ -30,6 +30,8 @@ use crate::led_indicator::LedIndicator;
 use crate::morse::Morse;
 #[cfg(feature = "split")]
 use crate::protocol::rynk::PeripheralStatus;
+#[cfg(feature = "split")]
+use crate::protocol::rynk::{SplitTransportForce, SplitTransportState};
 
 /// CMD high bit marking a topic (server → host push).
 const RYNK_TOPIC_BIT: u16 = 0x8000;
@@ -325,6 +327,12 @@ endpoints! {
     /// Disconnect a profile and keep its bond until a new host pairs with it.
     #[cfg(feature = "_ble")]
     DisconnectBleProfile = 0x0706: u8 => ();
+    #[cfg(feature = "split")]
+    /// Read the split-transport selector: policy, force, cable detect.
+    GetSplitTransport = 0x070A: () => SplitTransportState;
+    #[cfg(feature = "split")]
+    /// Force the split transport (volatile); echoes the resulting state.
+    SetSplitTransportForce = 0x070B: SplitTransportForce => SplitTransportState;
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
