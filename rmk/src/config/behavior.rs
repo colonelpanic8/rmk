@@ -3,6 +3,7 @@ use heapless::Vec;
 use rmk_types::fork::Fork;
 use rmk_types::keycode::KeyCode;
 use rmk_types::morse::{Morse, MorseMode, MorseProfile};
+use rmk_types::unicode::UnicodeMode;
 
 use crate::keyboard::combo::Combo;
 use crate::{
@@ -38,6 +39,7 @@ pub struct BehaviorConfig {
     pub mouse_key: MouseKeyConfig,
     pub auto_mouse_layer: Vec<AutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>,
     pub mouse_layer_scale: Vec<MouseLayerScaleConfig, MOUSE_LAYER_SCALE_MAX_NUM>,
+    pub unicode: UnicodeConfig,
 }
 
 /// Mouse movement and scroll scaling for one active layer.
@@ -46,6 +48,17 @@ pub struct MouseLayerScaleConfig {
     pub layer: u8,
     pub move_scale: [u16; 2],
     pub scroll_scale: [u16; 2],
+}
+
+/// Config for unicode codepoint input
+#[derive(Debug, Default)]
+pub struct UnicodeConfig {
+    /// Codepoints addressed by `Action::Unicode(n)`. A `&'static` slice, so the
+    /// table lives in flash at 4 bytes per codepoint.
+    pub codepoints: &'static [u32],
+    /// Input method the codepoints are typed through; restored from flash on
+    /// boot, changed at runtime by `KeyboardAction::UnicodeModeCycle`.
+    pub mode: UnicodeMode,
 }
 
 /// Config for auto mouse layer behavior
