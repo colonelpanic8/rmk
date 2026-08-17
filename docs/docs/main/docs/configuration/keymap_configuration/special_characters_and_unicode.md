@@ -24,8 +24,43 @@ Each unicode symbol has an `code point` (aka alt-sequence) identifying it, usual
 
 Depending on your Operating System and Keyboard Layout you can enter a specific character by pressing a key combination, usually using the alt modifier.
 
-If you are using Windows, follow [this description](https://altcodeunicode.com/how-to-use-alt-codes/) to enter unicode characters.
+RMK types that key combination for you. List the codepoints you want under `[behavior.unicode]` and bind `UNICODE(n)` to the n-th entry of the list:
 
-MacOS has a key layout called `Unicode Hex Input`, which is similar to en-US, but allows entering unicode alt sequences by holding alt pressed and entering the unicode number.
+```toml
+[behavior.unicode]
+default_mode = "linux"                   # linux | macos | windows
+codepoints = ["00E9", "2764", "1F44D"]   # hex, no `U+` prefix
 
-In rmk you can define the input sequence for printing a unicode symbol using [Macro Sequences](./keyboard_macros.md).
+[[keymap.layer]]
+keys = """
+UNICODE(0)  UNICODE(1)  UNICODE(2)  UnicodeModeCycle  ...
+"""
+```
+
+The table is `&'static`, so it lives in flash and costs 4 bytes per codepoint. That is what makes it a better fit than [macro sequences](./keyboard_macros.md) for a layer full of symbols: macros share the fixed `macro_space_size` RAM buffer, which a few dozen codepoints already exhaust.
+
+## Input modes
+
+`default_mode` picks the input method the codepoint is typed through:
+
+| Mode | Sequence | Requires |
+| --- | --- | --- |
+| `linux` | `Ctrl+Shift+U`, hex digits, `Enter` | IBus |
+| `macos` | Hex digits typed with `LeftAlt` held | The `Unicode Hex Input` keyboard layout |
+| `windows` | `RightAlt`, `u`, hex digits, `Enter` | [WinCompose](https://github.com/samhocevar/wincompose) |
+
+`macos` reads exactly four hex digits per UTF-16 code unit, so codepoints above `U+FFFF` are typed as a surrogate pair. The other two take the codepoint itself.
+
+Bind `UnicodeModeCycle` to move between the three modes at runtime. The chosen mode is written to storage and restored on the next boot, so it only has to be set once per host.
+
+## Shifted variants
+
+`UNICODE(n)` does not look at the shift state. Pair two codepoints with a [fork](../behavior.md) when a key should type a different one while shift is held:
+
+```toml
+[[behavior.fork.forks]]
+trigger = "UNICODE(0)"
+negative_output = "UNICODE(0)"
+positive_output = "UNICODE(1)"
+match_any = "LShift|RShift"
+```
