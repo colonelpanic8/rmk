@@ -22,4 +22,6 @@ pub enum KeyboardAction {
     ComboOff,
     ComboToggle,
     CapsWordToggle,
+    /// Cycle the unicode input mode and persist the new one.
+    UnicodeModeCycle,
 }
