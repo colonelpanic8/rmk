@@ -14,6 +14,7 @@ mod layout;
 pub(super) mod lighting;
 mod macro_data;
 mod morse;
+mod pointing;
 mod status;
 mod system;
 
