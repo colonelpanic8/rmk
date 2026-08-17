@@ -135,6 +135,8 @@ enable_flow_tap = true
 prior_idle_time = "120ms"
 hold_on_other_press = true
 unilateral_tap = false
+# Set true instead of unilateral_tap for strict geometry-gated holds.
+opposite_hand_hold = false
 hold_timeout = "250ms"
 gap_timeout = "250ms"
 
