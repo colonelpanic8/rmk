@@ -456,7 +456,6 @@ fn wire_values_locked() {
         default_layer: 2,
         active_bitmap: [0x05, 0, 0, 0, 0, 0, 0, 0x80],
     };
-    let profile = MorseProfile::new(None, Some(MorseMode::Normal), Some(200), Some(150));
     let split_latency_policy = SplitCentralLatencyPolicy {
         powered: 0,
         battery: 4,
