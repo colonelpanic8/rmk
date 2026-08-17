@@ -11,7 +11,9 @@ use {
 };
 
 use crate::MACRO_SPACE_SIZE;
-use crate::config::{BehaviorConfig, Hand, MouseKeyConfig, OneShotModifiersConfig, PositionalConfig};
+use crate::config::{
+    BehaviorConfig, Hand, MouseKeyConfig, MouseLayerScaleConfig, OneShotModifiersConfig, PositionalConfig,
+};
 use crate::event::{KeyboardEvent, KeyboardEventPos, LayerChangeEvent, publish_event};
 use crate::input_device::rotary_encoder::Direction;
 use crate::keyboard::combo::Combo;
@@ -592,6 +594,17 @@ impl<'a> KeyMap<'a> {
 
     pub(crate) fn mouse_key_config(&self) -> MouseKeyConfig {
         self.inner.borrow().behavior.mouse_key
+    }
+
+    pub(crate) fn mouse_layer_scale(&self) -> Option<MouseLayerScaleConfig> {
+        let inner = self.inner.borrow();
+        let active_layer = inner.get_activated_layer();
+        inner
+            .behavior
+            .mouse_layer_scale
+            .iter()
+            .find(|config| config.layer == active_layer)
+            .copied()
     }
 
     pub(crate) fn forks_is_empty(&self) -> bool {
