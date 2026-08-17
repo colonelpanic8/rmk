@@ -40,14 +40,15 @@ use rmk_types::protocol::rynk::{
     LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
     LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZone, LightingZoneId,
     LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState, MorseHoldTriggerPositionState,
-    PeripheralStatus, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
-    PutLightingOverlayChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
-    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
-    SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
-    SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
-    SetLightingSceneCellRequest, SetLightingStateRequest, SetMacroRequest, SetMorseBulkRequest,
-    SetMorseHoldTriggerPositionsRequest, SetMorseRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState,
-    StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
+    PeripheralStatus, PointingCapabilities, PointingConfig, ProtocolVersion,
+    PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
+    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest, SetComboRequest,
+    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
+    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
+    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
+    SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseRequest,
+    SetPointingConfigRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
+    UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -382,6 +383,23 @@ impl Client {
     /// Write the global behavior config.
     pub async fn set_behavior(&self, config: BehaviorConfig) -> Result<(), RynkHostError> {
         self.request::<command::SetBehaviorConfig>(&config).await
+    }
+
+    /// Discover optional pointing modes supported by the running firmware.
+    /// Older firmware reports [`RynkError::UnknownCmd`].
+    pub async fn get_pointing_capabilities(&self) -> Result<PointingCapabilities, RynkHostError> {
+        self.request::<command::GetPointingCapabilities>(&()).await
+    }
+
+    /// Read the complete pointing-device arrangement.
+    pub async fn get_pointing_config(&self) -> Result<PointingConfig, RynkHostError> {
+        self.request::<command::GetPointingConfig>(&()).await
+    }
+
+    /// Replace the complete pointing-device arrangement.
+    pub async fn set_pointing_config(&self, config: PointingConfig) -> Result<PointingConfig, RynkHostError> {
+        self.request::<command::SetPointingConfig>(&SetPointingConfigRequest { config })
+            .await
     }
 
     /// Read the currently active layer.
