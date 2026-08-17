@@ -403,7 +403,11 @@ mod tests {
     }
 
     fn event_for(device_id: u8, axes: [AxisEvent; 3]) -> PointingEvent {
-        PointingEvent { device_id, axes }
+        PointingEvent {
+            device_id,
+            axes,
+            buttons: 0,
+        }
     }
 
     fn entry(device_id: Option<u8>) -> EntryState {

@@ -118,6 +118,11 @@ pub struct PointingEvent {
     pub device_id: u8,
     /// Raw axis values (X, Y, Z).
     pub axes: [AxisEvent; 3],
+    /// Device-originated button state (same bit order as the HID mouse
+    /// report: bit 0 is the primary button). Devices without physical
+    /// buttons or tap detection report 0; these bits are OR-ed with
+    /// keymap-driven mouse buttons when a report is built.
+    pub buttons: u8,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Copy, MaxSize)]
