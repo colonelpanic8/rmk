@@ -6,8 +6,12 @@ use embassy_time::Duration;
 use embedded_storage::nor_flash::NorFlash;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use postcard::experimental::max_size::MaxSize;
+use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::connection::ConnectionType;
-use rmk_types::morse::MorseProfile;
+use rmk_types::morse::{MorseProfile, MorseProfileName};
+use rmk_types::protocol::rynk::BehaviorOptions;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::PointingConfig;
 #[cfg(all(feature = "lighting", feature = "rynk"))]
 use rmk_types::protocol::rynk::{
     LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE,
@@ -15,8 +19,6 @@ use rmk_types::protocol::rynk::{
     LightingExtendedConditionalSceneCell, LightingLayerPolicy, LightingSceneCell,
 };
 use rmk_types::unicode::UnicodeMode;
-#[cfg(feature = "rynk")]
-use rmk_types::protocol::rynk::PointingConfig;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
@@ -149,6 +151,20 @@ pub(crate) enum FlashOperationMessage {
     },
     #[cfg(feature = "host")]
     MorseHoldTriggerPositions(HoldTriggerPositions),
+    #[cfg(feature = "host")]
+    MorseProfile {
+        idx: u8,
+        profile: MorseProfile,
+    },
+    #[cfg(feature = "host")]
+    MorseProfileName {
+        idx: u8,
+        name: MorseProfileName,
+    },
+    #[cfg(feature = "host")]
+    BehaviorOptions(BehaviorOptions),
+    #[cfg(feature = "host")]
+    AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
     // Current saved connection type
     ConnectionType(ConnectionType),
     // Timeout time for combos
@@ -263,6 +279,17 @@ pub(crate) enum StorageKey {
     UnicodeMode,
     #[cfg(feature = "rynk")]
     PointingConfig,
+    // Postcard tags variants by declaration order, so new keys go last: an
+    // existing keyboard's persisted items must keep the tags they were saved
+    // with.
+    #[cfg(feature = "host")]
+    MorseProfile(u8),
+    #[cfg(feature = "host")]
+    BehaviorOptions,
+    #[cfg(feature = "host")]
+    AutoMouseLayerConfigs,
+    #[cfg(feature = "host")]
+    MorseProfileName(u8),
 }
 
 impl StorageKey {
@@ -299,6 +326,16 @@ impl StorageKey {
     #[cfg(feature = "host")]
     pub(crate) const fn morse(idx: u8) -> Self {
         Self::Morse(idx)
+    }
+
+    #[cfg(feature = "host")]
+    pub(crate) const fn morse_profile(idx: u8) -> Self {
+        Self::MorseProfile(idx)
+    }
+
+    #[cfg(feature = "host")]
+    pub(crate) const fn morse_profile_name(idx: u8) -> Self {
+        Self::MorseProfileName(idx)
     }
 }
 
@@ -371,6 +408,15 @@ pub(crate) enum StorageData {
     UnicodeMode(UnicodeMode),
     #[cfg(feature = "rynk")]
     PointingConfig(PointingConfig),
+    // New variants go last, for the same reason as in `StorageKey`.
+    #[cfg(feature = "host")]
+    MorseProfile(MorseProfile),
+    #[cfg(feature = "host")]
+    BehaviorOptions(StoredBehaviorOptions),
+    #[cfg(feature = "host")]
+    AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
+    #[cfg(feature = "host")]
+    MorseProfileName(MorseProfileName),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -465,6 +511,64 @@ pub(crate) struct BehaviorConfig {
     // Interval for tapping capslock.
     // macOS has special processing of capslock, when tapping capslock, the tap interval should be another value
     pub(crate) tap_capslock_interval: u16,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub(crate) struct StoredBehaviorOptions {
+    pub(crate) tri_layer: Option<[u8; 3]>,
+    pub(crate) combo_prior_idle_ms: Option<u16>,
+    pub(crate) oneshot_activate_on_keypress: bool,
+    pub(crate) oneshot_quick_release: bool,
+    pub(crate) morse_enable_flow_tap: bool,
+}
+
+impl From<BehaviorOptions> for StoredBehaviorOptions {
+    fn from(options: BehaviorOptions) -> Self {
+        Self {
+            tri_layer: options.tri_layer,
+            combo_prior_idle_ms: options.combo_prior_idle_ms,
+            oneshot_activate_on_keypress: options.oneshot_activate_on_keypress,
+            oneshot_quick_release: options.oneshot_quick_release,
+            morse_enable_flow_tap: options.morse_enable_flow_tap,
+        }
+    }
+}
+
+impl From<&config::BehaviorConfig> for StoredBehaviorOptions {
+    fn from(behavior: &config::BehaviorConfig) -> Self {
+        Self {
+            tri_layer: behavior.tri_layer,
+            combo_prior_idle_ms: behavior
+                .combo
+                .prior_idle_time
+                .map(|duration| duration.as_millis() as u16),
+            oneshot_activate_on_keypress: behavior.one_shot_modifiers.activate_on_keypress,
+            oneshot_quick_release: behavior.one_shot_modifiers.quick_release,
+            morse_enable_flow_tap: behavior.morse.enable_flow_tap,
+        }
+    }
+}
+
+fn auto_mouse_layer_configs(
+    behavior: &config::BehaviorConfig,
+) -> heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> {
+    if let Some(configs) = &behavior.runtime_auto_mouse_layer {
+        return configs.clone();
+    }
+    behavior
+        .auto_mouse_layer
+        .iter()
+        .map(|config| RuntimeAutoMouseLayerConfig {
+            device_id: config.device_id,
+            target_layer: config.target_layer,
+            timeout_ms: config.timeout.as_millis() as u32,
+            threshold: config.threshold,
+            deactivate_on_key: config.deactivate_on_key,
+            extra_mouse_keys: config.extra_mouse_keys.iter().copied().collect(),
+            reset_timeout_on_key: config.reset_timeout_on_key,
+        })
+        .collect()
 }
 
 impl From<LocalStorageConfig> for StorageData {
@@ -688,6 +792,30 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             behavior_config.unicode.mode = mode;
         }
 
+        let read_data = self
+            .flash
+            .fetch_item(&mut self.buffer, &StorageKey::BehaviorOptions)
+            .await
+            .map_err(|e| print_storage_error::<F>(e))?;
+
+        if let Some(StorageData::BehaviorOptions(options)) = read_data {
+            behavior_config.tri_layer = options.tri_layer;
+            behavior_config.combo.prior_idle_time =
+                options.combo_prior_idle_ms.map(|ms| Duration::from_millis(ms as u64));
+            behavior_config.one_shot_modifiers.activate_on_keypress = options.oneshot_activate_on_keypress;
+            behavior_config.one_shot_modifiers.quick_release = options.oneshot_quick_release;
+            behavior_config.morse.enable_flow_tap = options.morse_enable_flow_tap;
+        }
+
+        let read_data = self
+            .flash
+            .fetch_item(&mut self.buffer, &StorageKey::AutoMouseLayerConfigs)
+            .await
+            .map_err(|e| print_storage_error::<F>(e))?;
+        if let Some(StorageData::AutoMouseLayerConfigs(configs)) = read_data {
+            behavior_config.runtime_auto_mouse_layer = Some(configs);
+        }
+
         Ok(())
     }
 
@@ -881,6 +1009,20 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         self.store_data(StorageKey::BehaviorConfig, &StorageData::from(behavior))
             .await
             .map_err(|e| print_storage_error::<F>(e))?;
+        #[cfg(feature = "host")]
+        self.store_data(
+            StorageKey::BehaviorOptions,
+            &StorageData::BehaviorOptions(behavior.into()),
+        )
+        .await
+        .map_err(|e| print_storage_error::<F>(e))?;
+        #[cfg(feature = "host")]
+        self.store_data(
+            StorageKey::AutoMouseLayerConfigs,
+            &StorageData::AutoMouseLayerConfigs(auto_mouse_layer_configs(behavior)),
+        )
+        .await
+        .map_err(|e| print_storage_error::<F>(e))?;
 
         #[cfg(feature = "host")]
         self.store_data(
@@ -942,6 +1084,16 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         self.store_data(
             StorageKey::MorseHoldTriggerPositions,
             &StorageData::MorseHoldTriggerPositions(behavior.morse.hold_trigger_positions.clone()),
+        )
+        .await?;
+        self.store_data(
+            StorageKey::BehaviorOptions,
+            &StorageData::BehaviorOptions(behavior.into()),
+        )
+        .await?;
+        self.store_data(
+            StorageKey::AutoMouseLayerConfigs,
+            &StorageData::AutoMouseLayerConfigs(auto_mouse_layer_configs(behavior)),
         )
         .await?;
 
@@ -1097,6 +1249,19 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     )
                     .await
                 }
+                #[cfg(feature = "host")]
+                FlashOperationMessage::MorseProfile { idx, profile } => {
+                    self.store_data(StorageKey::morse_profile(idx), &StorageData::MorseProfile(profile))
+                        .await
+                }
+                #[cfg(feature = "host")]
+                FlashOperationMessage::MorseProfileName { idx, name } => {
+                    self.store_data(
+                        StorageKey::morse_profile_name(idx),
+                        &StorageData::MorseProfileName(name),
+                    )
+                    .await
+                }
                 FlashOperationMessage::ConnectionType(ty) => {
                     self.store_data(StorageKey::ConnectionType, &StorageData::ConnectionType(ty))
                         .await
@@ -1243,6 +1408,22 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 FlashOperationMessage::UnicodeMode(mode) => {
                     self.store_data(StorageKey::UnicodeMode, &StorageData::UnicodeMode(mode))
                         .await
+                }
+                #[cfg(feature = "host")]
+                FlashOperationMessage::BehaviorOptions(options) => {
+                    self.store_data(
+                        StorageKey::BehaviorOptions,
+                        &StorageData::BehaviorOptions(options.into()),
+                    )
+                    .await
+                }
+                #[cfg(feature = "host")]
+                FlashOperationMessage::AutoMouseLayerConfigs(configs) => {
+                    self.store_data(
+                        StorageKey::AutoMouseLayerConfigs,
+                        &StorageData::AutoMouseLayerConfigs(configs),
+                    )
+                    .await
                 }
             };
 
@@ -1450,6 +1631,8 @@ mod tests {
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageKey::LightingRuntimeConditionalSceneShardV2(0),
             StorageKey::UnicodeMode,
+            #[cfg(feature = "host")]
+            StorageKey::MorseProfile(9),
         ];
 
         let mut buffer = [0u8; 64];
