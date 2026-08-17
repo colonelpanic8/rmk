@@ -45,8 +45,9 @@ use rynk::rmk_types::protocol::rynk::{
     SetComboBulkRequest, SetComboDefinitionBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMorseBulkRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest, SplitCentralLatencyPolicy,
-    SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
+    SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
+    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
+    UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -105,11 +106,6 @@ impl RynkClient {
     /// runs concurrently with the request methods.
     pub async fn next_topic(&self) -> Result<TopicEvent, JsValue> {
         self.drive(async { Ok(self.client.next_topic().await) }).await
-    }
-    #[wasm_bindgen(unchecked_return_type = "MorseProfileState")]
-    pub async fn read_morse_profile_state(&self) -> Result<JsValue, JsValue> {
-        let state = self.drive(self.client.read_morse_profile_state()).await?;
-        serde_wasm_bindgen::to_value(&state).map_err(|error| JsValue::from_str(&error.to_string()))
     }
     #[wasm_bindgen(unchecked_return_type = "MorseProfileState")]
     pub async fn read_morse_profile_state(&self) -> Result<JsValue, JsValue> {
@@ -216,11 +212,6 @@ endpoints! {
     set_morse_bulk(request: SetMorseBulkRequest) -> (),
     get_morse_hold_trigger_positions() -> MorseHoldTriggerPositionState,
     set_morse_hold_trigger_positions(request: SetMorseHoldTriggerPositionsRequest) -> (),
-    get_pointing_config() -> PointingConfig,
-    set_pointing_config(config: PointingConfig) -> PointingConfig,
-    get_morse_profile_count() -> u8,
-    get_morse_profile_bulk(start_index: u8) -> GetMorseProfileBulkResponse,
-    set_morse_profile_bulk(request: SetMorseProfileBulkRequest) -> (),
     get_morse_profile_count() -> u8,
     get_morse_profile_bulk(start_index: u8) -> GetMorseProfileBulkResponse,
     set_morse_profile_bulk(request: SetMorseProfileBulkRequest) -> (),
@@ -234,6 +225,10 @@ endpoints! {
     set_behavior(config: BehaviorConfig) -> (),
     get_split_central_latency() -> SplitCentralLatencyState,
     set_split_central_latency(policy: SplitCentralLatencyPolicy) -> SplitCentralLatencyState,
+    get_behavior_options() -> BehaviorOptions,
+    set_behavior_options(options: BehaviorOptions) -> (),
+    get_auto_mouse_layer_configs() -> AutoMouseLayerConfigState,
+    set_auto_mouse_layer_configs(request: SetAutoMouseLayerConfigsRequest) -> (),
     // status
     get_current_layer() -> u8,
     get_layer_state() -> LayerState,
