@@ -469,6 +469,7 @@ fn wire_values_locked() {
     let ble_name = BleName {
         template: heapless::String::try_from("Glove80 {slot}").unwrap(),
     };
+    let opposite_profile = ex.profile.with_opposite_hand_hold(Some(true));
 
     let entries: alloc::vec::Vec<(&str, alloc::vec::Vec<u8>)> = alloc::vec![
         // --- Response envelope + connection ---
@@ -584,6 +585,7 @@ fn wire_values_locked() {
             encode(&(MouseButtons::BUTTON1 | MouseButtons::BUTTON8))
         ),
         ("MorseProfile(Normal,200,150)", encode(&ex.profile)),
+        ("MorseProfile(OppHand,Normal,200,150)", encode(&opposite_profile)),
         // --- Keymap / encoder / behavior config payloads ---
         (
             "KeyPosition{layer:0,row:5,col:13}",
