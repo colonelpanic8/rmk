@@ -35,6 +35,9 @@ pub struct RmkConfig<'a> {
     /// Baked at build time from `[layout].map`; empty when there's no layout.
     #[cfg(feature = "rynk")]
     pub layout_blob: &'a [u8],
+    /// Compiled logical occupancy and fallback name for every fixed layer slot.
+    #[cfg(feature = "rynk")]
+    pub layer_names: &'a [Option<&'a str>],
     #[cfg(feature = "storage")]
     pub storage_config: StorageConfig,
     #[cfg(feature = "_ble")]
@@ -54,6 +57,7 @@ impl Default for RmkConfig<'_> {
             vial_config: VialConfig::default(),
             lock_config: LockConfig::default(),
             layout_blob: rmk_types::constants::LAYOUT_BLOB,
+            layer_names: &[],
             #[cfg(feature = "storage")]
             storage_config: StorageConfig::default(),
             #[cfg(feature = "_ble")]
