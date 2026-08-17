@@ -120,7 +120,6 @@ fn keymap_write_survives_restart() {
             .await;
     });
 }
-
 #[cfg(feature = "storage")]
 #[test]
 fn hold_trigger_positions_survive_restart() {
@@ -143,6 +142,131 @@ fn hold_trigger_positions_survive_restart() {
         let mut keyboard = SimKeyboard::builder([[[k!(A), k!(B)]]]).build_with_flash(flash).await;
         keyboard
             .rynk::<command::GetMorseHoldTriggerPositions>("null", RynkReply::Ok(STORED_STATE))
+            .run()
+            .await;
+    });
+}
+
+/// A retuned profile has to outlive the session that set it, or dialing timings
+/// in by feel would reset on every unplug. The restarted keyboard compiles a
+/// 300 ms hold, so a 150 ms press resolving as a hold can only come from the
+/// 100 ms that was persisted.
+#[cfg(feature = "storage")]
+#[test]
+fn morse_profile_write_survives_restart() {
+    use rmk::config::BehaviorConfig;
+    use rmk::mtp;
+    use rmk::types::modifier::ModifierCombination;
+    use rmk::types::morse::{MorseMode, MorseProfile};
+
+    const SET_PROFILE: &str = r#"{"index":0,"profile":{"mode":"Normal","hold_timeout_ms":100,"gap_timeout_ms":100}}"#;
+
+    fn compiled_behavior() -> BehaviorConfig {
+        let mut behavior = BehaviorConfig::default();
+        behavior
+            .morse
+            .profiles
+            .push(MorseProfile::new(None, Some(MorseMode::Normal), Some(300), Some(300)))
+            .unwrap();
+        behavior
+    }
+
+    test_block_on(async {
+        let flash = crate::simulator::flash::InMemoryFlash::new();
+        let keymap = [[[mtp!(A, ModifierCombination::LSHIFT, 0)]]];
+        {
+            let mut keyboard = SimKeyboard::builder(keymap)
+                .behavior_config(compiled_behavior())
+                .build_with_flash(flash.clone())
+                .await;
+            keyboard
+                .rynk::<command::SetMorseProfile>(SET_PROFILE, RynkReply::Ok("null"))
+                .wait_storage()
+                .run()
+                .await;
+        }
+        let mut keyboard = SimKeyboard::builder(keymap)
+            .behavior_config(compiled_behavior())
+            .build_with_flash(flash)
+            .await;
+        keyboard
+            .tap(0, 0, 150)
+            .expect_keys_with_mods(ModifierCombination::LSHIFT.into_bits(), [])
+            .expect_keys([])
+            .run()
+            .await;
+    });
+}
+
+#[cfg(feature = "storage")]
+#[test]
+fn named_morse_profile_survives_restart() {
+    const SET_ENTRY: &str = r#"{"entry":{"index":3,"name":"thumb-layer","profile":{"mode":"Normal","hold_timeout_ms":180,"gap_timeout_ms":180}}}"#;
+    const GET_STATE: &str = r#"{"capacity":16,"total":1,"entries":[{"index":3,"name":"thumb-layer","profile":{"mode":"Normal","hold_timeout_ms":180,"gap_timeout_ms":180}}]}"#;
+
+    test_block_on(async {
+        let flash = crate::simulator::flash::InMemoryFlash::new();
+        {
+            let mut keyboard = SimKeyboard::builder([[[k!(A)]]]).build_with_flash(flash.clone()).await;
+            keyboard
+                .rynk::<command::SetMorseProfileEntry>(SET_ENTRY, RynkReply::Ok("null"))
+                .wait_storage()
+                .run()
+                .await;
+        }
+        let mut keyboard = SimKeyboard::builder([[[k!(A)]]]).build_with_flash(flash).await;
+        keyboard
+            .rynk::<command::GetMorseProfileState>(r#"{"offset":0}"#, RynkReply::Ok(GET_STATE))
+            .run()
+            .await;
+    });
+}
+
+/// Global behavior options are durable just like the older timeout payload.
+#[cfg(feature = "storage")]
+#[test]
+fn behavior_options_write_survives_restart() {
+    const SET_OPTIONS: &str = r#"{"tri_layer":[0,1,2],"combo_prior_idle_ms":75,"oneshot_activate_on_keypress":true,"oneshot_quick_release":true,"morse_enable_flow_tap":true,"morse_prior_idle_ms":125,"morse_default_profile":{"mode":"PermissiveHold","hold_timeout_ms":225,"gap_timeout_ms":175}}"#;
+
+    test_block_on(async {
+        let flash = crate::simulator::flash::InMemoryFlash::new();
+        let keymap = [[[k!(A)]], [[k!(A)]], [[k!(A)]]];
+        {
+            let mut keyboard = SimKeyboard::builder(keymap).build_with_flash(flash.clone()).await;
+            keyboard
+                .rynk::<command::SetBehaviorOptions>(SET_OPTIONS, RynkReply::Ok("null"))
+                .wait_storage()
+                .run()
+                .await;
+        }
+        let mut keyboard = SimKeyboard::builder(keymap).build_with_flash(flash).await;
+        keyboard
+            .rynk::<command::GetBehaviorOptions>("null", RynkReply::Ok(SET_OPTIONS))
+            .run()
+            .await;
+    });
+}
+
+#[cfg(feature = "storage")]
+#[test]
+fn auto_mouse_layer_configs_write_survives_restart() {
+    const SET_CONFIGS: &str = r#"{"configs":[{"device_id":1,"target_layer":2,"timeout_ms":500,"threshold":3,"deactivate_on_key":false,"extra_mouse_keys":[],"reset_timeout_on_key":false}]}"#;
+    const GET_CONFIGS: &str = r#"{"capacity":2,"configs":[{"device_id":1,"target_layer":2,"timeout_ms":500,"threshold":3,"deactivate_on_key":false,"extra_mouse_keys":[],"reset_timeout_on_key":false}]}"#;
+
+    test_block_on(async {
+        let flash = crate::simulator::flash::InMemoryFlash::new();
+        let keymap = [[[k!(A)]], [[k!(A)]], [[k!(A)]]];
+        {
+            let mut keyboard = SimKeyboard::builder(keymap).build_with_flash(flash.clone()).await;
+            keyboard
+                .rynk::<command::SetAutoMouseLayerConfigs>(SET_CONFIGS, RynkReply::Ok("null"))
+                .wait_storage()
+                .run()
+                .await;
+        }
+        let mut keyboard = SimKeyboard::builder(keymap).build_with_flash(flash).await;
+        keyboard
+            .rynk::<command::GetAutoMouseLayerConfigs>("null", RynkReply::Ok(GET_CONFIGS))
             .run()
             .await;
     });
