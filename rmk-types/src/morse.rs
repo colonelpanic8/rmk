@@ -50,9 +50,9 @@ pub enum MorseMode {
 ///
 /// Bit layout of the inner `u64`:
 /// ```text
-///     63  62     | 61      | 60           48 | 47  46    | 45      | 44           32 | 31  30  | 29       17 | 16  15 | 14  13   | 12       0
-/// ht_on_release | mode_hi | prior_idle_time | retro_tap | qt_set  | quick_tap_tm    | mode_lo | gap_timeout | uni_tap| flow_tap | hold_timeout
-///     (2b)      |  (1b)   |    (13b ms)     |   (2b)    |  (1b)   |   (13b ms)      |   (2b)  |   (13b ms)  |  (2b)  |   (2b)   |  (13b ms)
+///     63  62     | 61      | 60           48 | 47  46    | 45      | 44           32 | 31  30  | 29       17 | 16  15   | 14  13   | 12       0
+/// ht_on_release | mode_hi | prior_idle_time | retro_tap | qt_set  | quick_tap_tm    | mode_lo | gap_timeout | hand_hold | flow_tap | hold_timeout
+///     (2b)      |  (1b)   |    (13b ms)     |   (2b)    |  (1b)   |   (13b ms)      |   (2b)  |   (13b ms)  |   (2b)   |   (2b)   |  (13b ms)
 /// ```
 ///
 /// - `retro_tap` (bits 47, 46): `00`/`01` = None, `10` = Some(false), `11` = Some(true)
@@ -68,7 +68,10 @@ pub enum MorseMode {
 ///   two low bits were already full when the fourth mode was added.
 /// - `flow_tap` (bits 14, 13): `00`/`01` = None, `10` = Some(false), `11` = Some(true)
 /// - `gap_timeout` (bits 29-17): gap timeout in ms (0 = None, max 8191)
-/// - `uni_tap` (bits 16-15): `00`/`01` = None, `10` = Some(false), `11` = Some(true)
+/// - `hand_hold` (bits 16-15): `00` = both policies unset, `01` =
+///   `opposite_hand_hold = Some(true)`, `10` = both policies `Some(false)`,
+///   `11` = `unilateral_tap = Some(true)`. The two true policies are mutually
+///   exclusive, preserving the fixed eight-byte profile representation.
 /// - `hold_timeout` (bits 12-0): hold timeout in ms (0 = None, max 8191)
 #[derive(PartialEq, Eq, Clone, Copy, Debug, MaxSize)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -123,14 +126,40 @@ impl MorseProfile {
     }
 
     pub const fn with_unilateral_tap(self, b: Option<bool>) -> Self {
-        Self(
-            (self.0 & !UNI_TAP_MASK)
-                | match b {
-                    Some(true) => UNI_TAP_MASK,
-                    Some(false) => UNI_TAP_HIGH_BIT,
-                    None => 0,
-                },
-        )
+        let bits = match b {
+            Some(true) => UNI_TAP_MASK,
+            Some(false) => UNI_TAP_HIGH_BIT,
+            // Preserve the distinct opposite-hand policy when clearing only
+            // unilateral tap; otherwise retain the historical clear behavior.
+            None if self.0 & UNI_TAP_MASK == UNI_TAP_LOW_BIT => UNI_TAP_LOW_BIT,
+            None => 0,
+        };
+        Self((self.0 & !UNI_TAP_MASK) | bits)
+    }
+
+    /// Whether timeout merely arms this tap-hold until a key on the opposite
+    /// hand (or a bilateral key) activates its hold action.
+    ///
+    /// `Some(true)` is mutually exclusive with `unilateral_tap = Some(true)`.
+    /// `Some(false)` is the shared explicit-false code and lets a named profile
+    /// override an enabled default profile without widening the packed wire.
+    pub fn opposite_hand_hold(self) -> Option<bool> {
+        match (self.0 & UNI_TAP_MASK) >> 15 {
+            1 => Some(true),
+            2 => Some(false),
+            _ => None,
+        }
+    }
+
+    pub const fn with_opposite_hand_hold(self, b: Option<bool>) -> Self {
+        let bits = match b {
+            Some(true) => UNI_TAP_LOW_BIT,
+            Some(false) => UNI_TAP_HIGH_BIT,
+            // Preserve unilateral tap when this field is absent.
+            None if self.0 & UNI_TAP_MASK == UNI_TAP_MASK => UNI_TAP_MASK,
+            None => 0,
+        };
+        Self((self.0 & !UNI_TAP_MASK) | bits)
     }
 
     /// Per-profile override for flow tap. `None` inherits the global morse setting.
@@ -339,6 +368,7 @@ impl Serialize for MorseProfile {
             #[derive(Serialize)]
             struct Repr {
                 unilateral_tap: Option<bool>,
+                opposite_hand_hold: Option<bool>,
                 enable_flow_tap: Option<bool>,
                 mode: Option<MorseMode>,
                 hold_timeout_ms: Option<u16>,
@@ -350,6 +380,7 @@ impl Serialize for MorseProfile {
             }
             Repr {
                 unilateral_tap: self.unilateral_tap(),
+                opposite_hand_hold: self.opposite_hand_hold(),
                 enable_flow_tap: self.enable_flow_tap(),
                 mode: self.mode(),
                 hold_timeout_ms: self.hold_timeout_ms(),
@@ -372,6 +403,7 @@ impl<'de> Deserialize<'de> for MorseProfile {
             #[derive(Deserialize)]
             struct Repr {
                 unilateral_tap: Option<bool>,
+                opposite_hand_hold: Option<bool>,
                 enable_flow_tap: Option<bool>,
                 mode: Option<MorseMode>,
                 hold_timeout_ms: Option<u16>,
@@ -386,6 +418,7 @@ impl<'de> Deserialize<'de> for MorseProfile {
             let r = Repr::deserialize(deserializer)?;
             Ok(
                 MorseProfile::new(r.unilateral_tap, r.mode, r.hold_timeout_ms, r.gap_timeout_ms)
+                    .with_opposite_hand_hold(r.opposite_hand_hold)
                     .with_enable_flow_tap(r.enable_flow_tap)
                     .with_quick_tap_timeout_ms(r.quick_tap_timeout_ms)
                     .with_retro_tap(r.retro_tap)
@@ -402,7 +435,7 @@ impl<'de> Deserialize<'de> for MorseProfile {
 #[cfg(feature = "wasm")]
 const _: () = {
     #[::wasm_bindgen::prelude::wasm_bindgen(typescript_custom_section)]
-    const TS_APPEND_CONTENT: &'static str = "export type MorseProfile = { unilateral_tap: boolean | undefined; enable_flow_tap: boolean | undefined; mode: MorseMode | undefined; hold_timeout_ms: number | undefined; gap_timeout_ms: number | undefined; quick_tap_timeout_ms: number | undefined; retro_tap: boolean | undefined; prior_idle_time_ms: number | undefined; hold_trigger_on_release: boolean | undefined; };";
+    const TS_APPEND_CONTENT: &'static str = "export type MorseProfile = { unilateral_tap: boolean | undefined; opposite_hand_hold: boolean | undefined; enable_flow_tap: boolean | undefined; mode: MorseMode | undefined; hold_timeout_ms: number | undefined; gap_timeout_ms: number | undefined; quick_tap_timeout_ms: number | undefined; retro_tap: boolean | undefined; prior_idle_time_ms: number | undefined; hold_trigger_on_release: boolean | undefined; };";
 };
 crate::wasm_object_abi!(MorseProfile, "MorseProfile");
 
@@ -948,6 +981,27 @@ mod tests {
     }
 
     #[test]
+    fn opposite_hand_hold_preserves_packed_profile_width() {
+        let base = MorseProfile::new(None, Some(MorseMode::Normal), Some(200), Some(150));
+        let enabled = base.with_opposite_hand_hold(Some(true));
+        assert_eq!(u64::from(enabled) & UNI_TAP_MASK, UNI_TAP_LOW_BIT);
+        assert_eq!(enabled.opposite_hand_hold(), Some(true));
+        assert_eq!(enabled.unilateral_tap(), None);
+        assert_eq!(core::mem::size_of::<MorseProfile>(), 8);
+        assert_eq!(MorseProfile::POSTCARD_MAX_SIZE, u64::POSTCARD_MAX_SIZE);
+
+        let disabled = base.with_opposite_hand_hold(Some(false));
+        assert_eq!(disabled.opposite_hand_hold(), Some(false));
+        assert_eq!(disabled.unilateral_tap(), Some(false));
+
+        let unilateral = base.with_unilateral_tap(Some(true));
+        assert_eq!(unilateral.unilateral_tap(), Some(true));
+        assert_eq!(unilateral.opposite_hand_hold(), None);
+        assert_eq!(unilateral.with_opposite_hand_hold(None), unilateral);
+        assert_eq!(enabled.with_unilateral_tap(None), enabled);
+    }
+
+    #[test]
     fn prior_idle_time_accessors_preserve_packed_fields() {
         assert_eq!(MorseProfile::const_default().prior_idle_time_ms(), None);
 
@@ -1031,7 +1085,7 @@ mod tests {
     }
 
     /// The human-readable serde goes `MorseProfile` -> decoded parts -> `new()`.
-    /// Every occupied bit is covered by the decoded fields, so that path must be lossless.
+    /// Every packed field is reconstructed, so that path must be lossless.
     #[test]
     fn morse_profile_parts_roundtrip() {
         for p in [
@@ -1049,9 +1103,11 @@ mod tests {
                 .with_retro_tap(Some(true))
                 .with_prior_idle_time_ms(Some(90))
                 .with_hold_trigger_on_release(Some(true)),
+            MorseProfile::new(None, Some(MorseMode::Normal), Some(200), Some(150)).with_opposite_hand_hold(Some(true)),
             MorseProfile::const_default(),
         ] {
             let parts = MorseProfile::new(p.unilateral_tap(), p.mode(), p.hold_timeout_ms(), p.gap_timeout_ms())
+                .with_opposite_hand_hold(p.opposite_hand_hold())
                 .with_enable_flow_tap(p.enable_flow_tap())
                 .with_quick_tap_timeout_ms(p.quick_tap_timeout_ms())
                 .with_retro_tap(p.retro_tap())
