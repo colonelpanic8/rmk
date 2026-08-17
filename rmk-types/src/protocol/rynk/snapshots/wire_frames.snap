@@ -50,6 +50,8 @@ GetMorse reply Ok(Morse{TAP->Key(A)})                                   04 01 04
 GetMorse request 0                                                      04 01 04 01 01 00
 GetMorseHoldTriggerPositions reply Ok({16,[(default,1,2),(3,4,5)]})     04 0a 04 01 09 10 02 ff 01 02 03 04 05 00
 GetMorseHoldTriggerPositions request ()                                 04 0a 04 01 00
+GetPointingCapabilities reply Ok(PointingCapabilities{Keypad})          04 03 0a 01 02 01 00
+GetPointingCapabilities request ()                                      04 03 0a 01 00
 GetSleepState reply Ok(true)                                            04 06 08 01 02 01 00
 GetSleepState request ()                                                04 06 08 01 00
 GetVersion reply Ok(CURRENT)                                            02 01 02 01 01 02 01 00
