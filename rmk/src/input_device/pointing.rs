@@ -499,7 +499,14 @@ impl Default for PointingProcessorConfig {
 }
 
 /// PointingProcessor that converts motion events to mouse reports
-#[processor(subscribe = [PointingEvent, PointingProcessorEvent])]
+///
+/// `PointingProcessorEvent` is listed first because `#[processor]` dispatches
+/// subscriptions with `select_biased!`, in declaration order. Motion can
+/// arrive faster than the report channel drains, and a mode change queued
+/// behind that backlog would not apply until the finger stopped — exactly
+/// when a layer-driven mode is no longer wanted. Mode changes are rare, so
+/// giving them the first arm cannot starve motion.
+#[processor(subscribe = [PointingProcessorEvent, PointingEvent])]
 pub struct PointingProcessor<'a> {
     /// Reference to the keymap (used for mouse_buttons)
     keymap: &'a KeyMap<'a>,
@@ -755,6 +762,7 @@ mod tests {
     use embedded_hal_async::digital::Wait;
 
     use super::*;
+    use crate::event::{EventSubscriber, publish_event};
     use crate::input_device::InputDevice;
     use crate::test_support::test_block_on as block_on;
 
@@ -1469,6 +1477,32 @@ mod tests {
     }
 
     // === Integration tests for PointingProcessor ===
+
+    #[test]
+    fn test_pending_mode_change_is_dispatched_before_queued_motion() {
+        let mut sub = PointingProcessorProcessorEventSubscriber::new();
+
+        // Motion first, so only the subscription order can put the mode
+        // change ahead of it.
+        let axis = |axis| AxisEvent {
+            axis,
+            typ: AxisValType::Rel,
+            value: 5,
+        };
+        publish_event(PointingEvent {
+            device_id: 0,
+            axes: [axis(Axis::X), axis(Axis::Y), axis(Axis::Z)],
+        });
+        publish_event(PointingProcessorEvent {
+            device_id: 0,
+            mode: PointingMode::Scroll(ScrollConfig::default()),
+        });
+
+        assert!(matches!(
+            block_on(sub.next_event()),
+            PointingProcessorProcessorEventEnum::PointingProcessor(_)
+        ));
+    }
 
     #[test]
     fn test_pointing_processor_mode_selection() {
