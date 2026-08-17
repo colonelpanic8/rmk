@@ -39,13 +39,14 @@ use rmk_types::protocol::rynk::{
     LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
     LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
     LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZone, LightingZoneId,
-    LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState, PeripheralStatus,
-    ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
-    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest, SetComboRequest,
-    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
-    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
-    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState,
+    LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState, MorseHoldTriggerPositionState,
+    PeripheralStatus, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    PutLightingOverlayChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
+    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
+    SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
+    SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
+    SetLightingSceneCellRequest, SetLightingStateRequest, SetMacroRequest, SetMorseBulkRequest,
+    SetMorseHoldTriggerPositionsRequest, SetMorseRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState,
     StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
 };
 #[cfg(feature = "alloc")]
@@ -344,6 +345,19 @@ impl Client {
     pub async fn set_morse_bulk(&self, request: SetMorseBulkRequest) -> Result<(), RynkHostError> {
         self.require_bulk_transfer(Cmd::SetMorseBulk)?;
         self.request::<command::SetMorseBulk>(&request).await
+    }
+
+    /// Read the complete profile-keyed positional hold-trigger table.
+    pub async fn get_morse_hold_trigger_positions(&self) -> Result<MorseHoldTriggerPositionState, RynkHostError> {
+        self.request::<command::GetMorseHoldTriggerPositions>(&()).await
+    }
+
+    /// Atomically replace the complete profile-keyed positional hold-trigger table.
+    pub async fn set_morse_hold_trigger_positions(
+        &self,
+        request: SetMorseHoldTriggerPositionsRequest,
+    ) -> Result<(), RynkHostError> {
+        self.request::<command::SetMorseHoldTriggerPositions>(&request).await
     }
 
     /// Read one chunk of macro data starting at byte `offset`. Chunks are always full
