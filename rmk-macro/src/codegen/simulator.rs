@@ -316,7 +316,6 @@ fn expand_rmk_config(host: &Host, layout_blob: &[u8]) -> TokenStream2 {
         quote! { (#row, #col) }
     });
     let (insecure, write_requires_unlock) = (host.insecure, host.write_requires_unlock);
-    let bootloader_requires_unlock = host.bootloader_requires_unlock;
     let maintenance_mode_default = host.maintenance_mode_default;
     let blob = proc_macro2::Literal::byte_string(layout_blob);
     quote! {
@@ -325,7 +324,6 @@ fn expand_rmk_config(host: &Host, layout_blob: &[u8]) -> TokenStream2 {
                 unlock_keys: &[#(#keys),*],
                 insecure: #insecure,
                 write_requires_unlock: #write_requires_unlock,
-                bootloader_requires_unlock: #bootloader_requires_unlock,
                 maintenance_mode_default: #maintenance_mode_default,
             },
             layout_blob: #blob,
