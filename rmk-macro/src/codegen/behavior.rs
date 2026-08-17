@@ -6,7 +6,7 @@ use quote::{format_ident, quote};
 use rmk_config::resolved::Behavior;
 use rmk_config::resolved::behavior::{
     AutoMouseLayer, Combos, Forks, MacroOperation, Macros, Morse, MorseActionPair, MorseKey,
-    MorseProfile, OneShot,
+    MorseProfile, MouseLayerScale, OneShot,
 };
 
 use super::action_parser::{
@@ -572,6 +572,24 @@ fn expand_auto_mouse_layer(auto_mouse_layer: &[AutoMouseLayer]) -> proc_macro2::
     }
 }
 
+fn expand_mouse_layer_scale(mouse_layer_scale: &[MouseLayerScale]) -> proc_macro2::TokenStream {
+    let entries = mouse_layer_scale.iter().map(|cfg| {
+        let layer = cfg.layer;
+        let move_scale = cfg.move_scale;
+        let scroll_scale = cfg.scroll_scale;
+        quote! {
+            ::rmk::config::MouseLayerScaleConfig {
+                layer: #layer,
+                move_scale: [#(#move_scale),*],
+                scroll_scale: [#(#scroll_scale),*],
+            }
+        }
+    });
+    quote! {
+        ::rmk::heapless::Vec::from_iter([#(#entries),*])
+    }
+}
+
 pub(crate) fn expand_behavior_config(behavior: &Behavior) -> proc_macro2::TokenStream {
     let profiles = behavior
         .morse
@@ -587,6 +605,7 @@ pub(crate) fn expand_behavior_config(behavior: &Behavior) -> proc_macro2::TokenS
     let forks = expand_forks(&behavior.forks, &profiles);
     let morse = expand_morse(&behavior.morse);
     let auto_mouse_layer = expand_auto_mouse_layer(&behavior.auto_mouse_layer);
+    let mouse_layer_scale = expand_mouse_layer_scale(&behavior.mouse_layer_scale);
 
     quote! {
         #[allow(clippy::needless_update)]
@@ -601,6 +620,7 @@ pub(crate) fn expand_behavior_config(behavior: &Behavior) -> proc_macro2::TokenS
             mouse_key: ::rmk::config::MouseKeyConfig::default(),
             tap: ::rmk::config::TapConfig::default(),
             auto_mouse_layer: #auto_mouse_layer,
+            mouse_layer_scale: #mouse_layer_scale,
             ..Default::default()
         };
     }
