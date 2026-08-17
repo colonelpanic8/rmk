@@ -15,7 +15,7 @@ use postcard::experimental::serialized_size;
 use rmk_types::action::{EncoderAction, KeyAction};
 use rmk_types::battery::BatteryStatus;
 use rmk_types::ble::BleStatus;
-use rmk_types::combo::Combo;
+use rmk_types::combo::{Combo, ComboDefinition};
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
@@ -27,10 +27,10 @@ use rmk_types::protocol::rynk::{
     BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig,
     BehaviorOptions, BleName, BuildInfo, ClearLightingOverlayRequest, Cmd, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
-    DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest,
-    GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest,
-    GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerState, LightingCapabilities,
-    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
+    DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetComboDefinitionBulkResponse, GetEncoderRequest,
+    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
+    GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerState,
+    LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
     LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage, LightingExtension,
     LightingExtensionLayers, LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionNamesRequest,
     LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest,
@@ -45,13 +45,14 @@ use rmk_types::protocol::rynk::{
     PointingConfig, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
     PutLightingOverlayChunkRequest,
     PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetAutoMouseLayerConfigsRequest,
-    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
-    SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
-    SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
-    SetLightingSceneCellRequest, SetLightingStateRequest, SetMacroRequest, SetMorseBulkRequest,
-    SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
-    SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, SplitCentralLatencyPolicy,
-    SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
+    SetComboBulkRequest, SetComboDefinitionBulkRequest, SetComboDefinitionRequest, SetComboRequest, SetEncoderRequest,
+    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
+    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
+    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
+    SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest,
+    SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest,
+    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
+    UnsetLightingSceneCellRequest, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -290,6 +291,17 @@ impl Client {
             .await
     }
 
+    /// Read one action- or position-triggered combo definition by index.
+    pub async fn get_combo_definition(&self, index: u8) -> Result<ComboDefinition, RynkHostError> {
+        self.request::<command::GetComboDefinition>(&index).await
+    }
+
+    /// Write one action- or position-triggered combo definition by index.
+    pub async fn set_combo_definition(&self, index: u8, definition: ComboDefinition) -> Result<(), RynkHostError> {
+        self.request::<command::SetComboDefinition>(&SetComboDefinitionRequest { index, definition })
+            .await
+    }
+
     /// Read one page of combos starting at slot `start_index`. A page holds
     /// up to `max_bulk_items` combos; the last one may hold fewer, and a
     /// `start_index` past the last slot returns an empty page.
@@ -306,6 +318,22 @@ impl Client {
     pub async fn set_combo_bulk(&self, request: SetComboBulkRequest) -> Result<(), RynkHostError> {
         self.require_bulk_transfer(Cmd::SetComboBulk)?;
         self.request::<command::SetComboBulk>(&request).await
+    }
+
+    /// Read one page of action- or position-triggered combo definitions.
+    pub async fn get_combo_definition_bulk(
+        &self,
+        start_index: u8,
+    ) -> Result<GetComboDefinitionBulkResponse, RynkHostError> {
+        self.require_bulk_transfer(Cmd::GetComboDefinitionBulk)?;
+        self.request::<command::GetComboDefinitionBulk>(&GetComboBulkRequest { start_index })
+            .await
+    }
+
+    /// Write consecutive action- or position-triggered combo definitions.
+    pub async fn set_combo_definition_bulk(&self, request: SetComboDefinitionBulkRequest) -> Result<(), RynkHostError> {
+        self.require_bulk_transfer(Cmd::SetComboDefinitionBulk)?;
+        self.request::<command::SetComboDefinitionBulk>(&request).await
     }
 
     /// Read one fork entry by index.
@@ -1088,6 +1116,15 @@ impl Client {
         .await
     }
 
+    /// Read every combo slot using the additive action-or-position representation.
+    pub async fn read_all_combo_definitions(&self) -> Result<Vec<ComboDefinition>, RynkHostError> {
+        let total = self.capabilities.max_combos as usize;
+        self.read_all(total, self.capabilities.max_bulk_items, async |c, start| {
+            c.get_combo_definition_bulk(start as u8).await.map(|r| r.definitions)
+        })
+        .await
+    }
+
     /// Read every morse slot with concurrent paged reads. A short page ends the read early.
     pub async fn read_all_morses(&self) -> Result<Vec<Morse>, RynkHostError> {
         let total = self.capabilities.max_morse as usize;
@@ -1759,6 +1796,23 @@ impl Client {
         self.commit_lighting_scene_replace(CommitLightingSceneReplaceRequest {
             transaction_id: transaction.id,
         })
+        .await
+    }
+
+    /// Write every combo using the additive action-or-position representation.
+    pub async fn write_all_combo_definitions(&self, definitions: Vec<ComboDefinition>) -> Result<(), RynkHostError> {
+        self.write_all(
+            Cmd::SetComboDefinitionBulk,
+            1,
+            definitions,
+            async |c, start, definitions| {
+                c.set_combo_definition_bulk(SetComboDefinitionBulkRequest {
+                    start_index: start as u8,
+                    definitions,
+                })
+                .await
+            },
+        )
         .await
     }
 
