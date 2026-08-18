@@ -1,10 +1,13 @@
-use embassy_time::{Duration, Timer, with_timeout};
+use embassy_time::{Duration, Instant, Timer, with_deadline};
 use embedded_io_async::{Read, Write};
 use heapless::Deque;
 
 use super::driver::SplitDriverError;
 use crate::split::driver::{PeripheralManager, SplitReader, SplitWriter, set_peripheral_connected};
 use crate::split::{SPLIT_MESSAGE_MAX_SIZE, SplitMessage};
+
+/// Frame delimiter: COBS guarantees no zero bytes inside an encoded frame.
+const SENTINEL: u8 = 0x00;
 
 /// Receive split message from peripheral via serial and process it
 ///
@@ -89,9 +92,14 @@ pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
 }
 
 /// Serial driver for BOTH split central and peripheral
+///
+/// Wire format: one message per frame, `cobs(postcard(message) ++ crc32_le)`
+/// terminated by a zero sentinel. The CRC lets a receiver drop frames that
+/// were truncated or corrupted on the bus; the sentinel gives it a resync
+/// point in the following bytes.
 pub(crate) struct SerialSplitDriver<S> {
     serial: S,
-    buffer: [u8; SPLIT_MESSAGE_MAX_SIZE],
+    buffer: [u8; SPLIT_MESSAGE_MAX_SIZE * 2],
     n_bytes_part: usize,
 }
 
@@ -99,19 +107,45 @@ impl<S> SerialSplitDriver<S> {
     pub(crate) fn new(serial: S) -> Self {
         Self {
             serial,
-            buffer: [0_u8; SPLIT_MESSAGE_MAX_SIZE],
+            buffer: [0_u8; SPLIT_MESSAGE_MAX_SIZE * 2],
             n_bytes_part: 0,
         }
     }
 }
 
+/// Decode one sentinel-delimited frame: COBS-decode in place, verify the
+/// trailing CRC-32, then deserialize the payload.
+fn decode_frame(frame: &mut [u8]) -> Result<SplitMessage, SplitDriverError> {
+    let decoded_len = cobs::decode_in_place(frame).map_err(|_| SplitDriverError::SerializeError)?;
+    let Some(payload_len) = decoded_len.checked_sub(4) else {
+        return Err(SplitDriverError::SerializeError);
+    };
+    let (payload, crc_bytes) = frame[..decoded_len].split_at(payload_len);
+    let expected = u32::from_le_bytes(crc_bytes.try_into().unwrap());
+    if crate::crc32::crc32(payload) != expected {
+        error!("Split frame CRC mismatch, dropping frame");
+        return Err(SplitDriverError::SerializeError);
+    }
+    postcard::from_bytes(payload).map_err(|e| {
+        error!("Postcard deserialize split message error: {}", e);
+        SplitDriverError::SerializeError
+    })
+}
+
 impl<S: Read> SplitReader for SerialSplitDriver<S> {
     async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
-        const SENTINEL: u8 = 0x00;
         // Check the buffer *before* reading: a prior read() call may have
-        // pulled in more than one complete message, and the next one is
+        // pulled in more than one complete frame, and the next one is
         // already waiting in `self.buffer[..self.n_bytes_part]`.
-        while !self.buffer[..self.n_bytes_part].contains(&SENTINEL) && self.n_bytes_part < self.buffer.len() {
+        let sentinel_index = loop {
+            if let Some(index) = self.buffer[..self.n_bytes_part].iter().position(|&b| b == SENTINEL) {
+                break index;
+            }
+            if self.n_bytes_part >= self.buffer.len() {
+                // Sentinel-free garbage filled the buffer; drop it all.
+                self.n_bytes_part = 0;
+                return Err(SplitDriverError::SerializeError);
+            }
             let n_bytes = self
                 .serial
                 .read(&mut self.buffer[self.n_bytes_part..])
@@ -123,26 +157,13 @@ impl<S: Read> SplitReader for SerialSplitDriver<S> {
             if n_bytes == 0 {
                 return Err(SplitDriverError::EmptyMessage);
             }
-            debug_assert!(self.n_bytes_part + n_bytes <= self.buffer.len());
             self.n_bytes_part += n_bytes;
-        }
+        };
 
-        let (result, n_bytes_unused) =
-            match postcard::take_from_bytes_cobs::<SplitMessage>(&mut self.buffer[..self.n_bytes_part]) {
-                Ok((message, unused_bytes)) => (Ok(message), unused_bytes.len()),
-                Err(e) => {
-                    error!("Postcard deserialize split message error: {}", e);
-                    let n_bytes_unused = self.buffer[..self.n_bytes_part]
-                        .iter()
-                        .position(|&x| x == SENTINEL)
-                        .map_or(0, |index| self.n_bytes_part - index - 1);
-                    (Err(SplitDriverError::SerializeError), n_bytes_unused)
-                }
-            };
-
-        self.buffer
-            .copy_within(self.n_bytes_part - n_bytes_unused..self.n_bytes_part, 0);
-        self.n_bytes_part = n_bytes_unused;
+        let result = decode_frame(&mut self.buffer[..sentinel_index]);
+        // Consume the frame and its sentinel, keeping any following bytes.
+        self.buffer.copy_within(sentinel_index + 1..self.n_bytes_part, 0);
+        self.n_bytes_part -= sentinel_index + 1;
 
         result
     }
@@ -150,11 +171,20 @@ impl<S: Read> SplitReader for SerialSplitDriver<S> {
 
 impl<S: Write> SplitWriter for SerialSplitDriver<S> {
     async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
-        let mut buf = [0_u8; SPLIT_MESSAGE_MAX_SIZE];
-        let bytes = postcard::to_slice_cobs(message, &mut buf).map_err(|e| {
-            error!("Postcard serialize split message error: {}", e);
-            SplitDriverError::SerializeError
-        })?;
+        let mut raw = [0_u8; SPLIT_MESSAGE_MAX_SIZE];
+        let mut frame = [0_u8; SPLIT_MESSAGE_MAX_SIZE];
+        let payload_len = postcard::to_slice(message, &mut raw)
+            .map_err(|e| {
+                error!("Postcard serialize split message error: {}", e);
+                SplitDriverError::SerializeError
+            })?
+            .len();
+        let crc = crate::crc32::crc32(&raw[..payload_len]);
+        raw[payload_len..payload_len + 4].copy_from_slice(&crc.to_le_bytes());
+        let encoded_len = cobs::encode(&raw[..payload_len + 4], &mut frame);
+        frame[encoded_len] = SENTINEL;
+        let bytes = &frame[..encoded_len + 1];
+
         let mut remaining_bytes = bytes.len();
         while remaining_bytes > 0 {
             let sent_bytes = self
@@ -170,16 +200,49 @@ impl<S: Write> SplitWriter for SerialSplitDriver<S> {
 
 const HALF_DUPLEX_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const HALF_DUPLEX_RESPONSE_TIMEOUT: Duration = Duration::from_millis(5);
-const HALF_DUPLEX_QUEUE_CAPACITY: usize = 4;
+const HALF_DUPLEX_QUEUE_CAPACITY: usize = 8;
 
+/// Central side of the polled half-duplex bus.
+///
+/// The central is the only side that transmits unprompted, and it must never
+/// transmit while the peripheral may still be answering the last poll — on a
+/// half-duplex bus the two frames would collide. `response_deadline` tracks
+/// that window across cancelled `read()` futures, and both `read()` and
+/// `write()` wait it out before touching the wire.
 pub(crate) struct HalfDuplexCentralDriver<S> {
     serial: SerialSplitDriver<S>,
+    /// Deadline until which the peripheral may still be answering the last
+    /// poll. `None` when the bus is known quiet.
+    response_deadline: Option<Instant>,
+    /// Response that arrived while `write()` was clearing the bus; returned
+    /// by the next `read()`.
+    stashed: Option<SplitMessage>,
 }
 
 impl<S> HalfDuplexCentralDriver<S> {
     pub(crate) fn new(serial: S) -> Self {
         Self {
             serial: SerialSplitDriver::new(serial),
+            response_deadline: None,
+            stashed: None,
+        }
+    }
+}
+
+impl<S: Read + Write> HalfDuplexCentralDriver<S> {
+    /// Wait until the pending response window is over: an answer arrived,
+    /// the frame proved corrupt, or the deadline passed.
+    async fn clear_response_window(&mut self) -> Result<Option<SplitMessage>, SplitDriverError> {
+        let Some(deadline) = self.response_deadline else {
+            return Ok(None);
+        };
+        let result = with_deadline(deadline, self.serial.read()).await;
+        self.response_deadline = None;
+        match result {
+            Ok(Ok(SplitMessage::HalfDuplexIdle)) => Ok(None),
+            Ok(Ok(message)) => Ok(Some(message)),
+            Ok(Err(e)) => Err(e),
+            Err(_timeout) => Ok(None),
         }
     }
 }
@@ -187,24 +250,39 @@ impl<S> HalfDuplexCentralDriver<S> {
 impl<S: Read + Write> SplitReader for HalfDuplexCentralDriver<S> {
     async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
         loop {
+            if let Some(message) = self.stashed.take() {
+                return Ok(message);
+            }
+            if let Some(message) = self.clear_response_window().await? {
+                return Ok(message);
+            }
             self.serial.write(&SplitMessage::HalfDuplexPoll).await?;
-            if let Ok(message) = with_timeout(HALF_DUPLEX_RESPONSE_TIMEOUT, self.serial.read()).await {
-                let message = message?;
-                if !matches!(message, SplitMessage::HalfDuplexIdle) {
-                    return Ok(message);
-                }
+            self.response_deadline = Some(Instant::now() + HALF_DUPLEX_RESPONSE_TIMEOUT);
+            if let Some(message) = self.clear_response_window().await? {
+                return Ok(message);
             }
             Timer::after(HALF_DUPLEX_POLL_INTERVAL).await;
         }
     }
 }
 
-impl<S: Write> SplitWriter for HalfDuplexCentralDriver<S> {
+impl<S: Read + Write> SplitWriter for HalfDuplexCentralDriver<S> {
     async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
+        // The manager awaits write() outside its select, so this send cannot
+        // be cancelled mid-frame. It only has to stay out of the response
+        // window of a poll whose read() future was cancelled.
+        match self.clear_response_window().await {
+            Ok(Some(response)) => self.stashed = Some(response),
+            Ok(None) => {}
+            // A corrupt response still means the window is over.
+            Err(_) => {}
+        }
         self.serial.write(message).await
     }
 }
 
+/// Peripheral side of the polled half-duplex bus: transmits exactly one
+/// frame per received poll, so it can never collide with the central.
 pub(crate) struct HalfDuplexPeripheralDriver<S> {
     serial: SerialSplitDriver<S>,
     pending: Deque<SplitMessage, HALF_DUPLEX_QUEUE_CAPACITY>,
@@ -224,8 +302,13 @@ impl<S: Read + Write> SplitReader for HalfDuplexPeripheralDriver<S> {
         loop {
             let message = self.serial.read().await?;
             if matches!(message, SplitMessage::HalfDuplexPoll) {
-                let response = self.pending.pop_front().unwrap_or(SplitMessage::HalfDuplexIdle);
+                let response = self.pending.front().copied().unwrap_or(SplitMessage::HalfDuplexIdle);
                 self.serial.write(&response).await?;
+                // Pop only after the reply is on the wire: a read() future
+                // dropped mid-send retransmits instead of losing the message.
+                if !matches!(response, SplitMessage::HalfDuplexIdle) {
+                    self.pending.pop_front();
+                }
             } else {
                 return Ok(message);
             }
@@ -304,14 +387,25 @@ mod tests {
     }
 
     fn encode(msg: &SplitMessage) -> Vec<u8> {
-        let mut buf = [0u8; SPLIT_MESSAGE_MAX_SIZE];
-        let encoded = postcard::to_slice_cobs(msg, &mut buf).unwrap();
-        encoded.to_vec()
+        let mut raw = [0u8; SPLIT_MESSAGE_MAX_SIZE];
+        let payload_len = postcard::to_slice(msg, &mut raw).unwrap().len();
+        let crc = crate::crc32::crc32(&raw[..payload_len]);
+        raw[payload_len..payload_len + 4].copy_from_slice(&crc.to_le_bytes());
+        let mut frame = vec![0u8; SPLIT_MESSAGE_MAX_SIZE];
+        let encoded_len = cobs::encode(&raw[..payload_len + 4], &mut frame);
+        frame.truncate(encoded_len);
+        frame.push(SENTINEL);
+        frame
     }
 
     fn decode(bytes: &[u8]) -> SplitMessage {
-        let mut bytes = bytes.to_vec();
-        postcard::from_bytes_cobs(&mut bytes).unwrap()
+        let mut frame = bytes.to_vec();
+        assert_eq!(frame.pop(), Some(SENTINEL), "frame must end with the sentinel");
+        let decoded_len = cobs::decode_in_place(&mut frame).unwrap();
+        let payload_len = decoded_len - 4;
+        let expected = u32::from_le_bytes(frame[payload_len..decoded_len].try_into().unwrap());
+        assert_eq!(crate::crc32::crc32(&frame[..payload_len]), expected, "CRC mismatch");
+        postcard::from_bytes(&frame[..payload_len]).unwrap()
     }
 
     #[test]
@@ -347,6 +441,57 @@ mod tests {
             decode(&driver.serial.serial.writes[0]),
             SplitMessage::LedState(true)
         ));
+    }
+
+    /// A queued message is sent once per poll, not duplicated: the second
+    /// poll gets an Idle reply because the queue is empty again.
+    #[test]
+    fn half_duplex_peripheral_sends_each_message_once() {
+        let status = rmk_types::connection::ConnectionStatus::default();
+        let fake = FakeSerial::new([
+            encode(&SplitMessage::HalfDuplexPoll),
+            encode(&SplitMessage::HalfDuplexPoll),
+            encode(&SplitMessage::ConnectionStatus(status)),
+        ]);
+        let mut driver = HalfDuplexPeripheralDriver::new(fake);
+
+        block_on(driver.write(&SplitMessage::LedState(true))).unwrap();
+        let message = block_on(driver.read()).unwrap();
+
+        assert!(matches!(message, SplitMessage::ConnectionStatus(_)));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[0]),
+            SplitMessage::LedState(true)
+        ));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[1]),
+            SplitMessage::HalfDuplexIdle
+        ));
+    }
+
+    /// `write()` must not transmit into an open response window: it listens
+    /// first, stashes whatever response arrives, and only then sends. The
+    /// stashed message comes out of the next `read()` without touching the
+    /// wire.
+    #[test]
+    fn half_duplex_central_write_clears_response_window_first() {
+        let fake = FakeSerial::new([encode(&SplitMessage::LedState(true))]);
+        let mut driver = HalfDuplexCentralDriver::new(fake);
+        driver.response_deadline = Some(Instant::now() + HALF_DUPLEX_RESPONSE_TIMEOUT);
+
+        block_on(driver.write(&SplitMessage::LedState(false))).unwrap();
+
+        assert!(matches!(driver.stashed, Some(SplitMessage::LedState(true))));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[0]),
+            SplitMessage::LedState(false)
+        ));
+
+        // No chunks are scripted anymore: read() must return the stash
+        // without polling.
+        let message = block_on(driver.read()).unwrap();
+        assert!(matches!(message, SplitMessage::LedState(true)));
+        assert_eq!(driver.serial.serial.writes.len(), 1);
     }
 
     #[test]
@@ -422,5 +567,65 @@ mod tests {
         }
 
         assert_eq!(drv.serial.read_calls, 2);
+    }
+
+    /// A frame corrupted on the wire fails its CRC and is dropped, and the
+    /// stream resyncs on the sentinel: the following healthy frame decodes.
+    #[test]
+    fn corrupt_frame_is_dropped_and_stream_resyncs() {
+        let mut bad = encode(&SplitMessage::LedState(false));
+        let idx = bad.len() / 2;
+        // Corrupt one mid-frame byte without creating a spurious sentinel.
+        bad[idx] = if bad[idx] == 0xFF { 0xFE } else { 0xFF };
+        let mut stream = bad;
+        stream.extend_from_slice(&encode(&SplitMessage::LedState(true)));
+
+        let fake = FakeSerial::new([stream]);
+        let mut drv = SerialSplitDriver::new(fake);
+
+        let err = block_on(drv.read()).expect_err("corrupt frame must not decode");
+        assert!(matches!(err, SplitDriverError::SerializeError));
+
+        let msg = block_on(drv.read()).expect("healthy frame after resync");
+        assert!(matches!(msg, SplitMessage::LedState(true)));
+        assert_eq!(drv.serial.read_calls, 1);
+    }
+
+    /// A truncated frame (sender died mid-transmission, then a healthy frame
+    /// follows) is rejected by CRC rather than misparsed.
+    #[test]
+    fn truncated_frame_is_rejected() {
+        let full = encode(&SplitMessage::LedState(false));
+        let mut stream = full[..full.len() - 3].to_vec();
+        stream.push(SENTINEL);
+        stream.extend_from_slice(&encode(&SplitMessage::LedState(true)));
+
+        let fake = FakeSerial::new([stream]);
+        let mut drv = SerialSplitDriver::new(fake);
+
+        let err = block_on(drv.read()).expect_err("truncated frame must not decode");
+        assert!(matches!(err, SplitDriverError::SerializeError));
+
+        let msg = block_on(drv.read()).expect("healthy frame after resync");
+        assert!(matches!(msg, SplitMessage::LedState(true)));
+    }
+
+    /// Round-trip through the production writer: what `SerialSplitDriver`
+    /// writes, `SerialSplitDriver` reads back.
+    #[test]
+    fn writer_reader_round_trip() {
+        let status = rmk_types::connection::ConnectionStatus::new();
+        let fake = FakeSerial::new([]);
+        let mut writer = SerialSplitDriver::new(fake);
+        block_on(writer.write(&SplitMessage::ConnectionStatus(status))).unwrap();
+
+        let frames = writer.serial.writes.concat();
+        let fake = FakeSerial::new([frames]);
+        let mut reader = SerialSplitDriver::new(fake);
+        let msg = block_on(reader.read()).unwrap();
+        match msg {
+            SplitMessage::ConnectionStatus(s) => assert_eq!(s, status),
+            other => panic!("expected ConnectionStatus, got {:?}", other),
+        }
     }
 }

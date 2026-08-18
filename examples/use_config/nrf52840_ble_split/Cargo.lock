@@ -1878,6 +1878,7 @@ version = "0.9.0"
 dependencies = [
  "bt-hci",
  "byteorder",
+ "cobs",
  "cortex-m",
  "crc32fast",
  "defmt 1.1.1",
