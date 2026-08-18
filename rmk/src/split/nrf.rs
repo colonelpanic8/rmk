@@ -74,6 +74,10 @@ impl Write for HalfDuplexUarte<'_> {
             turnaround,
             ..
         } = self;
+        // A cancelled write leaves its unsent tail in the TX ring; sent now
+        // it would prefix this frame and corrupt it on the wire. Drain it
+        // while the bus is still released, where the bytes go nowhere.
+        tx.flush().await?;
         direction.set_high();
         let mut guard = BusGuard {
             direction,
