@@ -515,7 +515,7 @@ impl Client {
     /// is not in [`DeviceCapabilities`], so this asks the device for it first.
     pub async fn read_all_morse_profiles(&self) -> Result<Vec<MorseProfile>, RynkHostError> {
         let total = self.get_morse_profile_count().await? as usize;
-        self.read_all(total, self.capabilities.max_bulk_items, async |c, start| {
+        self.read_all(total, self.capabilities.max_bulk_items.into(), async |c, start| {
             c.get_morse_profile_bulk(start as u8).await.map(|r| r.profiles)
         })
         .await
