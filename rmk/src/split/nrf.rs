@@ -48,18 +48,46 @@ impl Read for HalfDuplexUarte<'_> {
     }
 }
 
+/// Releases the bus when it goes out of scope, including when the write
+/// future is dropped mid-frame. A half that stops driving only on the happy
+/// path holds the transceiver in transmit after any cancellation: it goes
+/// deaf, and its peer's replies are driven over.
+struct BusGuard<'a, 'd> {
+    direction: &'a mut Output<'d>,
+    completed: bool,
+}
+
+impl Drop for BusGuard<'_, '_> {
+    fn drop(&mut self) {
+        self.direction.set_low();
+        if !self.completed {
+            crate::split::serial::counters::bump(&crate::split::serial::counters::WRITE_CANCELLED);
+        }
+    }
+}
+
 impl Write for HalfDuplexUarte<'_> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.direction.set_high();
+        let Self {
+            tx,
+            direction,
+            turnaround,
+            ..
+        } = self;
+        direction.set_high();
+        let mut guard = BusGuard {
+            direction,
+            completed: false,
+        };
         let mut written = 0;
         while written < buf.len() {
-            written += self.tx.write(&buf[written..]).await?;
+            written += tx.write(&buf[written..]).await?;
         }
         // Resolves once the TX ring is drained, i.e. after the final ENDTX:
         // the last byte is on the wire.
-        self.tx.flush().await?;
-        Timer::after(self.turnaround).await;
-        self.direction.set_low();
+        tx.flush().await?;
+        Timer::after(*turnaround).await;
+        guard.completed = true;
         Ok(buf.len())
     }
 
