@@ -256,6 +256,14 @@ impl<S: Write> SplitWriter for SerialSplitDriver<S> {
 const HALF_DUPLEX_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const HALF_DUPLEX_RESPONSE_TIMEOUT: Duration = Duration::from_millis(5);
 const HALF_DUPLEX_QUEUE_CAPACITY: usize = 8;
+/// How long the peripheral waits after decoding a poll before answering.
+///
+/// The central only enables its receiver once the last byte of the poll has
+/// left the wire and its turnaround has elapsed. A reply that starts inside
+/// that window is transmitted while the central is still driving, so it is
+/// lost whole rather than corrupted. The gap has to clear the central's
+/// turnaround plus the tick granularity of the timer that measures it.
+const HALF_DUPLEX_REPLY_GAP: Duration = Duration::from_micros(300);
 
 /// Central side of the polled half-duplex bus.
 ///
@@ -341,13 +349,21 @@ impl<S: Read + Write> SplitWriter for HalfDuplexCentralDriver<S> {
 pub(crate) struct HalfDuplexPeripheralDriver<S> {
     serial: SerialSplitDriver<S>,
     pending: Deque<SplitMessage, HALF_DUPLEX_QUEUE_CAPACITY>,
+    reply_gap: Duration,
 }
 
 impl<S> HalfDuplexPeripheralDriver<S> {
     pub(crate) fn new(serial: S) -> Self {
+        Self::with_reply_gap(serial, HALF_DUPLEX_REPLY_GAP)
+    }
+
+    /// Tests drive this with a zero gap: they run on a clock only the test
+    /// advances, so a real gap would never elapse.
+    pub(crate) fn with_reply_gap(serial: S, reply_gap: Duration) -> Self {
         Self {
             serial: SerialSplitDriver::new(serial),
             pending: Deque::new(),
+            reply_gap,
         }
     }
 }
@@ -358,6 +374,9 @@ impl<S: Read + Write> SplitReader for HalfDuplexPeripheralDriver<S> {
             let message = self.serial.read().await?;
             if matches!(message, SplitMessage::HalfDuplexPoll) {
                 let response = self.pending.front().copied().unwrap_or(SplitMessage::HalfDuplexIdle);
+                if self.reply_gap.as_ticks() != 0 {
+                    Timer::after(self.reply_gap).await;
+                }
                 self.serial.write(&response).await?;
                 // Pop only after the reply is on the wire: a read() future
                 // dropped mid-send retransmits instead of losing the message.
@@ -484,7 +503,7 @@ mod tests {
             encode(&SplitMessage::HalfDuplexPoll),
             encode(&SplitMessage::ConnectionStatus(status)),
         ]);
-        let mut driver = HalfDuplexPeripheralDriver::new(fake);
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
 
         block_on(driver.write(&SplitMessage::LedState(true))).unwrap();
         assert!(driver.serial.serial.writes.is_empty());
@@ -508,7 +527,7 @@ mod tests {
             encode(&SplitMessage::HalfDuplexPoll),
             encode(&SplitMessage::ConnectionStatus(status)),
         ]);
-        let mut driver = HalfDuplexPeripheralDriver::new(fake);
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
 
         block_on(driver.write(&SplitMessage::LedState(true))).unwrap();
         let message = block_on(driver.read()).unwrap();
