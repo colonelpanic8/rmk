@@ -26,6 +26,8 @@ pub mod counters {
     /// Frames whose bytes all reached the transport. A large gap below
     /// `TX_FRAMES` means writes are being cancelled mid-frame.
     pub static TX_DONE: AtomicU32 = AtomicU32::new(0);
+    /// Writes dropped before the bus was released normally.
+    pub static WRITE_CANCELLED: AtomicU32 = AtomicU32::new(0);
     /// Reads that returned a transport error (overrun, framing, break).
     /// Distinguishes a receiver that is failing from a quiet wire.
     pub static RX_ERRORS: AtomicU32 = AtomicU32::new(0);
@@ -34,11 +36,13 @@ pub mod counters {
         RX_BYTES.fetch_add(n as u32, Ordering::Relaxed);
     }
 
-    pub(super) fn bump(c: &AtomicU32) {
+    pub fn bump(c: &AtomicU32) {
         c.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// `(rx_bytes, frames_ok, frames_bad, tx_frames, tx_done, rx_errors)`.
+    /// `(rx_bytes, frames_ok, frames_bad, tx_frames, tx_done, rx_errors_and_cancels)`.
+    /// The last word packs read errors in the high half and cancelled writes
+    /// in the low half.
     pub fn snapshot() -> (u32, u32, u32, u32, u32, u32) {
         (
             RX_BYTES.load(Ordering::Relaxed),
@@ -46,7 +50,7 @@ pub mod counters {
             FRAMES_BAD.load(Ordering::Relaxed),
             TX_FRAMES.load(Ordering::Relaxed),
             TX_DONE.load(Ordering::Relaxed),
-            RX_ERRORS.load(Ordering::Relaxed),
+            (RX_ERRORS.load(Ordering::Relaxed).min(0xffff) << 16) | WRITE_CANCELLED.load(Ordering::Relaxed).min(0xffff),
         )
     }
 }
