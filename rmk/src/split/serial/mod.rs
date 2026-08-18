@@ -26,6 +26,9 @@ pub mod counters {
     /// Frames whose bytes all reached the transport. A large gap below
     /// `TX_FRAMES` means writes are being cancelled mid-frame.
     pub static TX_DONE: AtomicU32 = AtomicU32::new(0);
+    /// Reads that returned a transport error (overrun, framing, break).
+    /// Distinguishes a receiver that is failing from a quiet wire.
+    pub static RX_ERRORS: AtomicU32 = AtomicU32::new(0);
 
     pub(super) fn add_rx(n: usize) {
         RX_BYTES.fetch_add(n as u32, Ordering::Relaxed);
@@ -35,14 +38,15 @@ pub mod counters {
         c.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// `(rx_bytes, frames_ok, frames_bad, tx_frames, tx_done)`.
-    pub fn snapshot() -> (u32, u32, u32, u32, u32) {
+    /// `(rx_bytes, frames_ok, frames_bad, tx_frames, tx_done, rx_errors)`.
+    pub fn snapshot() -> (u32, u32, u32, u32, u32, u32) {
         (
             RX_BYTES.load(Ordering::Relaxed),
             FRAMES_OK.load(Ordering::Relaxed),
             FRAMES_BAD.load(Ordering::Relaxed),
             TX_FRAMES.load(Ordering::Relaxed),
             TX_DONE.load(Ordering::Relaxed),
+            RX_ERRORS.load(Ordering::Relaxed),
         )
     }
 }
@@ -189,6 +193,7 @@ impl<S: Read> SplitReader for SerialSplitDriver<S> {
                 .read(&mut self.buffer[self.n_bytes_part..])
                 .await
                 .map_err(|_e| {
+                    counters::bump(&counters::RX_ERRORS);
                     self.n_bytes_part = 0;
                     SplitDriverError::SerialError
                 })?;
