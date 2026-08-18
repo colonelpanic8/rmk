@@ -12,6 +12,8 @@ use crate::pointing::PointingMode;
 
 /// Pointing-mode feature bits returned by [`PointingCapabilities`].
 pub const POINTING_MODE_KEYPAD: u16 = 1 << 0;
+/// Firmware can remap a device's primary button in cursor mode.
+pub const POINTING_MODE_CURSOR_REMAP: u16 = 1 << 1;
 
 /// Optional pointing features supported by the running firmware.
 ///
@@ -27,6 +29,10 @@ pub struct PointingCapabilities {
 impl PointingCapabilities {
     pub const fn supports_keypad(self) -> bool {
         self.mode_flags & POINTING_MODE_KEYPAD != 0
+    }
+
+    pub const fn supports_cursor_remap(self) -> bool {
+        self.mode_flags & POINTING_MODE_CURSOR_REMAP != 0
     }
 }
 
@@ -145,7 +151,7 @@ pub struct SetPointingConfigRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pointing::{CursorConfig, KeypadConfig, ScrollConfig};
+    use crate::pointing::{CursorConfig, CursorRemapConfig, ScrollConfig};
     use crate::protocol::rynk::message::RYNK_MAX_PAYLOAD_SIZE;
     use crate::protocol::rynk::tests::{assert_max_size_bound, round_trip};
 
@@ -172,7 +178,10 @@ mod tests {
         config.overrides[1] = PointingLayerOverride {
             layer: 2,
             device_id: 1,
-            mode: PointingMode::Keypad(KeypadConfig::default()),
+            mode: PointingMode::CursorRemap(CursorRemapConfig {
+                primary_button: 2,
+                ..Default::default()
+            }),
         };
         config
     }
@@ -205,7 +214,10 @@ mod tests {
         // Layer 2 is overridden for both pads; layer 0 falls back.
         assert_eq!(
             config.mode_for(1, 2),
-            Some(PointingMode::Keypad(KeypadConfig::default()))
+            Some(PointingMode::CursorRemap(CursorRemapConfig {
+                primary_button: 2,
+                ..Default::default()
+            }))
         );
         assert_eq!(
             config.mode_for(1, 0),
@@ -224,5 +236,16 @@ mod tests {
             .supports_keypad()
         );
         assert!(!PointingCapabilities { mode_flags: 0 }.supports_keypad());
+    }
+
+    #[test]
+    fn cursor_remap_capability_is_discoverable() {
+        assert!(
+            PointingCapabilities {
+                mode_flags: POINTING_MODE_CURSOR_REMAP,
+            }
+            .supports_cursor_remap()
+        );
+        assert!(!PointingCapabilities { mode_flags: 0 }.supports_cursor_remap());
     }
 }

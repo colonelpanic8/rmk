@@ -31,6 +31,10 @@ pub enum PointingMode {
     Press(PressConfig),
     /// Keypad mode - XY motion and a primary tap emit configurable keycodes.
     Keypad(KeypadConfig),
+    /// Cursor mode with the device's primary button remapped to another
+    /// mouse-button mask. Kept as a separate, appended wire variant so old
+    /// persisted cursor configurations retain their postcard encoding.
+    CursorRemap(CursorRemapConfig),
 }
 
 impl Default for PointingMode {
@@ -62,6 +66,28 @@ impl Default for CursorConfig {
             multiplier_y: 1,
             invert_x: false,
             invert_y: false,
+        }
+    }
+}
+
+/// Configuration for cursor mode with a remapped primary device button.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct CursorRemapConfig {
+    /// Motion behaves exactly as it does in cursor mode.
+    pub cursor: CursorConfig,
+    /// Mouse-button mask emitted while the device's primary button is down.
+    /// Bit 0 is primary, bit 1 is secondary, and zero suppresses the tap.
+    pub primary_button: u8,
+}
+
+impl Default for CursorRemapConfig {
+    fn default() -> Self {
+        Self {
+            cursor: CursorConfig::default(),
+            primary_button: 1,
         }
     }
 }
