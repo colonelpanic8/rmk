@@ -450,7 +450,7 @@ impl Client {
     /// Read every combo slot using the additive action-or-position representation.
     pub async fn read_all_combo_definitions(&self) -> Result<Vec<ComboDefinition>, RynkHostError> {
         let total = self.capabilities.max_combos as usize;
-        self.read_all(total, self.capabilities.max_bulk_items, async |c, start| {
+        self.read_all(total, self.capabilities.max_bulk_items.into(), async |c, start| {
             c.get_combo_definition_bulk(start as u8).await.map(|r| r.definitions)
         })
         .await
