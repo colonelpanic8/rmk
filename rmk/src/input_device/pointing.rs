@@ -593,10 +593,16 @@ impl<'a> PointingProcessor<'a> {
             // Presence already delivers the press, and the pad's tap
             // gestures would only replay it as a stray click after liftoff.
             PointingMode::Press(_) => self.keymap.mouse_buttons() | self.latched_buttons(),
+            PointingMode::CursorRemap(config) => {
+                self.keymap.mouse_buttons()
+                    | remap_primary_button(event.buttons, config.primary_button)
+                    | self.latched_buttons()
+            }
             _ => self.keymap.mouse_buttons() | event.buttons | self.latched_buttons(),
         };
         match self.current_mode {
             PointingMode::Cursor(_)
+            | PointingMode::CursorRemap(_)
             | PointingMode::Scroll(_)
             | PointingMode::Sniper(_)
             | PointingMode::Drag(_)
@@ -606,6 +612,14 @@ impl<'a> PointingProcessor<'a> {
                     PointingMode::Cursor(cursor_config) => {
                         let Some(report) =
                             self.cursor_report(x, y, dt_ms, &cursor_config, buttons, device_buttons_changed)
+                        else {
+                            return;
+                        };
+                        report
+                    }
+                    PointingMode::CursorRemap(config) => {
+                        let Some(report) =
+                            self.cursor_report(x, y, dt_ms, &config.cursor, buttons, device_buttons_changed)
                         else {
                             return;
                         };
@@ -727,6 +741,18 @@ impl<'a> PointingProcessor<'a> {
     }
 }
 
+
+/// Replace only the device-originated primary button, preserving secondary
+/// and higher buttons reported by the device itself.
+fn remap_primary_button(buttons: u8, primary_button: u8) -> u8 {
+    const PRIMARY_BUTTON: u8 = 1;
+    (buttons & !PRIMARY_BUTTON)
+        | if buttons & PRIMARY_BUTTON != 0 {
+            primary_button
+        } else {
+            0
+        }
+}
 
 /// Whether drag mode holds its button after this button transition.
 ///
@@ -1852,6 +1878,14 @@ mod tests {
             accelerate(i16::MAX, i16::MIN, 1, ACCEL, &mut rest),
             (i16::MAX, i16::MIN)
         );
+    }
+
+    #[test]
+    fn test_cursor_primary_button_remap_preserves_other_buttons() {
+        assert_eq!(remap_primary_button(0, 2), 0);
+        assert_eq!(remap_primary_button(1, 2), 2);
+        assert_eq!(remap_primary_button(0b101, 2), 0b110);
+        assert_eq!(remap_primary_button(1, 0), 0);
     }
 
     // === Integration tests for PointingProcessor ===
