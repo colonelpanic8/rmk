@@ -263,7 +263,7 @@ const HALF_DUPLEX_QUEUE_CAPACITY: usize = 8;
 /// that window is transmitted while the central is still driving, so it is
 /// lost whole rather than corrupted. The gap has to clear the central's
 /// turnaround plus the tick granularity of the timer that measures it.
-const HALF_DUPLEX_REPLY_GAP: Duration = Duration::from_micros(300);
+const HALF_DUPLEX_REPLY_GAP: Duration = Duration::from_millis(2);
 
 /// Central side of the polled half-duplex bus.
 ///
