@@ -256,6 +256,11 @@ impl<S: Write> SplitWriter for SerialSplitDriver<S> {
 const HALF_DUPLEX_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const HALF_DUPLEX_RESPONSE_TIMEOUT: Duration = Duration::from_millis(5);
 const HALF_DUPLEX_QUEUE_CAPACITY: usize = 8;
+/// How many queued frames the peripheral may send per poll. Every reply
+/// burst ends with an Idle frame, which is what tells the central the bus
+/// is free again — so bandwidth scales with the burst without the central
+/// ever guessing when the peripheral has finished.
+const HALF_DUPLEX_REPLY_BURST: usize = 4;
 /// How long the peripheral waits after decoding a poll before answering.
 ///
 /// The central only enables its receiver once the last byte of the poll has
@@ -277,9 +282,8 @@ pub(crate) struct HalfDuplexCentralDriver<S> {
     /// Deadline until which the peripheral may still be answering the last
     /// poll. `None` when the bus is known quiet.
     response_deadline: Option<Instant>,
-    /// Response that arrived while `write()` was clearing the bus; returned
-    /// by the next `read()`.
-    stashed: Option<SplitMessage>,
+    /// Responses that arrived while clearing the bus; drained by `read()`.
+    stashed: Deque<SplitMessage, HALF_DUPLEX_QUEUE_CAPACITY>,
 }
 
 impl<S> HalfDuplexCentralDriver<S> {
@@ -287,36 +291,45 @@ impl<S> HalfDuplexCentralDriver<S> {
         Self {
             serial: SerialSplitDriver::new(serial),
             response_deadline: None,
-            stashed: None,
+            stashed: Deque::new(),
         }
     }
 }
 
 impl<S: Read + Write> HalfDuplexCentralDriver<S> {
-    /// Wait until the pending response window is over: an answer arrived,
-    /// the frame proved corrupt, or the deadline passed.
-    async fn clear_response_window(&mut self) -> Result<Option<SplitMessage>, SplitDriverError> {
-        let Some(deadline) = self.response_deadline else {
-            return Ok(None);
-        };
-        let result = with_deadline(deadline, self.serial.read()).await;
-        self.response_deadline = None;
-        match result {
-            Ok(Ok(SplitMessage::HalfDuplexIdle)) => Ok(None),
-            Ok(Ok(message)) => Ok(Some(message)),
-            Ok(Err(e)) => Err(e),
-            Err(_timeout) => Ok(None),
+    /// Wait until the pending response window is over, stashing every data
+    /// frame it carries. The peripheral terminates each reply burst with an
+    /// Idle frame; that terminator (or the deadline, or a corrupt frame) is
+    /// what closes the window.
+    async fn clear_response_window(&mut self) -> Result<(), SplitDriverError> {
+        while let Some(deadline) = self.response_deadline {
+            match with_deadline(deadline, self.serial.read()).await {
+                Ok(Ok(SplitMessage::HalfDuplexIdle)) => self.response_deadline = None,
+                Ok(Ok(message)) => {
+                    // A full stash drops the frame; the CRC layer already
+                    // makes this link at-most-once, so overflow is loss, not
+                    // corruption, and the queue outsizes a reply burst.
+                    let _ = self.stashed.push_back(message);
+                }
+                Ok(Err(e)) => {
+                    self.response_deadline = None;
+                    return Err(e);
+                }
+                Err(_timeout) => self.response_deadline = None,
+            }
         }
+        Ok(())
     }
 }
 
 impl<S: Read + Write> SplitReader for HalfDuplexCentralDriver<S> {
     async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
         loop {
-            if let Some(message) = self.stashed.take() {
+            if let Some(message) = self.stashed.pop_front() {
                 return Ok(message);
             }
-            if let Some(message) = self.clear_response_window().await? {
+            self.clear_response_window().await?;
+            if let Some(message) = self.stashed.pop_front() {
                 return Ok(message);
             }
             // Armed BEFORE the write: if this future is dropped mid-send the
@@ -324,7 +337,8 @@ impl<S: Read + Write> SplitReader for HalfDuplexCentralDriver<S> {
             // must not be allowed to drive over the reply it provokes.
             self.response_deadline = Some(Instant::now() + HALF_DUPLEX_RESPONSE_TIMEOUT);
             self.serial.write(&SplitMessage::HalfDuplexPoll).await?;
-            if let Some(message) = self.clear_response_window().await? {
+            self.clear_response_window().await?;
+            if let Some(message) = self.stashed.pop_front() {
                 return Ok(message);
             }
             Timer::after(HALF_DUPLEX_POLL_INTERVAL).await;
@@ -336,13 +350,9 @@ impl<S: Read + Write> SplitWriter for HalfDuplexCentralDriver<S> {
     async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
         // The manager awaits write() outside its select, so this send cannot
         // be cancelled mid-frame. It only has to stay out of the response
-        // window of a poll whose read() future was cancelled.
-        match self.clear_response_window().await {
-            Ok(Some(response)) => self.stashed = Some(response),
-            Ok(None) => {}
-            // A corrupt response still means the window is over.
-            Err(_) => {}
-        }
+        // window of a poll whose read() future was cancelled. A corrupt
+        // response still means the window is over.
+        let _ = self.clear_response_window().await;
         self.serial.write(message).await
     }
 }
@@ -376,16 +386,23 @@ impl<S: Read + Write> SplitReader for HalfDuplexPeripheralDriver<S> {
         loop {
             let message = self.serial.read().await?;
             if matches!(message, SplitMessage::HalfDuplexPoll) {
-                let response = self.pending.front().copied().unwrap_or(SplitMessage::HalfDuplexIdle);
                 if self.reply_gap.as_ticks() != 0 {
                     Timer::after(self.reply_gap).await;
                 }
-                self.serial.write(&response).await?;
-                // Pop only after the reply is on the wire: a read() future
-                // dropped mid-send retransmits instead of losing the message.
-                if !matches!(response, SplitMessage::HalfDuplexIdle) {
+                let mut sent = 0;
+                while sent < HALF_DUPLEX_REPLY_BURST {
+                    let Some(front) = self.pending.front().copied() else {
+                        break;
+                    };
+                    self.serial.write(&front).await?;
+                    // Popped only after the frame is on the wire: a read()
+                    // future dropped mid-send retransmits instead of losing
+                    // the message.
                     self.pending.pop_front();
+                    sent += 1;
                 }
+                // The terminator that tells the central the bus is free.
+                self.serial.write(&SplitMessage::HalfDuplexIdle).await?;
             } else {
                 return Ok(message);
             }
@@ -487,7 +504,9 @@ mod tests {
 
     #[test]
     fn half_duplex_central_polls_before_reading() {
-        let fake = FakeSerial::new([encode(&SplitMessage::LedState(true))]);
+        let mut reply = encode(&SplitMessage::LedState(true));
+        reply.extend_from_slice(&encode(&SplitMessage::HalfDuplexIdle));
+        let fake = FakeSerial::new([reply]);
         let mut driver = HalfDuplexCentralDriver::new(fake);
 
         let message = block_on(driver.read()).unwrap();
@@ -518,10 +537,14 @@ mod tests {
             decode(&driver.serial.serial.writes[0]),
             SplitMessage::LedState(true)
         ));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[1]),
+            SplitMessage::HalfDuplexIdle
+        ));
     }
 
     /// A queued message is sent once per poll, not duplicated: the second
-    /// poll gets an Idle reply because the queue is empty again.
+    /// poll's burst is empty, leaving only its Idle terminator.
     #[test]
     fn half_duplex_peripheral_sends_each_message_once() {
         let status = rmk_types::connection::ConnectionStatus::default();
@@ -544,6 +567,40 @@ mod tests {
             decode(&driver.serial.serial.writes[1]),
             SplitMessage::HalfDuplexIdle
         ));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[2]),
+            SplitMessage::HalfDuplexIdle
+        ));
+    }
+
+    /// Multiple queued messages all ride one poll, oldest first, with the
+    /// Idle terminator closing the burst.
+    #[test]
+    fn half_duplex_peripheral_bursts_queued_messages() {
+        let status = rmk_types::connection::ConnectionStatus::default();
+        let fake = FakeSerial::new([
+            encode(&SplitMessage::HalfDuplexPoll),
+            encode(&SplitMessage::ConnectionStatus(status)),
+        ]);
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+
+        block_on(driver.write(&SplitMessage::LedState(true))).unwrap();
+        block_on(driver.write(&SplitMessage::LedState(false))).unwrap();
+        let message = block_on(driver.read()).unwrap();
+
+        assert!(matches!(message, SplitMessage::ConnectionStatus(_)));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[0]),
+            SplitMessage::LedState(true)
+        ));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[1]),
+            SplitMessage::LedState(false)
+        ));
+        assert!(matches!(
+            decode(&driver.serial.serial.writes[2]),
+            SplitMessage::HalfDuplexIdle
+        ));
     }
 
     /// `write()` must not transmit into an open response window: it listens
@@ -552,13 +609,15 @@ mod tests {
     /// wire.
     #[test]
     fn half_duplex_central_write_clears_response_window_first() {
-        let fake = FakeSerial::new([encode(&SplitMessage::LedState(true))]);
+        let mut reply = encode(&SplitMessage::LedState(true));
+        reply.extend_from_slice(&encode(&SplitMessage::HalfDuplexIdle));
+        let fake = FakeSerial::new([reply]);
         let mut driver = HalfDuplexCentralDriver::new(fake);
         driver.response_deadline = Some(Instant::now() + HALF_DUPLEX_RESPONSE_TIMEOUT);
 
         block_on(driver.write(&SplitMessage::LedState(false))).unwrap();
 
-        assert!(matches!(driver.stashed, Some(SplitMessage::LedState(true))));
+        assert!(matches!(driver.stashed.front(), Some(SplitMessage::LedState(true))));
         assert!(matches!(
             decode(&driver.serial.serial.writes[0]),
             SplitMessage::LedState(false)
