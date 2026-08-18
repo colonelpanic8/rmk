@@ -319,8 +319,11 @@ impl<S: Read + Write> SplitReader for HalfDuplexCentralDriver<S> {
             if let Some(message) = self.clear_response_window().await? {
                 return Ok(message);
             }
-            self.serial.write(&SplitMessage::HalfDuplexPoll).await?;
+            // Armed BEFORE the write: if this future is dropped mid-send the
+            // poll may still have reached the wire, and the next transmission
+            // must not be allowed to drive over the reply it provokes.
             self.response_deadline = Some(Instant::now() + HALF_DUPLEX_RESPONSE_TIMEOUT);
+            self.serial.write(&SplitMessage::HalfDuplexPoll).await?;
             if let Some(message) = self.clear_response_window().await? {
                 return Ok(message);
             }
