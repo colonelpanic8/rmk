@@ -2,7 +2,8 @@
 
 use rmk_types::protocol::rynk::command::{GetPointingCapabilities, GetPointingConfig, SetPointingConfig};
 use rmk_types::protocol::rynk::{
-    POINTING_MODE_KEYPAD, PointingCapabilities, PointingConfig, RynkError, SetPointingConfigRequest,
+    POINTING_MODE_CURSOR_REMAP, POINTING_MODE_KEYPAD, PointingCapabilities, PointingConfig, RynkError,
+    SetPointingConfigRequest,
 };
 
 use super::super::RynkService;
@@ -24,7 +25,7 @@ impl Handle<SetPointingConfig> for RynkService<'_> {
 impl Handle<GetPointingCapabilities> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<PointingCapabilities, RynkError> {
         Ok(PointingCapabilities {
-            mode_flags: POINTING_MODE_KEYPAD,
+            mode_flags: POINTING_MODE_KEYPAD | POINTING_MODE_CURSOR_REMAP,
         })
     }
 }
