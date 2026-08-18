@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 use embassy_sync::watch::Watch;
 
@@ -14,6 +14,9 @@ pub const FORCE_BLE: u8 = 2;
 static AUTO_ENABLED: AtomicBool = AtomicBool::new(false);
 static WIRED_SELECTED: AtomicBool = AtomicBool::new(false);
 static FORCED: AtomicU8 = AtomicU8::new(FORCE_AUTO);
+/// Times the effective selection entered the wired state, so a half that
+/// never switched can be told apart from one that switched and went quiet.
+static WIRED_ENTRIES: AtomicU32 = AtomicU32::new(0);
 
 /// Broadcasts every effective-selection change so waiters suspend instead of
 /// polling. Sized for the transport tasks of both halves plus application
@@ -23,7 +26,15 @@ static SELECTION_CHANGED: Watch<RawMutex, bool, 8> = Watch::new();
 pub fn initialize(wired: bool) {
     WIRED_SELECTED.store(wired, Ordering::Release);
     AUTO_ENABLED.store(true, Ordering::Release);
+    if wired {
+        WIRED_ENTRIES.fetch_add(1, Ordering::Relaxed);
+    }
     SELECTION_CHANGED.sender().send(wired);
+}
+
+/// How many times this half selected the wired link.
+pub fn wired_entries() -> u32 {
+    WIRED_ENTRIES.load(Ordering::Relaxed)
 }
 
 pub fn update(wired: bool) {
@@ -31,6 +42,9 @@ pub fn update(wired: bool) {
     WIRED_SELECTED.store(wired, Ordering::Release);
     let now = effective_wired();
     if now != was {
+        if now {
+            WIRED_ENTRIES.fetch_add(1, Ordering::Relaxed);
+        }
         SELECTION_CHANGED.sender().send(now);
     }
 }
@@ -43,6 +57,9 @@ pub fn set_forced(mode: u8) {
     FORCED.store(mode.min(FORCE_BLE), Ordering::Release);
     let now = effective_wired();
     if now != was {
+        if now {
+            WIRED_ENTRIES.fetch_add(1, Ordering::Relaxed);
+        }
         SELECTION_CHANGED.sender().send(now);
     }
 }
