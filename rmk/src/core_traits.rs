@@ -29,10 +29,7 @@ impl<F: core::future::Future> core::future::Future for NoInline<F> {
     type Output = F::Output;
 
     #[inline(never)]
-    fn poll(
-        self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<F::Output> {
+    fn poll(self: core::pin::Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> core::task::Poll<F::Output> {
         // SAFETY: structural pinning of the only field.
         unsafe { self.map_unchecked_mut(|s| &mut s.0) }.poll(cx)
     }

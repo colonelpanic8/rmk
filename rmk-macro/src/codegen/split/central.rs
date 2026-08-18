@@ -126,6 +126,9 @@ pub(crate) fn expand_serial_init(chip: &ChipModel, serial: Vec<SerialConfig>) ->
                     .unwrap_or_else(|| ["PPI_CH0".to_string(), "PPI_CH1".to_string()]);
                 let ppi_ch1 = format_ident!("{}", ppi_channels[0]);
                 let ppi_ch2 = format_ident!("{}", ppi_channels[1]);
+                let ppi_group = format_ident!("PPI_GROUP{}", idx);
+                let rx_ring_static = format_ident!("UARTE_RX_RING{}", idx);
+                let tx_ring_static = format_ident!("UARTE_TX_RING{}", idx);
                 let irq_name = format_ident!("IrqsUarte{}", idx);
                 let uart_irq = match s.instance.as_str() {
                     "UARTE0" => format_ident!("UARTE0"),
@@ -141,22 +144,26 @@ pub(crate) fn expand_serial_init(chip: &ChipModel, serial: Vec<SerialConfig>) ->
                 };
                 quote! {
                     ::embassy_nrf::bind_interrupts!(struct #irq_name {
-                        #uart_irq => ::embassy_nrf::uarte::InterruptHandler<::embassy_nrf::peripherals::#uart_instance>;
+                        #uart_irq => ::embassy_nrf::buffered_uarte::InterruptHandler<::embassy_nrf::peripherals::#uart_instance>;
                     });
                     let mut uart_config = ::embassy_nrf::uarte::Config::default();
                     uart_config.baudrate = #baudrate;
-                    let #uart_name = ::embassy_nrf::uarte::Uarte::new(
+                    static #rx_ring_static: ::static_cell::StaticCell<[u8; 256]> = ::static_cell::StaticCell::new();
+                    static #tx_ring_static: ::static_cell::StaticCell<[u8; 128]> = ::static_cell::StaticCell::new();
+                    let #uart_name = ::embassy_nrf::buffered_uarte::BufferedUarte::new(
                         p.#uart_instance,
+                        p.#timer,
+                        p.#ppi_ch1,
+                        p.#ppi_ch2,
+                        p.#ppi_group,
                         p.#rx_pin,
                         p.#tx_pin,
                         #irq_name,
                         uart_config,
+                        &mut #rx_ring_static.init([0_u8; 256])[..],
+                        &mut #tx_ring_static.init([0_u8; 128])[..],
                     );
-                    let (#tx_name, #rx_name) = #uart_name.split_with_idle(
-                        p.#timer,
-                        p.#ppi_ch1,
-                        p.#ppi_ch2,
-                    );
+                    let (#rx_name, #tx_name) = #uart_name.split();
                     let direction = ::embassy_nrf::gpio::Output::new(
                         p.#direction_pin,
                         ::embassy_nrf::gpio::Level::Low,
