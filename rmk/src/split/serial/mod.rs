@@ -9,6 +9,40 @@ use crate::split::{SPLIT_MESSAGE_MAX_SIZE, SplitMessage};
 /// Frame delimiter: COBS guarantees no zero bytes inside an encoded frame.
 const SENTINEL: u8 = 0x00;
 
+/// Wired-link traffic counters, so a half that goes quiet can be told apart
+/// from one that never saw the bus at all. Read them over the host protocol
+/// on the central and through the split debug relay on the peripheral.
+pub mod counters {
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    /// Bytes delivered by the serial transport.
+    pub static RX_BYTES: AtomicU32 = AtomicU32::new(0);
+    /// Frames that decoded and passed CRC.
+    pub static FRAMES_OK: AtomicU32 = AtomicU32::new(0);
+    /// Frames dropped by COBS, CRC, or postcard.
+    pub static FRAMES_BAD: AtomicU32 = AtomicU32::new(0);
+    /// Frames handed to the transport for transmission.
+    pub static TX_FRAMES: AtomicU32 = AtomicU32::new(0);
+
+    pub(super) fn add_rx(n: usize) {
+        RX_BYTES.fetch_add(n as u32, Ordering::Relaxed);
+    }
+
+    pub(super) fn bump(c: &AtomicU32) {
+        c.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `(rx_bytes, frames_ok, frames_bad, tx_frames)`.
+    pub fn snapshot() -> (u32, u32, u32, u32) {
+        (
+            RX_BYTES.load(Ordering::Relaxed),
+            FRAMES_OK.load(Ordering::Relaxed),
+            FRAMES_BAD.load(Ordering::Relaxed),
+            TX_FRAMES.load(Ordering::Relaxed),
+        )
+    }
+}
+
 /// Receive split message from peripheral via serial and process it
 ///
 /// Generic parameters:
@@ -157,10 +191,16 @@ impl<S: Read> SplitReader for SerialSplitDriver<S> {
             if n_bytes == 0 {
                 return Err(SplitDriverError::EmptyMessage);
             }
+            counters::add_rx(n_bytes);
             self.n_bytes_part += n_bytes;
         };
 
         let result = decode_frame(&mut self.buffer[..sentinel_index]);
+        counters::bump(if result.is_ok() {
+            &counters::FRAMES_OK
+        } else {
+            &counters::FRAMES_BAD
+        });
         // Consume the frame and its sentinel, keeping any following bytes.
         self.buffer.copy_within(sentinel_index + 1..self.n_bytes_part, 0);
         self.n_bytes_part -= sentinel_index + 1;
@@ -184,6 +224,7 @@ impl<S: Write> SplitWriter for SerialSplitDriver<S> {
         let encoded_len = cobs::encode(&raw[..payload_len + 4], &mut frame);
         frame[encoded_len] = SENTINEL;
         let bytes = &frame[..encoded_len + 1];
+        counters::bump(&counters::TX_FRAMES);
 
         let mut remaining_bytes = bytes.len();
         while remaining_bytes > 0 {
