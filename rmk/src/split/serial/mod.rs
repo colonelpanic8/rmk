@@ -23,6 +23,9 @@ pub mod counters {
     pub static FRAMES_BAD: AtomicU32 = AtomicU32::new(0);
     /// Frames handed to the transport for transmission.
     pub static TX_FRAMES: AtomicU32 = AtomicU32::new(0);
+    /// Frames whose bytes all reached the transport. A large gap below
+    /// `TX_FRAMES` means writes are being cancelled mid-frame.
+    pub static TX_DONE: AtomicU32 = AtomicU32::new(0);
 
     pub(super) fn add_rx(n: usize) {
         RX_BYTES.fetch_add(n as u32, Ordering::Relaxed);
@@ -32,13 +35,14 @@ pub mod counters {
         c.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// `(rx_bytes, frames_ok, frames_bad, tx_frames)`.
-    pub fn snapshot() -> (u32, u32, u32, u32) {
+    /// `(rx_bytes, frames_ok, frames_bad, tx_frames, tx_done)`.
+    pub fn snapshot() -> (u32, u32, u32, u32, u32) {
         (
             RX_BYTES.load(Ordering::Relaxed),
             FRAMES_OK.load(Ordering::Relaxed),
             FRAMES_BAD.load(Ordering::Relaxed),
             TX_FRAMES.load(Ordering::Relaxed),
+            TX_DONE.load(Ordering::Relaxed),
         )
     }
 }
@@ -235,6 +239,7 @@ impl<S: Write> SplitWriter for SerialSplitDriver<S> {
                 .map_err(|_e| SplitDriverError::SerialError)?;
             remaining_bytes -= sent_bytes;
         }
+        counters::bump(&counters::TX_DONE);
         Ok(bytes.len())
     }
 }
