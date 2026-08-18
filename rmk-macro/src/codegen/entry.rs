@@ -361,6 +361,9 @@ fn transport_setup(
 pub(crate) fn expand_tasks(tasks: Vec<TokenStream2>) -> TokenStream2 {
     let mut current_joined = quote! {};
     tasks.iter().enumerate().for_each(|(id, task)| {
+        // Each arm polls through its own never-inlined function: flattening
+        // every task into one giant poll has miscompiled on thumbv7em.
+        let task = quote! { ::rmk::core_traits::NoInline(#task) };
         if id == 0 {
             current_joined = quote! {#task};
         } else {
