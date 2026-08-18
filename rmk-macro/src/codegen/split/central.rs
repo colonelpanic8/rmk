@@ -148,8 +148,12 @@ pub(crate) fn expand_serial_init(chip: &ChipModel, serial: Vec<SerialConfig>) ->
                     });
                     let mut uart_config = ::embassy_nrf::uarte::Config::default();
                     uart_config.baudrate = #baudrate;
-                    static #rx_ring_static: ::static_cell::StaticCell<[u8; 256]> = ::static_cell::StaticCell::new();
-                    static #tx_ring_static: ::static_cell::StaticCell<[u8; 128]> = ::static_cell::StaticCell::new();
+                    // The RX ring is the only backlog while the executor is
+                    // busy; size it for a full replication snapshot burst
+                    // (tens of frames back-to-back at the wire rate), not for
+                    // single messages.
+                    static #rx_ring_static: ::static_cell::StaticCell<[u8; 4096]> = ::static_cell::StaticCell::new();
+                    static #tx_ring_static: ::static_cell::StaticCell<[u8; 512]> = ::static_cell::StaticCell::new();
                     let #uart_name = ::embassy_nrf::buffered_uarte::BufferedUarte::new(
                         p.#uart_instance,
                         p.#timer,
@@ -160,8 +164,8 @@ pub(crate) fn expand_serial_init(chip: &ChipModel, serial: Vec<SerialConfig>) ->
                         p.#tx_pin,
                         #irq_name,
                         uart_config,
-                        &mut #rx_ring_static.init([0_u8; 256])[..],
-                        &mut #tx_ring_static.init([0_u8; 128])[..],
+                        &mut #rx_ring_static.init([0_u8; 4096])[..],
+                        &mut #tx_ring_static.init([0_u8; 512])[..],
                     );
                     let (#rx_name, #tx_name) = #uart_name.split();
                     let direction = ::embassy_nrf::gpio::Output::new(
