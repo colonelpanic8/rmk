@@ -1,7 +1,7 @@
 #[cfg(feature = "subrating")]
 use bt_hci::{cmd::le::LeSetHostFeature, controller::ControllerCmdSync};
 use embassy_futures::join::join;
-use embassy_futures::select::{Either, select};
+use embassy_futures::select::select;
 use embassy_time::{Duration, Timer};
 use rmk_types::connection::ConnectionStatus;
 use trouble_host::prelude::*;
@@ -177,6 +177,21 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
         .filter(|a| a.is_valid)
         .map(|a| a.address);
 
+    /// Revert a BLE force the central never joins. The forced link is this
+    /// half's only way to hear the override that would free it, so a force
+    /// whose transport stays dead while a cable is detected strands the
+    /// peripheral; the cable-detect input is ground truth.
+    async fn forced_ble_liveness_fallback() {
+        if crate::split::selector::forced_mode() != crate::split::selector::FORCE_BLE
+            || !crate::split::selector::detected_wired()
+        {
+            core::future::pending::<()>().await;
+        }
+        embassy_time::Timer::after_secs(8).await;
+        info!("BLE force reverted: central never connected");
+        crate::split::selector::set_forced(crate::split::selector::FORCE_AUTO);
+    }
+
     let peri_task = async {
         // Set subrating host support before any advertising/connecting
         #[cfg(feature = "subrating")]
@@ -188,14 +203,15 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
             update_status(|c| *c = ConnectionStatus::new());
             publish_event(CentralConnectedEvent { connected: false });
             publish_event(SleepStateEvent::new(false));
-            let connection = select(
+            let connection = embassy_futures::select::select3(
                 split_peripheral_advertise(id, central_addr, &mut peripheral, &server),
                 crate::split::selector::wait_wired_selected(),
+                forced_ble_liveness_fallback(),
             )
             .await;
             let connection = match connection {
-                Either::First(connection) => connection,
-                Either::Second(_) => continue,
+                embassy_futures::select::Either3::First(connection) => connection,
+                embassy_futures::select::Either3::Second(_) | embassy_futures::select::Either3::Third(_) => continue,
             };
             match connection {
                 Ok(conn) => {

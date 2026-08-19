@@ -180,6 +180,12 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
         }
     }
 
+    /// The transport, for transport-specific upkeep while the manager is
+    /// parked (e.g. draining a deselected serial port).
+    pub(crate) fn transceiver_mut(&mut self) -> &mut T {
+        &mut self.transceiver
+    }
+
     /// Send a message to the peripheral, returning Err on disconnect.
     async fn send(&mut self, msg: &SplitMessage) -> Result<(), ()> {
         debug!("Sending message to peripheral {}: {:?}", self.id, msg);
