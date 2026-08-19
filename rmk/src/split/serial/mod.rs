@@ -124,7 +124,14 @@ pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
     );
 
     loop {
-        crate::split::selector::wait_wired_selected().await;
+        match embassy_futures::select::select(
+            peripheral_manager.transceiver_mut().drain(),
+            crate::split::selector::wait_wired_selected(),
+        )
+        .await
+        {
+            embassy_futures::select::Either::First(_) | embassy_futures::select::Either::Second(_) => {}
+        }
         set_peripheral_connected(id, true);
         match embassy_futures::select::select(
             peripheral_manager.run(),
@@ -559,6 +566,18 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
     }
 }
 
+impl<S: Read> HalfDuplexCentralDriver<S> {
+    /// Consume and discard everything that arrives while this transport is
+    /// deselected. An unread UARTE eventually overruns its ring and can wedge
+    /// reception; draining also means a resumed session starts from a clean
+    /// stream instead of a backlog of stale frames.
+    pub(crate) async fn drain(&mut self) {
+        loop {
+            let _ = self.serial.read_frame().await;
+        }
+    }
+}
+
 impl<S: Read + Write> SplitReader for HalfDuplexCentralDriver<S> {
     async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
         loop {
@@ -617,6 +636,15 @@ impl<S> HalfDuplexPeripheralDriver<S> {
             serial: SerialSplitDriver::new(serial),
             link: LinkEndpoint::new(),
             reply_gap,
+        }
+    }
+}
+
+impl<S: Read> HalfDuplexPeripheralDriver<S> {
+    /// See [`HalfDuplexCentralDriver::drain`].
+    pub(crate) async fn drain(&mut self) {
+        loop {
+            let _ = self.serial.read_frame().await;
         }
     }
 }
