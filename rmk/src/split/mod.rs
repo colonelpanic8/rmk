@@ -21,9 +21,9 @@ pub mod rp;
 pub mod selector;
 pub mod serial;
 
-/// Maximum size of a split message frame on the wire: postcard payload,
-/// 4-byte CRC-32, COBS overhead, and the sentinel byte.
-pub const SPLIT_MESSAGE_MAX_SIZE: usize = SplitMessage::POSTCARD_MAX_SIZE + 10;
+/// Maximum size of a split message frame on the wire: link header, postcard
+/// payload, 4-byte CRC-32, COBS overhead, and the sentinel byte.
+pub const SPLIT_MESSAGE_MAX_SIZE: usize = SplitMessage::POSTCARD_MAX_SIZE + 16;
 
 /// Volatile split-transport force from the application (one of
 /// `selector::FORCE_*`). While a peripheral is connected the force travels
