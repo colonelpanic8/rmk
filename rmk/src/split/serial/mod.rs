@@ -33,6 +33,10 @@ pub mod counters {
     pub static RX_ERRORS: AtomicU32 = AtomicU32::new(0);
     /// Sequenced frames retransmitted by the link layer.
     pub static RETRANSMITS: AtomicU32 = AtomicU32::new(0);
+    /// Messages refused at enqueue because their outgoing lane was full.
+    /// A refused message is lost above the sequencing layer — nothing
+    /// retransmits it — so this is the only trace it leaves.
+    pub static LANE_DROPS: AtomicU32 = AtomicU32::new(0);
 
     pub(super) fn add_rx(n: usize) {
         RX_BYTES.fetch_add(n as u32, Ordering::Relaxed);
@@ -658,7 +662,17 @@ impl<S: Read + Write> SplitReader for HalfDuplexCentralDriver<S> {
 impl<S: Read + Write> SplitWriter for HalfDuplexCentralDriver<S> {
     async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
         let control = matches!(lane_of(message), Lane::Control);
-        self.link.enqueue(message)?;
+        // A full lane drains only through exchanges, so drive them until the
+        // message fits instead of refusing it. The manager treats a write
+        // error as droppable, so a refusal here silently severed any
+        // application burst larger than one lane: the peripheral staged a
+        // snapshot head that never committed, acknowledged nothing, and the
+        // central re-sent — and re-lost — the same burst forever.
+        while self.link.enqueue(message).is_err() {
+            if !self.exchange().await? {
+                Timer::after(HALF_DUPLEX_POLL_INTERVAL).await;
+            }
+        }
         if control {
             // The manager acts on a control send having happened (e.g. it
             // switches transports after a TransportOverride), so drive
@@ -759,7 +773,15 @@ impl<S: Read + Write> SplitReader for HalfDuplexPeripheralDriver<S> {
 
 impl<S> SplitWriter for HalfDuplexPeripheralDriver<S> {
     async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
-        self.link.enqueue(message)?;
+        // Unlike the central, this side cannot drive the bus to make room —
+        // it transmits only when polled, and its write arm shares a loop
+        // with the read arm that answers those polls, so waiting here would
+        // deadlock the link. Refusal stays, but counted: a key event refused
+        // here vanishes with no other trace.
+        if self.link.enqueue(message).is_err() {
+            counters::bump(&counters::LANE_DROPS);
+            return Err(SplitDriverError::SerialError);
+        }
         Ok(SPLIT_MESSAGE_MAX_SIZE)
     }
 }
@@ -1014,6 +1036,53 @@ mod tests {
         assert!(
             writes.iter().any(|w| w.0 & SEQ_FLAG != 0),
             "bulk frame flows once credit arrives"
+        );
+    }
+
+    #[test]
+    fn central_write_backpressures_bulk_instead_of_dropping() {
+        // Overfill the bulk lane: the ninth write must drive exchanges until
+        // space frees rather than refuse (and thereby lose) the message.
+        // Scripted: the session handshake echo, a credit grant, then a reply
+        // acknowledging the first in-flight window.
+        let credit_grant = encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle);
+        let window_ack = encode_with(0, 4, 8, &SplitMessage::HalfDuplexIdle);
+        let fake = FakeSerial::new([reset_echo(), credit_grant, window_ack]);
+        let mut driver = HalfDuplexCentralDriver::new(fake);
+
+        for _ in 0..LANE_CAPACITY {
+            block_on(driver.write(&SplitMessage::HalfDuplexIdle)).unwrap();
+        }
+        block_on(driver.write(&SplitMessage::HalfDuplexIdle)).unwrap();
+
+        let writes = decoded_writes(&driver.serial.serial.writes);
+        let sequenced = writes.iter().filter(|w| w.0 & SEQ_FLAG != 0).count();
+        assert_eq!(sequenced, 4, "one window of bulk frames reached the wire");
+        assert_eq!(
+            driver.link.bulk.len(),
+            LANE_CAPACITY - 4 + 1,
+            "the overflow message waited for lane space instead of vanishing"
+        );
+    }
+
+    #[test]
+    fn peripheral_counts_refused_lane_overflow() {
+        use core::sync::atomic::Ordering;
+
+        let fake = FakeSerial::new([]);
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let key = SplitMessage::Key(crate::event::KeyboardEvent::key(0, 0, true));
+        for _ in 0..LANE_CAPACITY {
+            block_on(driver.write(&key)).unwrap();
+        }
+
+        let before = counters::LANE_DROPS.load(Ordering::Relaxed);
+        block_on(driver.write(&key)).expect_err("a full input lane refuses the write");
+
+        assert_eq!(
+            counters::LANE_DROPS.load(Ordering::Relaxed) - before,
+            1,
+            "the refusal must be counted — it is the only trace of the loss"
         );
     }
 
