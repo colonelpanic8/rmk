@@ -81,9 +81,46 @@ pub async fn run_rmk_split_peripheral_half_duplex<S: Write + Read>(serial: S) {
 pub async fn run_rmk_split_peripheral_auto_half_duplex<S: Write + Read>(serial: S) {
     let mut peripheral = SplitPeripheral::new(HalfDuplexPeripheralDriver::new(serial));
     loop {
-        crate::split::selector::wait_wired_selected().await;
-        match select(peripheral.run(), crate::split::selector::wait_wireless_selected()).await {
+        // Parked: keep the UARTE consumed so its ring cannot overrun and
+        // wedge reception while the central is still transmitting.
+        match select(
+            peripheral.split_driver.drain(),
+            crate::split::selector::wait_wired_selected(),
+        )
+        .await
+        {
             Either::First(_) | Either::Second(_) => {}
+        }
+        match embassy_futures::select::select3(
+            peripheral.run(),
+            crate::split::selector::wait_wireless_selected(),
+            forced_wired_liveness_fallback(),
+        )
+        .await
+        {
+            embassy_futures::select::Either3::First(_)
+            | embassy_futures::select::Either3::Second(_)
+            | embassy_futures::select::Either3::Third(_) => {}
+        }
+    }
+}
+
+/// Revert a wired force whose link never carries anything. A force is only
+/// honoured while its transport is alive: the cable-detect input is ground
+/// truth, and a peripheral stranded on a dead forced link cannot receive the
+/// override that would free it.
+async fn forced_wired_liveness_fallback() {
+    use core::sync::atomic::Ordering;
+    if crate::split::selector::forced_mode() != crate::split::selector::FORCE_WIRED {
+        core::future::pending::<()>().await;
+    }
+    loop {
+        let before = crate::split::serial::counters::FRAMES_OK.load(Ordering::Relaxed);
+        embassy_time::Timer::after_secs(4).await;
+        if crate::split::serial::counters::FRAMES_OK.load(Ordering::Relaxed) == before {
+            info!("wired force reverted: link carried nothing");
+            crate::split::selector::set_forced(crate::split::selector::FORCE_AUTO);
+            return;
         }
     }
 }
