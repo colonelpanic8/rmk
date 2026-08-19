@@ -133,6 +133,7 @@ pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
             embassy_futures::select::Either::First(_) | embassy_futures::select::Either::Second(_) => {}
         }
         set_peripheral_connected(id, true);
+        peripheral_manager.transceiver_mut().begin_session();
         match embassy_futures::select::select(
             peripheral_manager.run(),
             crate::split::selector::wait_wireless_selected(),
@@ -168,7 +169,13 @@ pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
 
 const LINK_HEADER: usize = 3;
 const SEQ_FLAG: u8 = 0x80;
-const SEQ_MASK: u8 = 0x7f;
+/// On an unsequenced frame: sequence-state reset. The central raises it on
+/// every fresh session (and whenever acknowledgements stop progressing); the
+/// peripheral zeroes its endpoint and echoes the flag on its terminator.
+/// Without this, one half rebooting mid-session deadlocks the link: each
+/// side discards the other's frames as out-of-order forever.
+const RESET_FLAG: u8 = 0x40;
+const SEQ_MASK: u8 = 0x3f;
 /// Outstanding unacknowledged sequenced frames.
 const LINK_WINDOW: usize = 4;
 /// Exchanges an unacked frame survives before the window retransmits.
@@ -181,9 +188,9 @@ const LANE_CAPACITY: usize = 8;
 /// response timeout even when the whole window retransmits.
 const FRAMES_PER_EXCHANGE: usize = 4;
 
-/// `true` if sequence `a` precedes `b` in mod-128 arithmetic.
+/// `true` if sequence `a` precedes `b` in mod-64 arithmetic.
 fn seq_before(a: u8, b: u8) -> bool {
-    a != b && (b.wrapping_sub(a) & SEQ_MASK) < 64
+    a != b && (b.wrapping_sub(a) & SEQ_MASK) < 32
 }
 
 /// Which outgoing lane a message belongs to. Control messages change link or
@@ -329,6 +336,18 @@ impl LinkEndpoint {
         if !self.unacked.is_empty() {
             self.exchanges_without_ack = self.exchanges_without_ack.saturating_add(1);
         }
+    }
+
+    /// Zero the sequence state for a fresh session. Unacknowledged frames
+    /// are dropped rather than replayed: a session boundary means a peer
+    /// rebooted or the link deadlocked, and the layers above re-sync their
+    /// state on link-up anyway.
+    fn reset(&mut self) {
+        self.next_seq = 0;
+        self.expected = 0;
+        self.unacked.clear();
+        self.resend = 0;
+        self.exchanges_without_ack = 0;
     }
 
     /// A control-lane message is still queued or awaiting acknowledgement.
@@ -492,6 +511,9 @@ const HALF_DUPLEX_REPLY_GAP: Duration = Duration::from_millis(2);
 /// Exchanges a control-lane write waits for its acknowledgement before
 /// reporting the link dead.
 const CONTROL_ACK_EXCHANGES: usize = 32;
+/// Consecutive exchanges without acknowledgement progress before the central
+/// assumes the peer rebooted and renegotiates the sequence session.
+const STUCK_ACK_EXCHANGES: u8 = 24;
 
 /// Central side of the polled half-duplex bus.
 ///
@@ -507,6 +529,9 @@ pub(crate) struct HalfDuplexCentralDriver<S> {
     /// Deadline until which the peripheral may still be answering the last
     /// poll. `None` when the bus is known quiet.
     response_deadline: Option<Instant>,
+    /// The sequence handshake is pending: polls carry [`RESET_FLAG`] and
+    /// data transfer waits until the peripheral echoes it.
+    session_fresh: bool,
 }
 
 impl<S> HalfDuplexCentralDriver<S> {
@@ -515,18 +540,38 @@ impl<S> HalfDuplexCentralDriver<S> {
             serial: SerialSplitDriver::new(serial),
             link: LinkEndpoint::new(),
             response_deadline: None,
+            session_fresh: true,
         }
+    }
+
+    /// Restart the sequence handshake at the next exchange. Called whenever
+    /// a wired session (re)starts: the peer may have rebooted since the last
+    /// one, and stale sequence state would deadlock the link.
+    pub(crate) fn begin_session(&mut self) {
+        self.session_fresh = true;
     }
 }
 
 impl<S: Read + Write> HalfDuplexCentralDriver<S> {
     /// Listen until the current response window closes: the peripheral's
     /// terminator arrived, a frame proved corrupt, or the deadline passed.
-    /// Data frames land in the link inbox.
-    async fn drain_response_window(&mut self) -> Result<(), SplitDriverError> {
+    /// Data frames land in the link inbox. Returns how many frames arrived.
+    async fn drain_response_window(&mut self) -> Result<usize, SplitDriverError> {
+        let mut frames = 0;
         while let Some(deadline) = self.response_deadline {
             match with_deadline(deadline, self.serial.read_frame()).await {
                 Ok(Ok((ctrl, ack, credit, message))) => {
+                    frames += 1;
+                    if self.session_fresh {
+                        // Nothing from the old session can be trusted; only
+                        // the peripheral's reset echo matters.
+                        if ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0 {
+                            self.link.reset();
+                            self.session_fresh = false;
+                            self.response_deadline = None;
+                        }
+                        continue;
+                    }
                     self.link.on_header(ack, credit);
                     if ctrl & SEQ_FLAG != 0 {
                         self.link.accept(ctrl & SEQ_MASK, message);
@@ -541,13 +586,26 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
                 Err(_timeout) => self.response_deadline = None,
             }
         }
-        Ok(())
+        Ok(frames)
     }
 
     /// One full exchange: transmit queued and retransmitted frames plus a
-    /// poll, then listen out the response window.
-    async fn exchange(&mut self) -> Result<(), SplitDriverError> {
+    /// poll, then listen out the response window. Returns `true` if the
+    /// peripheral answered at all.
+    async fn exchange(&mut self) -> Result<bool, SplitDriverError> {
         self.drain_response_window().await?;
+        // A peer whose responses arrive but never acknowledge anything is
+        // running a different sequence session (it rebooted); renegotiate.
+        if self.link.exchanges_without_ack >= STUCK_ACK_EXCHANGES {
+            self.session_fresh = true;
+        }
+        if self.session_fresh {
+            self.response_deadline = Some(Instant::now() + HALF_DUPLEX_RESPONSE_TIMEOUT);
+            self.serial
+                .write_frame(RESET_FLAG, 0, self.link.credit(), &SplitMessage::HalfDuplexPoll)
+                .await?;
+            return Ok(self.drain_response_window().await? > 0);
+        }
         let mut burst: Deque<(u8, SplitMessage), FRAMES_PER_EXCHANGE> = Deque::new();
         self.link.fill_burst(&mut burst);
         // Armed BEFORE the writes: if this future is dropped mid-send the
@@ -562,7 +620,7 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
         self.serial
             .write_frame(0, self.link.expected, self.link.credit(), &SplitMessage::HalfDuplexPoll)
             .await?;
-        self.drain_response_window().await
+        Ok(self.drain_response_window().await? > 0)
     }
 }
 
@@ -584,11 +642,15 @@ impl<S: Read + Write> SplitReader for HalfDuplexCentralDriver<S> {
             if let Some(message) = self.link.inbox.pop_front() {
                 return Ok(message);
             }
-            self.exchange().await?;
+            let active = self.exchange().await?;
             if let Some(message) = self.link.inbox.pop_front() {
                 return Ok(message);
             }
-            Timer::after(HALF_DUPLEX_POLL_INTERVAL).await;
+            // Only pace out when the peripheral answered nothing: an active
+            // link runs at exchange cadence, a quiet one at the interval.
+            if !active {
+                Timer::after(HALF_DUPLEX_POLL_INTERVAL).await;
+            }
         }
     }
 }
@@ -605,8 +667,9 @@ impl<S: Read + Write> SplitWriter for HalfDuplexCentralDriver<S> {
                 if !self.link.control_outstanding() {
                     return Ok(SPLIT_MESSAGE_MAX_SIZE);
                 }
-                self.exchange().await?;
-                Timer::after(HALF_DUPLEX_POLL_INTERVAL).await;
+                if !self.exchange().await? {
+                    Timer::after(HALF_DUPLEX_POLL_INTERVAL).await;
+                }
             }
             if self.link.control_outstanding() {
                 return Err(SplitDriverError::SerialError);
@@ -656,6 +719,18 @@ impl<S: Read + Write> SplitReader for HalfDuplexPeripheralDriver<S> {
                 return Ok(message);
             }
             let (ctrl, ack, credit, message) = self.serial.read_frame().await?;
+            if ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0 {
+                // Fresh session: zero the sequence state and echo the flag so
+                // the central knows it may start sending data.
+                self.link.reset();
+                if self.reply_gap.as_ticks() != 0 {
+                    Timer::after(self.reply_gap).await;
+                }
+                self.serial
+                    .write_frame(RESET_FLAG, 0, self.link.credit(), &SplitMessage::HalfDuplexIdle)
+                    .await?;
+                continue;
+            }
             self.link.on_header(ack, credit);
             if ctrl & SEQ_FLAG != 0 {
                 self.link.accept(ctrl & SEQ_MASK, message);
@@ -772,6 +847,10 @@ mod tests {
         encode_with(SEQ_FLAG | seq, ack, u8::MAX, msg)
     }
 
+    fn reset_echo() -> Vec<u8> {
+        encode_with(RESET_FLAG, 0, 8, &SplitMessage::HalfDuplexIdle)
+    }
+
     fn decode(bytes: &[u8]) -> (u8, u8, u8, SplitMessage) {
         let mut frame = bytes.to_vec();
         assert_eq!(frame.pop(), Some(SENTINEL), "frame must end with the sentinel");
@@ -784,32 +863,29 @@ mod tests {
 
     #[test]
     fn central_exchange_polls_and_delivers_reply() {
-        // The peripheral answers the poll with one sequenced frame and the
-        // burst terminator.
+        // Exchange 1 is the session handshake; exchange 2 carries data.
         let mut reply = seq_frame(0, 0, &SplitMessage::LedState(true));
         reply.extend_from_slice(&encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle));
-        let fake = FakeSerial::new([reply]);
+        let fake = FakeSerial::new([reset_echo(), reply]);
         let mut driver = HalfDuplexCentralDriver::new(fake);
 
         let message = block_on(driver.read()).unwrap();
 
         assert!(matches!(message, SplitMessage::LedState(true)));
         let writes = decoded_writes(&driver.serial.serial.writes);
+        assert_eq!(writes[0].0, RESET_FLAG, "session opens with a reset poll");
         assert!(matches!(writes[0].3, SplitMessage::HalfDuplexPoll));
-        assert_eq!(writes[0].1, 0, "first poll expects seq 0");
+        assert!(matches!(writes[1].3, SplitMessage::HalfDuplexPoll));
+        assert_eq!(writes[1].1, 0, "first data poll expects seq 0");
     }
 
     #[test]
     fn central_acks_received_frames_on_next_poll() {
         let mut reply = seq_frame(0, 0, &SplitMessage::LedState(true));
         reply.extend_from_slice(&encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle));
-        let empty_reply = encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle);
-        // The second read performs one more exchange, then finds another
-        // sequenced frame to return.
         let mut second = seq_frame(1, 0, &SplitMessage::LedState(false));
         second.extend_from_slice(&encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle));
-        let _ = empty_reply;
-        let fake = FakeSerial::new([reply, second]);
+        let fake = FakeSerial::new([reset_echo(), reply, second]);
         let mut driver = HalfDuplexCentralDriver::new(fake);
 
         let first = block_on(driver.read()).unwrap();
@@ -818,8 +894,8 @@ mod tests {
         assert!(matches!(second, SplitMessage::LedState(false)));
 
         let writes = decoded_writes(&driver.serial.serial.writes);
-        assert_eq!(writes[0].1, 0, "first poll expects seq 0");
-        assert_eq!(writes[1].1, 1, "second poll acknowledges seq 0");
+        assert_eq!(writes[1].1, 0, "first data poll expects seq 0");
+        assert_eq!(writes[2].1, 1, "next poll acknowledges seq 0");
     }
 
     #[test]
@@ -981,10 +1057,41 @@ mod tests {
     #[test]
     fn seq_ordering_wraps() {
         assert!(seq_before(0, 1));
-        assert!(seq_before(126, 127));
-        assert!(seq_before(127, 0));
+        assert!(seq_before(62, 63));
+        assert!(seq_before(63, 0));
         assert!(!seq_before(1, 0));
         assert!(!seq_before(0, 0));
-        assert!(!seq_before(0, 100));
+        assert!(!seq_before(0, 40));
+    }
+
+    /// A peripheral with stale sequence state (its peer rebooted) zeroes on
+    /// a reset poll and the link recovers.
+    #[test]
+    fn reset_poll_zeroes_peripheral_state() {
+        let status = rmk_types::connection::ConnectionStatus::default();
+        // Advance the peripheral's expected sequence to 3.
+        let advance: Vec<Vec<u8>> = (0..3).map(|i| seq_frame(i, 0, &SplitMessage::LedState(true))).collect();
+        let reset = encode_with(RESET_FLAG, 0, 8, &SplitMessage::HalfDuplexPoll);
+        // After the reset, seq 0 must be accepted again.
+        let fresh = seq_frame(0, 0, &SplitMessage::ConnectionStatus(status));
+        let mut chunks = advance;
+        chunks.push(reset);
+        chunks.push(fresh);
+        let fake = FakeSerial::new(chunks);
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+
+        for _ in 0..3 {
+            let m = block_on(driver.read()).unwrap();
+            assert!(matches!(m, SplitMessage::LedState(true)));
+        }
+        let m = block_on(driver.read()).unwrap();
+        assert!(
+            matches!(m, SplitMessage::ConnectionStatus(_)),
+            "post-reset seq 0 accepted"
+        );
+
+        let writes = decoded_writes(&driver.serial.serial.writes);
+        let echo = writes.iter().find(|w| w.0 & RESET_FLAG != 0).expect("reset echoed");
+        assert!(matches!(echo.3, SplitMessage::HalfDuplexIdle));
     }
 }
