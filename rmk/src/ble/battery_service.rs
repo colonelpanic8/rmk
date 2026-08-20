@@ -18,6 +18,12 @@ use crate::sleep::SLEEPING_STATE;
 const PERIPHERAL_BATTERY_SERVICE_UUID: u128 = 0x061686b6_6a06_4d02_8a8f_c514225bbdb3;
 const PERIPHERAL_BATTERY_LEVEL_UUID: u128 = 0xcd3259e5_a755_4bf0_9f36_690cddccdb51;
 
+/// Split batteries with a host-facing service; flash-constrained boards can omit them.
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
+const HOST_PERIPHERAL_IDS: &[usize] = &crate::SPLIT_BATTERY_PERIPHERAL_IDS;
+#[cfg(all(feature = "split", feature = "_no_split_peripheral_battery_service"))]
+const HOST_PERIPHERAL_IDS: &[usize] = &[];
+
 /// Battery services in handle order, starting with the central on every profile.
 pub(super) struct BatteryServices {
     levels: [BatteryLevel; BatteryServices::CCCD_COUNT],
@@ -29,11 +35,15 @@ struct BatteryLevel {
 }
 
 impl BatteryServices {
+    #[cfg(not(feature = "_no_split_peripheral_battery_service"))]
     pub(super) const CCCD_COUNT: usize = crate::BATTERY_BLE_DESCRIPTIONS.len();
+    #[cfg(feature = "_no_split_peripheral_battery_service")]
+    pub(super) const CCCD_COUNT: usize = 1;
     pub(super) const ATTRIBUTE_COUNT: usize = 7 * Self::CCCD_COUNT;
 
     pub(super) fn new<const MAX: usize>(table: &mut AttributeTable<'_, NoopRawMutex, MAX>) -> Self {
-        let levels = crate::BATTERY_BLE_DESCRIPTIONS.map(|(battery_id, user_description)| {
+        let levels = core::array::from_fn(|i| {
+            let (battery_id, user_description) = crate::BATTERY_BLE_DESCRIPTIONS[i];
             let mut service_uuid: Uuid = service::BATTERY.into();
             let mut characteristic_uuid: Uuid = characteristic::BATTERY_LEVEL.into();
             // For peripherals, use custom service & characteristic UUID
@@ -106,7 +116,7 @@ impl BatteryServices {
         };
         #[cfg(feature = "split")]
         let central = embassy_futures::join::join(central, async {
-            let ids = &crate::SPLIT_BATTERY_PERIPHERAL_IDS;
+            let ids = HOST_PERIPHERAL_IDS;
             if ids.is_empty() {
                 return;
             }
@@ -127,7 +137,7 @@ impl BatteryServices {
     /// Send the configured split batteries' levels to this connection.
     #[cfg(feature = "split")]
     pub(super) async fn notify_peripherals<P: PacketPool>(&self, conn: &GattConnection<'_, '_, P>) {
-        let ids = &crate::SPLIT_BATTERY_PERIPHERAL_IDS;
+        let ids = HOST_PERIPHERAL_IDS;
         if ids.is_empty() {
             return;
         }
