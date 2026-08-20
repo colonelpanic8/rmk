@@ -12,8 +12,8 @@ use rmk_types::led_indicator::LedIndicator;
 use rmk_types::morse::{Morse, MorseProfile, MorseProfileName};
 #[cfg(feature = "rynk")]
 use rmk_types::protocol::rynk::{
-    BehaviorConfig, BehaviorOptions, MORSE_PROFILE_ENTRY_CHUNK, MorseProfileEntry, MorseProfileState,
-    SetMorseProfileEntryRequest,
+    AutoMouseLayerConfigs, BehaviorConfig, BehaviorOptions, MORSE_PROFILE_ENTRY_CHUNK, MorseProfileEntry,
+    MorseProfileState, SetMorseProfileEntryRequest,
 };
 
 #[cfg(feature = "rynk")]
@@ -260,21 +260,19 @@ impl<'a> KeyboardContext<'a> {
         let total = (0..self.keymap.morse_profiles_capacity())
             .filter(|index| self.keymap.morse_profile_name(*index as u8).is_some())
             .count();
-        let mut entries: heapless::Vec<MorseProfileEntry, MORSE_PROFILE_ENTRY_CHUNK> = Default::default();
-        for index in (0..self.keymap.morse_profiles_capacity())
+        let entries = (0..self.keymap.morse_profiles_capacity())
             .filter(|index| self.keymap.morse_profile_name(*index as u8).is_some())
             .skip(offset as usize)
             .take(MORSE_PROFILE_ENTRY_CHUNK)
-        {
-            let index = index as u8;
-            entries
-                .push(MorseProfileEntry {
+            .map(|index| {
+                let index = index as u8;
+                MorseProfileEntry {
                     index,
                     name: self.keymap.morse_profile_name(index).expect("filtered occupied slot"),
                     profile: self.keymap.morse_profile(index),
-                })
-                .expect("page is bounded by the catalog chunk size");
-        }
+                }
+            })
+            .collect();
         MorseProfileState {
             capacity: self.keymap.morse_profiles_capacity() as u8,
             total: total as u8,
@@ -429,19 +427,23 @@ impl<'a> KeyboardContext<'a> {
         true
     }
 
-    pub fn auto_mouse_layer_configs(&self) -> heapless::Vec<AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> {
-        self.keymap.auto_mouse_layer_configs()
+    pub fn auto_mouse_layer_configs(&self) -> AutoMouseLayerConfigs {
+        self.keymap.auto_mouse_layer_configs().into_iter().collect()
     }
 
     /// Atomically replace the auto mouse layer table after validating every
     /// entry against this firmware's compiled resources.
-    pub async fn set_auto_mouse_layer_configs(
-        &self,
-        configs: heapless::Vec<AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>,
-    ) -> bool {
+    pub async fn set_auto_mouse_layer_configs(&self, configs: AutoMouseLayerConfigs) -> bool {
+        if configs.len() > crate::AUTO_MOUSE_LAYER_MAX_NUM {
+            return false;
+        }
         let (_, _, layers) = self.keymap.get_keymap_config();
         for (index, config) in configs.iter().enumerate() {
-            if config.target_layer as usize >= layers || config.timeout_ms == 0 || config.threshold == 0 {
+            if config.target_layer as usize >= layers
+                || config.timeout_ms == 0
+                || config.threshold == 0
+                || config.extra_mouse_keys.len() > rmk_types::auto_mouse::AUTO_MOUSE_LAYER_EXTRA_KEY_MAX_NUM
+            {
                 return false;
             }
             if (config.deactivate_on_key || config.reset_timeout_on_key) && crate::ACTION_EVENT_SUB_SIZE == 0 {
@@ -455,11 +457,13 @@ impl<'a> KeyboardContext<'a> {
             }
         }
 
-        self.keymap.set_auto_mouse_layer_configs(configs.clone());
+        let firmware_configs: heapless::Vec<AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> =
+            configs.into_iter().collect();
+        self.keymap.set_auto_mouse_layer_configs(firmware_configs.clone());
         publish_event(AutoMouseLayerConfigChangeEvent);
         #[cfg(feature = "storage")]
         FLASH_CHANNEL
-            .send(FlashOperationMessage::AutoMouseLayerConfigs(configs))
+            .send(FlashOperationMessage::AutoMouseLayerConfigs(firmware_configs))
             .await;
         true
     }
