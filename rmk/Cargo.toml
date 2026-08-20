@@ -236,6 +236,9 @@ split = [
     "rmk-types/split",
 ]
 
+## Disable host-facing GATT services for split-peripheral batteries on flash-constrained boards.
+_no_split_peripheral_battery_service = []
+
 ## Enable feature to use rp2040 specific features, like PIO and bootrom
 rp2040 = [
     "dep:embassy-rp",
