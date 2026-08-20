@@ -7,7 +7,7 @@ use trouble_host::prelude::*;
 
 use super::ble_server::Server;
 use crate::core_traits::Runnable;
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 use crate::event::PeripheralBatteryEvent;
 use crate::event::{BatteryStatusEvent, SubscribableEvent};
 use crate::keyboard::LAST_KEY_TIMESTAMP;
@@ -55,12 +55,12 @@ pub(crate) struct BatteryService {
     pub(crate) level: u8,
 }
 
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 pub(crate) struct PeripheralBatteryServices {
     pub(crate) levels: [Characteristic<u8>; crate::NUM_SPLIT_BATTERY_PERIPHERALS],
 }
 
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 impl PeripheralBatteryServices {
     pub(crate) const ATTRIBUTE_COUNT: usize = 7 * crate::NUM_SPLIT_BATTERY_PERIPHERALS;
     pub(crate) const CCCD_COUNT: usize = crate::NUM_SPLIT_BATTERY_PERIPHERALS;
@@ -80,7 +80,7 @@ impl PeripheralBatteryServices {
     }
 }
 
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 fn add_peripheral_battery_level<M: embassy_sync::blocking_mutex::raw::RawMutex, const MAX: usize>(
     table: &mut AttributeTable<'_, M, MAX>,
     peripheral_id: usize,
@@ -208,21 +208,21 @@ impl<P: PacketPool> Runnable for BleBatteryServer<'_, '_, '_, P> {
 /// when the peripheral reports its battery via the split BLE link) and
 /// notifies the matching peripheral battery characteristic so the host can
 /// read it the same way it reads the central's level.
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 pub(crate) struct BlePeripheralBatteryServer<'stack, 'server, 'conn, P: PacketPool> {
     battery_levels: [Characteristic<u8>; crate::NUM_SPLIT_BATTERY_PERIPHERALS],
     conn: &'conn GattConnection<'stack, 'server, P>,
     sub: <PeripheralBatteryEvent as SubscribableEvent>::Subscriber,
 }
 
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 fn find_peripheral_battery_slot(configured_ids: &[usize], peripheral_id: usize) -> Option<usize> {
     configured_ids
         .iter()
         .position(|configured_id| *configured_id == peripheral_id)
 }
 
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 fn initialize_peripheral_battery_levels(server: &Server) {
     for (slot, peripheral_id) in crate::SPLIT_BATTERY_PERIPHERAL_IDS.iter().copied().enumerate() {
         if let Some(BatteryStatus::Available { level: Some(level), .. }) =
@@ -237,7 +237,7 @@ fn initialize_peripheral_battery_levels(server: &Server) {
     }
 }
 
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 impl<'stack, 'server, 'conn, P: PacketPool> BlePeripheralBatteryServer<'stack, 'server, 'conn, P> {
     pub(crate) fn new(server: &Server, conn: &'conn GattConnection<'stack, 'server, P>) -> Self {
         let sub = PeripheralBatteryEvent::subscriber();
@@ -251,7 +251,7 @@ impl<'stack, 'server, 'conn, P: PacketPool> BlePeripheralBatteryServer<'stack, '
     }
 }
 
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 impl<P: PacketPool> Runnable for BlePeripheralBatteryServer<'_, '_, '_, P> {
     async fn run(&mut self) -> ! {
         // Wait for the GATT server to be ready before pushing notifications.
@@ -393,7 +393,7 @@ mod cpf_tests {
     }
 }
 
-#[cfg(all(test, feature = "split"))]
+#[cfg(all(test, feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 mod tests {
     use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
     use trouble_host::prelude::{AttributeTable, Characteristic, CharacteristicProp, characteristic};
