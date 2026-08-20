@@ -193,13 +193,14 @@ struct EntryConfig {
 
 impl From<rmk_types::auto_mouse::AutoMouseLayerConfig> for EntryConfig {
     fn from(config: rmk_types::auto_mouse::AutoMouseLayerConfig) -> Self {
+        let extra_mouse_keys = config.extra_mouse_keys.into_iter().collect();
         Self {
             device_id: config.device_id,
             target_layer: config.target_layer,
             timeout: Duration::from_millis(config.timeout_ms as u64),
             threshold: config.threshold,
             deactivate_on_key: config.deactivate_on_key,
-            extra_mouse_keys: config.extra_mouse_keys,
+            extra_mouse_keys,
             reset_timeout_on_key: config.reset_timeout_on_key,
         }
     }
