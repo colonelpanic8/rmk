@@ -61,6 +61,7 @@ pub struct BuildConstants {
     pub dongle_pairing_window_secs: u32,
     pub events: Vec<EventChannel>,
     pub passkey: Option<Passkey>,
+    pub advertising: Advertising,
 }
 
 pub struct EventChannel {
@@ -73,6 +74,40 @@ pub struct EventChannel {
 pub struct Passkey {
     pub enabled: bool,
     pub timeout_secs: u32,
+}
+
+pub struct Advertising {
+    pub fast_interval_ms: u16,
+    pub slow_interval_ms: u16,
+    pub fast_timeout_secs: u32,
+}
+
+impl Advertising {
+    fn resolve(ble: Option<&crate::BleConfig>) -> Result<Self, String> {
+        let fast_interval_ms = ble.and_then(|b| b.advertising_fast_interval_ms).unwrap_or(30);
+        let slow_interval_ms = ble.and_then(|b| b.advertising_slow_interval_ms).unwrap_or(200);
+        let fast_timeout_secs = ble.and_then(|b| b.advertising_fast_timeout_secs).unwrap_or(5);
+        for (name, value) in [
+            ("advertising_fast_interval_ms", fast_interval_ms),
+            ("advertising_slow_interval_ms", slow_interval_ms),
+        ] {
+            if !(20..=10240).contains(&value) {
+                return Err(format!(
+                    "keyboard.toml: [ble.{name}] must be 20..=10240 milliseconds, got {value}"
+                ));
+            }
+        }
+        if fast_interval_ms > slow_interval_ms {
+            return Err(
+                "keyboard.toml: [ble.advertising_fast_interval_ms] must not exceed advertising_slow_interval_ms".into(),
+            );
+        }
+        Ok(Self {
+            fast_interval_ms,
+            slow_interval_ms,
+            fast_timeout_secs,
+        })
+    }
 }
 
 impl crate::KeyboardTomlConfig {
@@ -289,6 +324,7 @@ impl crate::KeyboardTomlConfig {
             dongle_pairing_window_secs: rmk.dongle_pairing_window_secs,
             events,
             passkey,
+            advertising: Advertising::resolve(self.ble.as_ref())?,
         })
     }
 }
@@ -354,6 +390,51 @@ mod tests {
         BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, KeyboardTomlConfig, MIN_PASSKEY_ENTRY_TIMEOUT_SECS,
         SplitBoardConfig, SplitConfig,
     };
+
+    #[test]
+    fn advertising_defaults_and_toml_overrides() {
+        for (toml, expected) in [
+            ("", (30, 200, 5)),
+            ("[ble]\nenabled = true", (30, 200, 5)),
+            (
+                "[ble]\nenabled = true\nadvertising_fast_interval_ms = 20\nadvertising_slow_interval_ms = 10240\nadvertising_fast_timeout_secs = 12",
+                (20, 10240, 12),
+            ),
+            (
+                "[ble]\nenabled = true\nadvertising_fast_interval_ms = 200\nadvertising_fast_timeout_secs = 0",
+                (200, 200, 0),
+            ),
+        ] {
+            let config: KeyboardTomlConfig = toml::from_str(toml).unwrap();
+            let advertising = config.build_constants(&["_ble"]).unwrap().advertising;
+            assert_eq!(
+                (
+                    advertising.fast_interval_ms,
+                    advertising.slow_interval_ms,
+                    advertising.fast_timeout_secs
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn advertising_rejects_invalid_intervals() {
+        for (settings, field) in [
+            ("advertising_fast_interval_ms = 19", "advertising_fast_interval_ms"),
+            ("advertising_fast_interval_ms = 10241", "advertising_fast_interval_ms"),
+            ("advertising_slow_interval_ms = 0", "advertising_slow_interval_ms"),
+            ("advertising_slow_interval_ms = 10241", "advertising_slow_interval_ms"),
+            ("advertising_fast_interval_ms = 201", "advertising_fast_interval_ms"),
+        ] {
+            let config: KeyboardTomlConfig = toml::from_str(&format!("[ble]\nenabled = true\n{settings}")).unwrap();
+            let error = config
+                .build_constants(&["_ble"])
+                .err()
+                .expect("invalid intervals accepted");
+            assert!(error.contains(field), "{error}");
+        }
+    }
 
     #[test]
     fn reserves_led_subscribers_for_display_split_and_dual_rynk_sessions() {

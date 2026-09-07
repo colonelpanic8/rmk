@@ -1006,6 +1006,11 @@ pub struct BleConfig {
     pub use_2m_phy: Option<bool>,
     pub passkey_entry: Option<bool>,
     pub passkey_entry_timeout: Option<u32>,
+    /// Host advertising intervals in milliseconds; each must be 20..=10240.
+    pub advertising_fast_interval_ms: Option<u16>,
+    pub advertising_slow_interval_ms: Option<u16>,
+    /// Fast host advertising window in seconds; zero disables the fast phase.
+    pub advertising_fast_timeout_secs: Option<u32>,
 }
 
 /// Default passkey entry timeout in seconds.
