@@ -616,7 +616,16 @@ pub(crate) fn print_storage_error<F: AsyncNorFlash>(e: SSError<F::Error>) {
 
 /// Holds any one item with its key and framing; a multiple of 32 because
 /// `sequential-storage` wants that alignment on some flashes.
-const BUFFER_SIZE: usize = 256;
+const BUFFER_SIZE: usize = {
+    let mut size = 256;
+    // The hold-trigger table scales with its own capacity: three bytes per
+    // position plus key, tag, and length prefix.
+    #[cfg(feature = "host")]
+    if crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM * 3 + 16 > size {
+        size = crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM * 3 + 16;
+    }
+    (size + 31) & !31
+};
 
 /// Test-only: forget queued requests and any pending reply, so a test starts clean.
 #[cfg(any(test, feature = "std"))]
@@ -750,6 +759,27 @@ mod tests {
     const STALE_CONFIG: StorageValue = StorageValue::StorageConfig(0);
 
     const STORAGE_RANGE: core::ops::Range<u32> = (16_384 - 2 * 4_096) as u32..16_384u32;
+
+    /// A full table is the largest single item a host can store, so it must fit `BUFFER_SIZE`.
+    #[cfg(feature = "host")]
+    #[test]
+    fn full_hold_trigger_table_fits_flash_buffer() {
+        block_on(async {
+            let mut storage = new_storage(BlockingAsync::new(Part::new())).await;
+            let mut positions = HoldTriggerPositions::new();
+            for i in 0..crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM {
+                positions.push(((i / 40) as u8, 0, (i % 40) as u8)).unwrap();
+            }
+            storage
+                .put(StorageItem::MorseHoldTriggerPositions(positions.clone()))
+                .await
+                .unwrap();
+            assert!(matches!(
+                storage.fetch(StorageKey::MorseHoldTriggerPositions).await,
+                Ok(Some(StorageValue::MorseHoldTriggerPositions(stored))) if stored == positions
+            ));
+        });
+    }
 
     /// A flash holding `items`, written by an uncached map so `Storage::new` boots over them.
     async fn seeded(items: &[(StorageKey, StorageValue)]) -> TestFlash {
