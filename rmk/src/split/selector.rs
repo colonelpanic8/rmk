@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
-use embassy_sync::watch::Watch;
+use embassy_sync::watch::{DynReceiver, Watch};
 
 use crate::RawMutex;
 
@@ -22,6 +22,41 @@ static WIRED_ENTRIES: AtomicU32 = AtomicU32::new(0);
 /// polling. Sized for the transport tasks of both halves plus application
 /// observers; receivers free their slot on drop.
 static SELECTION_CHANGED: Watch<RawMutex, bool, 8> = Watch::new();
+
+/// A transport force requested by the application. Replicated to the
+/// peripheral before it takes effect; the generation lets an acknowledgement
+/// for a superseded request be told apart from the current one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ForceRequest {
+    pub generation: u8,
+    pub mode: u8,
+}
+
+static FORCE_GENERATION: AtomicU8 = AtomicU8::new(0);
+/// Latest force request: one receiver per peripheral manager.
+static FORCE_REQUESTED: Watch<RawMutex, ForceRequest, { crate::SPLIT_PERIPHERALS_NUM + 2 }> = Watch::new();
+
+/// Record a new desired force and wake the managers that replicate it.
+pub fn request_force(mode: u8) -> ForceRequest {
+    let generation = FORCE_GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+    let request = ForceRequest {
+        generation,
+        mode: mode.min(FORCE_BLE),
+    };
+    FORCE_REQUESTED.sender().send(request);
+    request
+}
+
+/// The latest requested force, acknowledged by the peripheral or not.
+pub fn desired_force() -> Option<ForceRequest> {
+    FORCE_REQUESTED.try_get()
+}
+
+pub(crate) fn force_requests() -> DynReceiver<'static, ForceRequest> {
+    FORCE_REQUESTED
+        .dyn_receiver()
+        .expect("force watch sized for every peripheral manager")
+}
 
 pub fn initialize(wired: bool) {
     WIRED_SELECTED.store(wired, Ordering::Release);

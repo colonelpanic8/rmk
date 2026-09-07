@@ -99,13 +99,13 @@ impl Handle<GetSplitTransport> for RynkService<'_> {
 }
 
 /// `Cmd::SetSplitTransportForce` — volatile transport force. While a
-/// peripheral is connected the force travels to it over the split link
-/// first and the central applies it only after that send, so both halves
-/// rendezvous on the forced transport; with no peripheral connected it
-/// applies locally at once so a stranded central can still be steered.
-/// The echoed state reads the selector immediately and may still show the
-/// pre-force selection while the handoff is in flight — poll
-/// `GetSplitTransport` for the settled state.
+/// peripheral is connected the force is replicated to it over the split
+/// link and the central applies it only once the peripheral acknowledges
+/// it, so both halves rendezvous on the forced transport; with no
+/// peripheral connected it applies locally at once so a stranded central
+/// can still be steered. The echoed state reads the selector immediately
+/// and may still show the pre-force selection while the handoff is in
+/// flight — poll `GetSplitTransport` for the settled state.
 #[cfg(feature = "split")]
 impl Handle<SetSplitTransportForce> for RynkService<'_> {
     async fn handle(&self, force: SplitTransportForce) -> Result<SplitTransportState, RynkError> {
@@ -118,9 +118,7 @@ impl Handle<SetSplitTransportForce> for RynkService<'_> {
             SplitTransportForce::Wired => selector::FORCE_WIRED,
             SplitTransportForce::Ble => selector::FORCE_BLE,
         };
-        if !crate::split::request_transport_force(mode) {
-            return Err(RynkError::NotReady);
-        }
+        crate::split::request_transport_force(mode);
         Ok(split_transport_state())
     }
 }
