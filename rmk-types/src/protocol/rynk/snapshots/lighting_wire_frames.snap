@@ -5,16 +5,16 @@
 #   UPDATE_SNAPSHOTS=1 cargo test -p rmk-types --features host --features lighting lighting_wire_frames
 # Format: <label>  <hex bytes>
 
-AbortLightingExtendedRuntimeConditionalSceneReplace reply     04 35 09 01 01 01 00
-AbortLightingExtendedRuntimeConditionalSceneReplace request   05 35 09 01 1f 00
+AbortLightingAdvancedRuntimeConditionalSceneReplace reply     04 45 09 01 01 01 00
+AbortLightingAdvancedRuntimeConditionalSceneReplace request   05 45 09 01 1f 00
 AbortLightingOverlayReplace reply                             04 10 09 01 01 01 00
 AbortLightingOverlayReplace request                           05 10 09 01 0d 00
 AbortLightingRuntimeConditionalSceneReplace reply             04 2a 09 01 01 01 00
 AbortLightingRuntimeConditionalSceneReplace request           05 2a 09 01 1f 00
 AbortLightingSceneReplace reply                               04 19 09 01 01 01 00
 AbortLightingSceneReplace request                             05 19 09 01 15 00
-BeginLightingExtendedRuntimeConditionalSceneReplace reply     04 32 09 01 01 03 1f 01 00
-BeginLightingExtendedRuntimeConditionalSceneReplace request   06 32 09 01 09 01 00
+BeginLightingAdvancedRuntimeConditionalSceneReplace reply     04 42 09 01 01 03 1f 01 00
+BeginLightingAdvancedRuntimeConditionalSceneReplace request   06 42 09 01 09 01 00
 BeginLightingOverlayReplace reply                             04 0d 09 01 01 03 0d 01 00
 BeginLightingOverlayReplace request                           06 0d 09 01 0c 01 00
 BeginLightingRuntimeConditionalSceneReplace reply             04 27 09 01 01 03 1f 01 00
@@ -23,24 +23,24 @@ BeginLightingSceneReplace reply                               04 16 09 01 01 03 
 BeginLightingSceneReplace request                             06 16 09 01 0c 01 00
 ClearLightingOverlay reply                                    04 0c 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
 ClearLightingOverlay request                                  05 0c 09 01 0b 00
-CommitLightingExtendedRuntimeConditionalSceneReplace reply    04 34 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
-CommitLightingExtendedRuntimeConditionalSceneReplace request  05 34 09 01 1f 00
+CommitLightingAdvancedRuntimeConditionalSceneReplace reply    04 44 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
+CommitLightingAdvancedRuntimeConditionalSceneReplace request  05 44 09 01 1f 00
 CommitLightingOverlayReplace reply                            04 0f 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
 CommitLightingOverlayReplace request                          05 0f 09 01 0d 00
 CommitLightingRuntimeConditionalSceneReplace reply            04 29 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
 CommitLightingRuntimeConditionalSceneReplace request          05 29 09 01 1f 00
 CommitLightingSceneReplace reply                              04 18 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
 CommitLightingSceneReplace request                            05 18 09 01 15 00
+GetLightingAdvancedRuntimeConditionalSceneStatus reply        04 40 09 01 01 05 09 40 01 03 00
+GetLightingAdvancedRuntimeConditionalSceneStatus request      04 40 09 01 00
+GetLightingAdvancedRuntimeConditionalScenes reply             04 41 09 01 01 0e 09 01 01 01 02 01 01 01 01 14 01 50 02 02 2a 18 07 08 09 01 01 01 01 03 01 01 01 02 01 01 01 01 01 01 24 08 01 01 01 02 01 01 00
+GetLightingAdvancedRuntimeConditionalScenes request           05 41 09 01 09 01 00
 GetLightingCapabilities reply                                 04 01 09 01 01 10 01 02 03 04 05 06 07 08 09 08 08 bf ab 01 07 00
 GetLightingCapabilities request                               04 01 09 01 00
 GetLightingCompiledSceneStatus reply                          04 1c 09 01 01 03 01 01 02 08 00
 GetLightingCompiledSceneStatus request                        04 1c 09 01 00
 GetLightingCompiledScenes reply                               04 1d 09 01 01 06 01 01 01 02 2a 04 07 08 09 00
 GetLightingCompiledScenes request                             05 1d 09 01 01 01 00
-GetLightingExtendedRuntimeConditionalSceneStatus reply        04 30 09 01 01 05 09 40 01 03 00
-GetLightingExtendedRuntimeConditionalSceneStatus request      04 30 09 01 00
-GetLightingExtendedRuntimeConditionalScenes reply             04 31 09 01 01 0e 09 01 01 01 02 01 01 01 01 14 01 50 02 02 2a 18 07 08 09 01 01 01 01 03 01 01 01 02 01 01 01 01 01 01 24 08 01 01 01 02 01 01 00
-GetLightingExtendedRuntimeConditionalScenes request           05 31 09 01 09 01 00
 GetLightingExtension inner Err(Unsupported)                   04 21 09 01 02 01 01 00
 GetLightingExtension reply                                    04 21 09 01 01 08 09 06 10 01 02 03 04 00
 GetLightingExtension request                                  04 21 09 01 00
@@ -84,8 +84,8 @@ GetLightingZoneMemberships request                            05 07 09 01 01 01 
 GetLightingZones reply                                        04 06 09 01 01 0b 01 01 01 04 05 74 68 75 6d 62 00
 GetLightingZones request                                      05 06 09 01 01 01 00
 LightingChange topic                                          03 07 80 01 00
-PutLightingExtendedRuntimeConditionalSceneChunk reply         04 33 09 01 01 01 00
-PutLightingExtendedRuntimeConditionalSceneChunk request       05 33 09 01 1f 0c 01 01 02 01 01 01 01 14 01 50 02 02 2a 18 07 08 09 01 01 01 01 03 01 01 01 02 01 01 01 01 01 01 24 08 01 01 01 02 01 01 00
+PutLightingAdvancedRuntimeConditionalSceneChunk reply         04 43 09 01 01 01 00
+PutLightingAdvancedRuntimeConditionalSceneChunk request       05 43 09 01 1f 0c 01 01 02 01 01 01 01 14 01 50 02 02 2a 18 07 08 09 01 01 01 01 03 01 01 01 02 01 01 01 01 01 01 24 08 01 01 01 02 01 01 00
 PutLightingOverlayChunk inner Err(TransactionExpired)         04 0e 09 01 03 01 0a 00
 PutLightingOverlayChunk reply                                 04 0e 09 01 01 01 00
 PutLightingOverlayChunk request                               05 0e 09 01 0d 0f 01 2a 01 01 02 03 e8 07 fa 01 32 01 88 27 00

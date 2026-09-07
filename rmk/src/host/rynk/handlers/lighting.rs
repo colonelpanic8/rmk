@@ -1,19 +1,21 @@
 //! Native Rynk lighting handlers and bounded replacement transactions.
-
 use embassy_time::Instant;
 use heapless::{String, Vec};
 use rmk_types::protocol::rynk::command::{
-    AbortLightingExtendedRuntimeConditionalSceneReplace, AbortLightingRuntimeConditionalSceneReplace,
+    AbortLightingAdvancedRuntimeConditionalSceneReplace, AbortLightingExtendedRuntimeConditionalSceneReplace,
+    AbortLightingRuntimeConditionalSceneReplace, BeginLightingAdvancedRuntimeConditionalSceneReplace,
     BeginLightingExtendedRuntimeConditionalSceneReplace, BeginLightingRuntimeConditionalSceneReplace,
-    ClearLightingOverlay, CommitLightingExtendedRuntimeConditionalSceneReplace,
-    CommitLightingRuntimeConditionalSceneReplace, GetLightingCapabilities, GetLightingCompiledSceneStatus,
-    GetLightingCompiledScenes, GetLightingConditionalSceneStatus, GetLightingConditionalScenes,
-    GetLightingExtendedRuntimeConditionalSceneStatus, GetLightingExtendedRuntimeConditionalScenes,
-    GetLightingExtension, GetLightingExtensionLayers, GetLightingExtensionNames, GetLightingExtensionParams,
-    GetLightingFrame, GetLightingKeys, GetLightingLeds, GetLightingOutputMode, GetLightingOutputs, GetLightingOverlay,
-    GetLightingPhysicalKeys, GetLightingReplicaStatus, GetLightingRoutes, GetLightingRuntimeConditionalSceneStatus,
-    GetLightingRuntimeConditionalScenes, GetLightingSceneStatus, GetLightingScenes, GetLightingState,
-    GetLightingZoneMemberships, GetLightingZones, PutLightingExtendedRuntimeConditionalSceneChunk,
+    ClearLightingOverlay, CommitLightingAdvancedRuntimeConditionalSceneReplace,
+    CommitLightingExtendedRuntimeConditionalSceneReplace, CommitLightingRuntimeConditionalSceneReplace,
+    GetLightingAdvancedRuntimeConditionalSceneStatus, GetLightingAdvancedRuntimeConditionalScenes,
+    GetLightingCapabilities, GetLightingCompiledSceneStatus, GetLightingCompiledScenes,
+    GetLightingConditionalSceneStatus, GetLightingConditionalScenes, GetLightingExtendedRuntimeConditionalSceneStatus,
+    GetLightingExtendedRuntimeConditionalScenes, GetLightingExtension, GetLightingExtensionLayers,
+    GetLightingExtensionNames, GetLightingExtensionParams, GetLightingFrame, GetLightingKeys, GetLightingLeds,
+    GetLightingOutputMode, GetLightingOutputs, GetLightingOverlay, GetLightingPhysicalKeys, GetLightingReplicaStatus,
+    GetLightingRoutes, GetLightingRuntimeConditionalSceneStatus, GetLightingRuntimeConditionalScenes,
+    GetLightingSceneStatus, GetLightingScenes, GetLightingState, GetLightingZoneMemberships, GetLightingZones,
+    PutLightingAdvancedRuntimeConditionalSceneChunk, PutLightingExtendedRuntimeConditionalSceneChunk,
     PutLightingRuntimeConditionalSceneChunk, SetLightingExtensionLayers, SetLightingExtensionParam,
     SetLightingExtensionState, SetLightingLayerPolicy, SetLightingOutputMode, SetLightingOverlay, SetLightingSceneCell,
     SetLightingState, SetLightingWakeLayers, UnsetLightingOverlay, UnsetLightingSceneCell,
@@ -23,12 +25,13 @@ use rmk_types::protocol::rynk::{
     AbortLightingSceneReplaceRequest, BeginLightingOverlayReplaceRequest,
     BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, ClearLightingOverlayRequest,
     CommitLightingOverlayReplaceRequest, CommitLightingRuntimeConditionalSceneReplaceRequest,
-    CommitLightingSceneReplaceRequest, LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE,
-    LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_PAGE_SIZE, LIGHTING_SCENE_CHUNK_SIZE,
-    LIGHTING_ZONE_NAME_SIZE, LightingCapabilities, LightingCapabilitiesResult, LightingCentralReplicaState,
-    LightingCompiledSceneStatus, LightingCompiledSceneStatusResult, LightingCompiledScenesPageResult,
-    LightingConditionalSceneCell, LightingConditionalSceneStatus, LightingConditionalSceneStatusResult,
-    LightingConditionalScenesPage, LightingConditionalScenesPageResult, LightingEffectFlags, LightingError,
+    CommitLightingSceneReplaceRequest, LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE,
+    LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_PAGE_SIZE, LIGHTING_SCENE_CHUNK_SIZE, LIGHTING_ZONE_NAME_SIZE,
+    LightingAdvancedRuntimeConditionalScenesPageResult, LightingCapabilities, LightingCapabilitiesResult,
+    LightingCentralReplicaState, LightingCompiledSceneStatus, LightingCompiledSceneStatusResult,
+    LightingCompiledScenesPageResult, LightingConditionalSceneCell, LightingConditionalSceneStatus,
+    LightingConditionalSceneStatusResult, LightingConditionalScenesPage, LightingConditionalScenesPageResult,
+    LightingEffectFlags, LightingError, LightingExtendedRuntimeConditionalScenesPage,
     LightingExtendedRuntimeConditionalScenesPageResult, LightingExtensionLayersResult,
     LightingExtensionNamesPageResult, LightingExtensionNamesRequest, LightingExtensionParamsPageResult,
     LightingExtensionParamsRequest, LightingExtensionResult, LightingFeatureFlags, LightingFramePage,
@@ -46,12 +49,12 @@ use rmk_types::protocol::rynk::{
     LightingSceneStatusResult, LightingSceneTransactionResult, LightingScenesPageResult, LightingState,
     LightingStateResult, LightingUnitResult, LightingZone, LightingZoneId, LightingZoneMembershipsPage,
     LightingZoneMembershipsPageResult, LightingZonesPage, LightingZonesPageResult,
-    PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
-    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, RynkError, RynkMessage,
-    SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
-    SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
-    SetLightingSceneCellRequest, SetLightingStateRequest, SetLightingWakeLayersRequest, UnsetLightingOverlayRequest,
-    UnsetLightingSceneCellRequest,
+    PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    PutLightingOverlayChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
+    RynkError, RynkMessage, SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest,
+    SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest, SetLightingOutputModeRequest,
+    SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest, SetLightingWakeLayersRequest,
+    UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
 };
 
 use super::super::lighting::{
@@ -422,7 +425,7 @@ impl Handle<GetLightingRuntimeConditionalSceneStatus> for RynkService<'_> {
     }
 }
 
-impl Handle<GetLightingExtendedRuntimeConditionalSceneStatus> for RynkService<'_> {
+impl Handle<GetLightingAdvancedRuntimeConditionalSceneStatus> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<LightingRuntimeConditionalSceneStatusResult, RynkError> {
         Ok(match runtime_conditional_scene_controller(self) {
             Ok(controller) => match controller
@@ -434,7 +437,7 @@ impl Handle<GetLightingExtendedRuntimeConditionalSceneStatus> for RynkService<'_
                         revision,
                         capacity: controller.runtime_conditional_scene_capacity,
                         cell_len,
-                        chunk_capacity: LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE as u8,
+                        chunk_capacity: LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE as u8,
                     })
                 }
                 Ok(_) => Err(LightingError::InvalidRequest),
@@ -467,20 +470,20 @@ impl Handle<GetLightingRuntimeConditionalScenes> for RynkService<'_> {
     }
 }
 
-impl Handle<GetLightingExtendedRuntimeConditionalScenes> for RynkService<'_> {
+impl Handle<GetLightingAdvancedRuntimeConditionalScenes> for RynkService<'_> {
     async fn handle(
         &self,
         req: LightingRuntimeConditionalScenePageRequest,
-    ) -> Result<LightingExtendedRuntimeConditionalScenesPageResult, RynkError> {
+    ) -> Result<LightingAdvancedRuntimeConditionalScenesPageResult, RynkError> {
         Ok(match runtime_conditional_scene_controller(self) {
             Ok(controller) => match controller
-                .request(RynkLightingCommand::ReadExtendedRuntimeConditionalScenes {
+                .request(RynkLightingCommand::ReadAdvancedRuntimeConditionalScenes {
                     expected_revision: req.revision,
                     offset: req.offset,
                 })
                 .await
             {
-                Ok(RynkLightingReadback::ExtendedRuntimeConditionalScenesPage(page)) => Ok(page),
+                Ok(RynkLightingReadback::AdvancedRuntimeConditionalScenesPage(page)) => Ok(page),
                 Ok(_) => Err(LightingError::InvalidRequest),
                 Err(error) => Err(error),
             },
@@ -516,7 +519,7 @@ impl Handle<BeginLightingRuntimeConditionalSceneReplace> for RynkService<'_> {
     }
 }
 
-impl Handle<BeginLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
+impl Handle<BeginLightingAdvancedRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
         req: BeginLightingRuntimeConditionalSceneReplaceRequest,
@@ -587,10 +590,10 @@ impl Handle<PutLightingRuntimeConditionalSceneChunk> for RynkService<'_> {
     }
 }
 
-impl Handle<PutLightingExtendedRuntimeConditionalSceneChunk> for RynkService<'_> {
+impl Handle<PutLightingAdvancedRuntimeConditionalSceneChunk> for RynkService<'_> {
     async fn handle(
         &self,
-        req: PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+        req: PutLightingAdvancedRuntimeConditionalSceneChunkRequest,
     ) -> Result<LightingUnitResult, RynkError> {
         for cell in &req.cells {
             if let Err(error) = cell.validate() {
@@ -629,7 +632,7 @@ impl Handle<PutLightingExtendedRuntimeConditionalSceneChunk> for RynkService<'_>
         }
         Ok(match runtime_conditional_scene_controller(self) {
             Ok(controller) => match controller
-                .request(RynkLightingCommand::PutExtendedRuntimeConditionalSceneChunk {
+                .request(RynkLightingCommand::PutAdvancedRuntimeConditionalSceneChunk {
                     transaction_id: req.transaction_id,
                     offset: req.offset,
                     cells: req.cells,
@@ -663,7 +666,7 @@ impl Handle<CommitLightingRuntimeConditionalSceneReplace> for RynkService<'_> {
     }
 }
 
-impl Handle<CommitLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
+impl Handle<CommitLightingAdvancedRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
         req: CommitLightingRuntimeConditionalSceneReplaceRequest,
@@ -702,7 +705,7 @@ impl Handle<AbortLightingRuntimeConditionalSceneReplace> for RynkService<'_> {
     }
 }
 
-impl Handle<AbortLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
+impl Handle<AbortLightingAdvancedRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
         req: AbortLightingRuntimeConditionalSceneReplaceRequest,
@@ -2209,7 +2212,7 @@ mod tests {
                 8,
             ));
             let session = session();
-            let cell = rmk_types::protocol::rynk::LightingExtendedConditionalSceneCell {
+            let cell = rmk_types::protocol::rynk::LightingAdvancedConditionalSceneCell {
                 cell: LightingConditionalSceneCell {
                     conditions: rmk_types::protocol::rynk::LightingConditionSet {
                         layer: None,
@@ -2236,10 +2239,10 @@ mod tests {
             cells.push(cell).unwrap();
             // Cell validation precedes transaction lookup, so the bogus
             // transaction id proves rejection came from the profile check.
-            let response = call::<PutLightingExtendedRuntimeConditionalSceneChunk>(
+            let response = call::<PutLightingAdvancedRuntimeConditionalSceneChunk>(
                 &service,
                 &session,
-                &PutLightingExtendedRuntimeConditionalSceneChunkRequest {
+                &PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
                     transaction_id: 999,
                     offset: 0,
                     cells,
@@ -2706,14 +2709,14 @@ mod tests {
                 assert_eq!(runtime_status.revision, 5);
                 assert_eq!(runtime_status.capacity, 4);
                 assert_eq!(runtime_status.cell_len, 0);
-                let extended_status = call::<GetLightingExtendedRuntimeConditionalSceneStatus>(&service, &session, &())
+                let extended_status = call::<GetLightingAdvancedRuntimeConditionalSceneStatus>(&service, &session, &())
                     .await
                     .unwrap()
                     .unwrap();
                 assert_eq!(extended_status.revision, runtime_status.revision);
                 assert_eq!(
                     extended_status.chunk_capacity as usize,
-                    LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE
+                    LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE
                 );
                 let transaction = call::<BeginLightingRuntimeConditionalSceneReplace>(
                     &service,
@@ -2771,7 +2774,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
                 assert_eq!(runtime_page.items.as_slice(), &[conditional_cell]);
-                let extended_page = call::<GetLightingExtendedRuntimeConditionalScenes>(
+                let extended_page = call::<GetLightingAdvancedRuntimeConditionalScenes>(
                     &service,
                     &session,
                     &LightingRuntimeConditionalScenePageRequest { revision: 6, offset: 0 },
@@ -2786,7 +2789,7 @@ mod tests {
                     "legacy writes install no connection predicate"
                 );
 
-                let transaction = call::<BeginLightingExtendedRuntimeConditionalSceneReplace>(
+                let transaction = call::<BeginLightingAdvancedRuntimeConditionalSceneReplace>(
                     &service,
                     &session,
                     &BeginLightingRuntimeConditionalSceneReplaceRequest {
@@ -2804,7 +2807,7 @@ mod tests {
                     bonded: None,
                     usb_connected: None,
                 };
-                let extended_cell = rmk_types::protocol::rynk::LightingExtendedConditionalSceneCell {
+                let extended_cell = rmk_types::protocol::rynk::LightingAdvancedConditionalSceneCell {
                     cell: conditional_cell,
                     connection: Some(connection),
                     effects: None,
@@ -2813,10 +2816,10 @@ mod tests {
                 };
                 let mut extended_cells = Vec::new();
                 extended_cells.push(extended_cell).unwrap();
-                call::<PutLightingExtendedRuntimeConditionalSceneChunk>(
+                call::<PutLightingAdvancedRuntimeConditionalSceneChunk>(
                     &service,
                     &session,
-                    &PutLightingExtendedRuntimeConditionalSceneChunkRequest {
+                    &PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
                         transaction_id: transaction.id,
                         offset: 0,
                         cells: extended_cells,
@@ -2825,7 +2828,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-                let committed = call::<CommitLightingExtendedRuntimeConditionalSceneReplace>(
+                let committed = call::<CommitLightingAdvancedRuntimeConditionalSceneReplace>(
                     &service,
                     &session,
                     &CommitLightingRuntimeConditionalSceneReplaceRequest {
@@ -2836,7 +2839,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
                 assert_eq!(committed.revision, 7);
-                let extended_page = call::<GetLightingExtendedRuntimeConditionalScenes>(
+                let extended_page = call::<GetLightingAdvancedRuntimeConditionalScenes>(
                     &service,
                     &session,
                     &LightingRuntimeConditionalScenePageRequest { revision: 7, offset: 0 },
@@ -2845,6 +2848,15 @@ mod tests {
                 .unwrap()
                 .unwrap();
                 assert_eq!(extended_page.items.as_slice(), &[extended_cell]);
+                let compatible_page = call::<GetLightingExtendedRuntimeConditionalScenes>(
+                    &service,
+                    &session,
+                    &LightingRuntimeConditionalScenePageRequest { revision: 7, offset: 0 },
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                assert_eq!(compatible_page.items.as_slice(), &[extended_cell.try_into().unwrap()]);
                 let legacy_page = call::<GetLightingRuntimeConditionalScenes>(
                     &service,
                     &session,
@@ -2958,5 +2970,95 @@ mod tests {
                 )));
             }
         });
+    }
+}
+
+impl Handle<GetLightingExtendedRuntimeConditionalSceneStatus> for RynkService<'_> {
+    async fn handle(&self, req: ()) -> Result<LightingRuntimeConditionalSceneStatusResult, RynkError> {
+        <Self as Handle<GetLightingAdvancedRuntimeConditionalSceneStatus>>::handle(self, req).await
+    }
+}
+
+impl Handle<BeginLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: BeginLightingRuntimeConditionalSceneReplaceRequest,
+    ) -> Result<LightingRuntimeConditionalSceneTransactionResult, RynkError> {
+        <Self as Handle<BeginLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
+    }
+}
+
+impl Handle<CommitLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: CommitLightingRuntimeConditionalSceneReplaceRequest,
+    ) -> Result<LightingStateResult, RynkError> {
+        <Self as Handle<CommitLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
+    }
+}
+
+impl Handle<AbortLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: AbortLightingRuntimeConditionalSceneReplaceRequest,
+    ) -> Result<LightingUnitResult, RynkError> {
+        <Self as Handle<AbortLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
+    }
+}
+
+impl Handle<GetLightingExtendedRuntimeConditionalScenes> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: LightingRuntimeConditionalScenePageRequest,
+    ) -> Result<LightingExtendedRuntimeConditionalScenesPageResult, RynkError> {
+        Ok(
+            match <Self as Handle<GetLightingAdvancedRuntimeConditionalScenes>>::handle(self, req).await? {
+                Ok(page) => {
+                    let mut items = heapless::Vec::new();
+                    for cell in page.items {
+                        match cell.try_into() {
+                            Ok(cell) => {
+                                let _ = items.push(cell);
+                            }
+                            Err(error) => return Ok(Err(error)),
+                        }
+                    }
+                    Ok(LightingExtendedRuntimeConditionalScenesPage {
+                        revision: page.revision,
+                        total_count: page.total_count,
+                        items,
+                    })
+                }
+                Err(error) => Err(error),
+            },
+        )
+    }
+}
+impl Handle<PutLightingExtendedRuntimeConditionalSceneChunk> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    ) -> Result<LightingUnitResult, RynkError> {
+        let mut offset = req.offset;
+        for chunk in req.cells.chunks(LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE) {
+            let mut cells = heapless::Vec::new();
+            for cell in chunk {
+                let _ = cells.push((*cell).into());
+            }
+            let result = <Self as Handle<PutLightingAdvancedRuntimeConditionalSceneChunk>>::handle(
+                self,
+                PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
+                    transaction_id: req.transaction_id,
+                    offset,
+                    cells,
+                },
+            )
+            .await?;
+            if result.is_err() {
+                return Ok(result);
+            }
+            offset += chunk.len() as u16;
+        }
+        Ok(Ok(()))
     }
 }
