@@ -107,12 +107,6 @@ pub async fn drain_flash_channel_for_test() {
 #[cfg(feature = "_ble")]
 pub(crate) static BLE_PROFILE_CHANNEL: Channel<RawMutex, BleProfileAction, 1> = Channel::new();
 
-/// Split-transport force requests (`selector::FORCE_*`), pushed by the Rynk
-/// handler and drained by the central's `PeripheralManager`, which forwards
-/// the force to the peripheral before applying it locally.
-#[cfg(feature = "split")]
-pub(crate) static SPLIT_TRANSPORT_FORCE_CHANNEL: Channel<RawMutex, u8, 1> = Channel::new();
-
 /// Vial RX from BLE GATT `output_data` writes — one 32-byte chunk per write.
 /// Pushed by `gatt_events_task`, drained by [`crate::ble::host::HostGattHandler::run`].
 #[cfg(all(feature = "vial", feature = "_ble"))]

@@ -132,6 +132,14 @@ impl<'stack, 'server, 'c, P: PacketPool> SplitWriter for BleSplitPeripheralDrive
             })?;
         Ok(gatt_msg.len)
     }
+
+    /// A notification is only queued towards the controller. Give it a
+    /// sleeping link's subrated interval to go on air before the caller acts
+    /// on its delivery, e.g. by tearing the link down.
+    async fn flush(&mut self) -> Result<(), SplitDriverError> {
+        Timer::after_millis(500).await;
+        Ok(())
+    }
 }
 
 /// Let the controller accept the central's subrate requests on the split link.

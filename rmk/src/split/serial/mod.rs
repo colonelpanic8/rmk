@@ -220,7 +220,8 @@ fn lane_of(message: &SplitMessage) -> Lane {
         | SplitMessage::ClearPeer
         | SplitMessage::KeyboardIndicator(_)
         | SplitMessage::Layer(_)
-        | SplitMessage::TransportOverride(_) => Lane::Control,
+        | SplitMessage::TransportOverride { .. }
+        | SplitMessage::TransportOverrideAck(_) => Lane::Control,
         _ => Lane::Bulk,
     }
 }
@@ -524,6 +525,9 @@ pub const HALF_DUPLEX_DEFAULT_BAUD: u32 = 115_200;
 /// Exchanges a control-lane write waits for its acknowledgement before
 /// reporting the link dead.
 const CONTROL_ACK_EXCHANGES: usize = 32;
+/// Wall-clock bound on a peripheral flushing a control message, for a
+/// central that has stopped polling.
+const CONTROL_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 /// Consecutive exchanges without acknowledgement progress before the central
 /// assumes the peer rebooted and renegotiates the sequence session.
 const STUCK_ACK_EXCHANGES: u8 = 24;
@@ -786,52 +790,61 @@ impl<S: Read> HalfDuplexPeripheralDriver<S> {
     }
 }
 
+impl<S: Read + Write> HalfDuplexPeripheralDriver<S> {
+    /// Serve one frame from the central: echo a reset, stow a data frame in
+    /// the inbox, or answer a poll with a burst and the terminator.
+    async fn serve(&mut self) -> Result<(), SplitDriverError> {
+        let (ctrl, ack, credit, message) = self.serial.read_frame().await?;
+        if ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0 {
+            // Fresh session: zero the sequence state and echo the flag so
+            // the central knows it may start sending data.
+            self.link.reset();
+            if self.reply_gap.as_ticks() != 0 {
+                Timer::after(self.reply_gap).await;
+            }
+            self.serial
+                .write_frame(RESET_FLAG, 0, self.link.credit(), &SplitMessage::HalfDuplexIdle)
+                .await?;
+            return Ok(());
+        }
+        self.link.on_header(ack, credit);
+        if ctrl & SEQ_FLAG != 0 {
+            self.link.accept(ctrl & SEQ_MASK, message);
+            return Ok(());
+        }
+        if !matches!(message, SplitMessage::HalfDuplexPoll) {
+            return Ok(());
+        }
+        if self.reply_gap.as_ticks() != 0 {
+            Timer::after(self.reply_gap).await;
+        }
+        let mut burst: Deque<(u8, SplitMessage), FRAMES_PER_EXCHANGE> = Deque::new();
+        self.link.fill_burst(&mut burst);
+        while let Some((seq, reply)) = burst.pop_front() {
+            self.serial
+                .write_frame(SEQ_FLAG | seq, self.link.expected, self.link.credit(), &reply)
+                .await?;
+        }
+        // The terminator that tells the central the bus is free.
+        self.serial
+            .write_frame(0, self.link.expected, self.link.credit(), &SplitMessage::HalfDuplexIdle)
+            .await
+            .map(drop)
+    }
+}
+
 impl<S: Read + Write> SplitReader for HalfDuplexPeripheralDriver<S> {
     async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
         loop {
             if let Some(message) = self.link.inbox.pop_front() {
                 return Ok(message);
             }
-            let (ctrl, ack, credit, message) = self.serial.read_frame().await?;
-            if ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0 {
-                // Fresh session: zero the sequence state and echo the flag so
-                // the central knows it may start sending data.
-                self.link.reset();
-                if self.reply_gap.as_ticks() != 0 {
-                    Timer::after(self.reply_gap).await;
-                }
-                self.serial
-                    .write_frame(RESET_FLAG, 0, self.link.credit(), &SplitMessage::HalfDuplexIdle)
-                    .await?;
-                continue;
-            }
-            self.link.on_header(ack, credit);
-            if ctrl & SEQ_FLAG != 0 {
-                self.link.accept(ctrl & SEQ_MASK, message);
-                continue;
-            }
-            if !matches!(message, SplitMessage::HalfDuplexPoll) {
-                continue;
-            }
-            if self.reply_gap.as_ticks() != 0 {
-                Timer::after(self.reply_gap).await;
-            }
-            let mut burst: Deque<(u8, SplitMessage), FRAMES_PER_EXCHANGE> = Deque::new();
-            self.link.fill_burst(&mut burst);
-            while let Some((seq, reply)) = burst.pop_front() {
-                self.serial
-                    .write_frame(SEQ_FLAG | seq, self.link.expected, self.link.credit(), &reply)
-                    .await?;
-            }
-            // The terminator that tells the central the bus is free.
-            self.serial
-                .write_frame(0, self.link.expected, self.link.credit(), &SplitMessage::HalfDuplexIdle)
-                .await?;
+            self.serve().await?;
         }
     }
 }
 
-impl<S> SplitWriter for HalfDuplexPeripheralDriver<S> {
+impl<S: Read + Write> SplitWriter for HalfDuplexPeripheralDriver<S> {
     async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
         // Unlike the central, this side cannot drive the bus to make room —
         // it transmits only when polled, and its write arm shares a loop
@@ -843,6 +856,23 @@ impl<S> SplitWriter for HalfDuplexPeripheralDriver<S> {
             return Err(SplitDriverError::SerialError);
         }
         Ok(SPLIT_MESSAGE_MAX_SIZE)
+    }
+
+    /// This side transmits only when polled, so delivery of a control
+    /// message means answering polls until the central's headers have
+    /// acknowledged it. Frames the central sends meanwhile are stowed for
+    /// `read`. Bounded: a central that stops polling is not waited for.
+    async fn flush(&mut self) -> Result<(), SplitDriverError> {
+        let deadline = Instant::now() + CONTROL_FLUSH_TIMEOUT;
+        for _ in 0..CONTROL_ACK_EXCHANGES {
+            if !self.link.control_outstanding() {
+                return Ok(());
+            }
+            with_deadline(deadline, self.serve())
+                .await
+                .map_err(|_| SplitDriverError::SerialError)??;
+        }
+        Err(SplitDriverError::SerialError)
     }
 }
 
@@ -1408,5 +1438,32 @@ mod tests {
             2,
             "delivered from the inbox without a new exchange"
         );
+    }
+
+    /// The peripheral's flush answers polls until the central's header has
+    /// acknowledged the queued control frame.
+    #[test]
+    fn peripheral_flush_waits_for_the_control_frame_to_be_acked() {
+        let poll = |ack: u8| encode_with(0, ack, 8, &SplitMessage::HalfDuplexPoll);
+        let fake = FakeSerial::new([poll(0), poll(1)]);
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+
+        block_on(driver.write(&SplitMessage::TransportOverrideAck(7))).unwrap();
+        block_on(driver.flush()).expect("acked by the second poll");
+
+        let writes = decoded_writes(&driver.serial.serial.writes);
+        assert!(matches!(writes[0].3, SplitMessage::TransportOverrideAck(7)));
+        assert_eq!(driver.serial.serial.chunks.len(), 0, "served exactly the polls needed");
+    }
+
+    #[test]
+    fn peripheral_flush_gives_up_on_a_central_that_never_acks() {
+        let poll = encode_with(0, 0, 8, &SplitMessage::HalfDuplexPoll);
+        let fake = FakeSerial::new(std::iter::repeat_n(poll, CONTROL_ACK_EXCHANGES));
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+
+        block_on(driver.write(&SplitMessage::TransportOverrideAck(7))).unwrap();
+        block_on(driver.flush()).expect_err("never acknowledged");
+        assert!(driver.link.control_outstanding());
     }
 }

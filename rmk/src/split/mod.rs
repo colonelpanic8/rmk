@@ -26,17 +26,16 @@ pub mod serial;
 pub const SPLIT_MESSAGE_MAX_SIZE: usize = SplitMessage::POSTCARD_MAX_SIZE + 16;
 
 /// Volatile split-transport force from the application (one of
-/// `selector::FORCE_*`). While a peripheral is connected the force travels
-/// to it over the split link first and the central applies it only after
-/// that send, so both halves rendezvous on the forced transport; with no
-/// peripheral connected it applies locally at once. Returns `false` when a
-/// previous request is still queued.
-pub fn request_transport_force(mode: u8) -> bool {
-    if driver::any_peripheral_connected() {
-        crate::channel::SPLIT_TRANSPORT_FORCE_CHANNEL.try_send(mode).is_ok()
-    } else {
+/// `selector::FORCE_*`). The force is desired state replicated to the
+/// peripheral: each connected peripheral's manager sends it and the central
+/// applies it locally only once the peripheral acknowledges that generation,
+/// so both halves rendezvous on the forced transport. A newer request
+/// supersedes an unacknowledged one. With no peripheral connected it applies
+/// locally at once, so a stranded central can still be steered.
+pub fn request_transport_force(mode: u8) {
+    selector::request_force(mode);
+    if !driver::any_peripheral_connected() {
         selector::set_forced(mode);
-        true
     }
 }
 
@@ -125,11 +124,14 @@ pub(crate) enum SplitMessage {
     /// Half-duplex response when the peripheral has nothing queued.
     HalfDuplexIdle,
 
-    /// Central → Peripheral: volatile split-transport force
-    /// (`selector::FORCE_*`), applied to the peripheral's selector. Sent to
-    /// the peripheral before the central applies the same force to itself so
-    /// both halves rendezvous on the forced transport.
-    TransportOverride(u8),
+    /// Central → Peripheral: desired split-transport force
+    /// (`selector::FORCE_*`) and its generation. The peripheral applies it
+    /// and answers with [`Self::TransportOverrideAck`]; the central applies
+    /// the same force to itself only on that acknowledgement, so both halves
+    /// rendezvous on the forced transport.
+    TransportOverride { generation: u8, mode: u8 },
+    /// Peripheral → Central: the force generation the peripheral applied.
+    TransportOverrideAck(u8),
 }
 
 // -----------------------------------------------------------------------
