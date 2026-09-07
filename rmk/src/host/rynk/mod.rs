@@ -59,14 +59,54 @@ impl<'a> RynkService<'a> {
         )
     }
 
-    /// Whether `cmd` is available only while maintenance mode is enabled.
+    /// Whether the maintenance lock covers `cmd`. A command missing from both
+    /// lists in [`Self::maintenance_policy`] is treated as locked, so a new
+    /// endpoint cannot bypass the lock by omission.
     fn requires_maintenance_mode(cmd: Cmd) -> bool {
+        Self::maintenance_policy(cmd).unwrap_or(true)
+    }
+
+    /// `Some(true)` for mutations and sensitive operations, `Some(false)` for
+    /// plain reads, `None` for a command nobody has classified yet (the
+    /// `every_endpoint_has_a_maintenance_policy` test keeps that set empty).
+    fn maintenance_policy(cmd: Cmd) -> Option<bool> {
         match cmd {
-            Cmd::Reboot | Cmd::BootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => true,
+            Cmd::Reboot | Cmd::BootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => Some(true),
             // Deleting or hiding a bond opens a re-pair hijack window; BLE-only commands.
             #[cfg(feature = "_ble")]
-            Cmd::ClearBleProfile | Cmd::DisconnectBleProfile => true,
-            _ => Self::needs_storage_write(cmd),
+            Cmd::ClearBleProfile | Cmd::DisconnectBleProfile => Some(true),
+            cmd if Self::needs_storage_write(cmd) => Some(true),
+            Cmd::GetVersion
+            | Cmd::GetCapabilities
+            | Cmd::GetLockStatus
+            | Cmd::UnlockPoll
+            | Cmd::Lock
+            | Cmd::GetLayout
+            | Cmd::GetDeviceInfo
+            | Cmd::GetMaintenanceMode
+            | Cmd::GetKeyAction
+            | Cmd::GetDefaultLayer
+            | Cmd::GetEncoderAction
+            | Cmd::GetKeymapBulk
+            | Cmd::GetMacro
+            | Cmd::GetCombo
+            | Cmd::GetComboBulk
+            | Cmd::GetMorse
+            | Cmd::GetMorseBulk
+            | Cmd::GetFork
+            | Cmd::GetBehaviorConfig
+            | Cmd::GetConnectionType
+            | Cmd::GetConnectionStatus
+            | Cmd::GetCurrentLayer
+            | Cmd::GetWpm
+            | Cmd::GetSleepState
+            | Cmd::GetLedIndicator
+            | Cmd::GetBatteryStatus => Some(false),
+            #[cfg(feature = "_ble")]
+            Cmd::SwitchBleProfile => Some(false),
+            #[cfg(feature = "split")]
+            Cmd::GetPeripheralStatus => Some(false),
+            _ => None,
         }
     }
 
@@ -388,6 +428,16 @@ mod tests {
                     | (Cmd::DisconnectBleProfile, Ok(BleProfileAction::Disconnect(0)))
             ));
         }
+    }
+
+    #[test]
+    fn every_endpoint_has_a_maintenance_policy() {
+        let unclassified: Vec<Cmd> = Cmd::ENDPOINTS
+            .iter()
+            .copied()
+            .filter(|cmd| RynkService::maintenance_policy(*cmd).is_none())
+            .collect();
+        assert!(unclassified.is_empty(), "unclassified commands: {unclassified:?}");
     }
 
     /// A read carrying more than one frame serves them all, in order: the
