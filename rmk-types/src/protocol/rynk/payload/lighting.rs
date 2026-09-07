@@ -25,7 +25,9 @@ pub const LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE: usize = 7;
 /// legacy chunk because each cell carries the connection, bonded-slot,
 /// effects, layers, and indicator predicates (two of them 32-bit layer masks)
 /// and the page still has to fit `LIGHTING_PAYLOAD_SIZE`.
-pub const LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE: usize = 3;
+pub const LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE: usize = 3;
+/// Chunk size of the original connection/effects endpoint.
+pub const LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE: usize = 5;
 /// Number of RGB cells in one presented-frame page.
 ///
 /// Deliberately far below what [`LIGHTING_PAYLOAD_SIZE`] would allow: a page
@@ -232,11 +234,8 @@ impl LightingFeatureFlags {
     /// earlier extended cell, so a host that cannot see this bit must use the
     /// legacy endpoints rather than risk a misparse.
     pub const RUNTIME_EFFECTS_CONDITIONS: u32 = 1 << 15;
-    /// The extended conditional-scene cell also carries a multi-layer
-    /// predicate and a lock-indicator predicate. Like
-    /// `RUNTIME_EFFECTS_CONDITIONS`, this bit describes the cell's encoding:
-    /// firmware without it speaks the shorter extended cell, and a host that
-    /// cannot see it must not use the extended endpoints against it.
+    /// The advanced conditional-scene endpoints support layer-set and host
+    /// lock-indicator predicates. The extended endpoints retain their format.
     pub const RUNTIME_LAYER_INDICATOR_CONDITIONS: u32 = 1 << 16;
 
     pub const fn contains(self, bits: u32) -> bool {
@@ -755,12 +754,28 @@ wire_type! {
         pub cell: LightingConditionalSceneCell,
         pub connection: Option<LightingConnectionCondition>,
         pub effects: Option<LightingEffectsCondition>,
+    }
+}
+
+impl LightingExtendedConditionalSceneCell {
+    pub fn validate(&self) -> LightingResult<()> {
+        self.cell.validate()
+    }
+}
+
+wire_type! {
+    /// Additive runtime conditional cell used by the extended endpoints. The
+    /// nested legacy cell keeps its established postcard field order intact.
+    pub struct LightingAdvancedConditionalSceneCell {
+        pub cell: LightingConditionalSceneCell,
+        pub connection: Option<LightingConnectionCondition>,
+        pub effects: Option<LightingEffectsCondition>,
         pub layers: Option<LightingLayersCondition>,
         pub indicators: Option<LightingIndicatorCondition>,
     }
 }
 
-impl LightingExtendedConditionalSceneCell {
+impl LightingAdvancedConditionalSceneCell {
     pub fn validate(&self) -> LightingResult<()> {
         if self.layers.is_some_and(|layers| layers.active & layers.inactive != 0) {
             return Err(LightingError::InvalidRequest);
@@ -1027,19 +1042,19 @@ impl MaxSize for LightingRuntimeConditionalScenesPage {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
-pub struct LightingExtendedRuntimeConditionalScenesPage {
+pub struct LightingAdvancedRuntimeConditionalScenesPage {
     pub revision: u32,
     pub total_count: u16,
-    #[cfg_attr(feature = "wasm", tsify(type = "LightingExtendedConditionalSceneCell[]"))]
-    pub items: Vec<LightingExtendedConditionalSceneCell, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE>,
+    #[cfg_attr(feature = "wasm", tsify(type = "LightingAdvancedConditionalSceneCell[]"))]
+    pub items: Vec<LightingAdvancedConditionalSceneCell, LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE>,
 }
 
-impl MaxSize for LightingExtendedRuntimeConditionalScenesPage {
+impl MaxSize for LightingAdvancedRuntimeConditionalScenesPage {
     const POSTCARD_MAX_SIZE: usize = u32::POSTCARD_MAX_SIZE
         + u16::POSTCARD_MAX_SIZE
         + crate::heapless_vec_max_size::<
-            LightingExtendedConditionalSceneCell,
-            LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE,
+            LightingAdvancedConditionalSceneCell,
+            LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE,
         >();
 }
 
@@ -1094,19 +1109,19 @@ impl MaxSize for PutLightingRuntimeConditionalSceneChunkRequest {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
-pub struct PutLightingExtendedRuntimeConditionalSceneChunkRequest {
+pub struct PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
     pub transaction_id: u32,
     pub offset: u16,
-    #[cfg_attr(feature = "wasm", tsify(type = "LightingExtendedConditionalSceneCell[]"))]
-    pub cells: Vec<LightingExtendedConditionalSceneCell, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE>,
+    #[cfg_attr(feature = "wasm", tsify(type = "LightingAdvancedConditionalSceneCell[]"))]
+    pub cells: Vec<LightingAdvancedConditionalSceneCell, LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE>,
 }
 
-impl MaxSize for PutLightingExtendedRuntimeConditionalSceneChunkRequest {
+impl MaxSize for PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
     const POSTCARD_MAX_SIZE: usize = u32::POSTCARD_MAX_SIZE
         + u16::POSTCARD_MAX_SIZE
         + crate::heapless_vec_max_size::<
-            LightingExtendedConditionalSceneCell,
-            LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE,
+            LightingAdvancedConditionalSceneCell,
+            LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE,
         >();
 }
 
@@ -1454,8 +1469,8 @@ pub type LightingExtensionParamsPageResult = LightingResult<LightingExtensionPar
 pub type LightingSceneTransactionResult = LightingResult<LightingSceneTransaction>;
 pub type LightingRuntimeConditionalSceneStatusResult = LightingResult<LightingRuntimeConditionalSceneStatus>;
 pub type LightingRuntimeConditionalScenesPageResult = LightingResult<LightingRuntimeConditionalScenesPage>;
-pub type LightingExtendedRuntimeConditionalScenesPageResult =
-    LightingResult<LightingExtendedRuntimeConditionalScenesPage>;
+pub type LightingAdvancedRuntimeConditionalScenesPageResult =
+    LightingResult<LightingAdvancedRuntimeConditionalScenesPage>;
 pub type LightingRuntimeConditionalSceneTransactionResult = LightingResult<LightingRuntimeConditionalSceneTransaction>;
 pub type LightingFramePageResult = LightingResult<LightingFramePage>;
 pub type LightingReplicaStatusResult = LightingResult<LightingReplicaStatus>;
@@ -1521,12 +1536,12 @@ const _: () = {
     );
     assert_endpoint_fits!(PutLightingRuntimeConditionalSceneChunkRequest, LightingUnitResult);
     assert_endpoint_fits!(
-        PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+        PutLightingAdvancedRuntimeConditionalSceneChunkRequest,
         LightingUnitResult
     );
     assert_endpoint_fits!(
         LightingRuntimeConditionalScenePageRequest,
-        LightingExtendedRuntimeConditionalScenesPageResult
+        LightingAdvancedRuntimeConditionalScenesPageResult
     );
     assert_endpoint_fits!(CommitLightingRuntimeConditionalSceneReplaceRequest, LightingStateResult);
     assert_endpoint_fits!(AbortLightingRuntimeConditionalSceneReplaceRequest, LightingUnitResult);
@@ -1878,15 +1893,6 @@ mod tests {
                 usb_connected: Some(true),
             }),
             effects: Some(LightingEffectsCondition { enabled: true }),
-            layers: Some(LightingLayersCondition {
-                active: 1 << 2 | 1 << 5,
-                inactive: 1 << 3,
-            }),
-            indicators: Some(LightingIndicatorCondition {
-                num_lock: Some(true),
-                caps_lock: None,
-                scroll_lock: Some(false),
-            }),
         };
         round_trip(&cell);
 
@@ -1911,6 +1917,80 @@ mod tests {
         round_trip(&request);
         assert_max_size_bound(&request);
         assert!(PutLightingExtendedRuntimeConditionalSceneChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+    }
+
+    #[test]
+    fn advanced_conditional_scene_types_round_trip_at_capacity() {
+        let base = LightingConditionalSceneCell {
+            conditions: LightingConditionSet {
+                layer: Some(LightingLayerCondition { layer: 2, active: true }),
+                battery: Some(LightingBatteryCondition {
+                    node: LightingNodeId(1),
+                    min_level: Some(20),
+                    max_level: Some(80),
+                    charge: LightingChargeCondition::Discharging,
+                }),
+                output_mode: Some(LightingOutputMode::PoweredOnly),
+            },
+            led_id: LightingLedId(42),
+            effect: LightingEffect::Solid {
+                color: LightingRgb8 { r: 7, g: 8, b: 9 },
+            },
+        };
+        let cell = LightingAdvancedConditionalSceneCell {
+            cell: base,
+            connection: Some(LightingConnectionCondition {
+                transport: Some(LightingActiveTransport::Ble),
+                profile: Some(3),
+                ble_state: Some(BleState::Connected),
+                bonded: Some(LightingBondedSlotCondition { slot: 2, bonded: true }),
+                usb_connected: Some(true),
+            }),
+            effects: Some(LightingEffectsCondition { enabled: true }),
+            layers: Some(LightingLayersCondition {
+                active: 1 << 2 | 1 << 5,
+                inactive: 1 << 3,
+            }),
+            indicators: Some(LightingIndicatorCondition {
+                num_lock: Some(true),
+                caps_lock: None,
+                scroll_lock: Some(false),
+            }),
+        };
+        round_trip(&cell);
+        assert_eq!(
+            LightingExtendedConditionalSceneCell::try_from(cell),
+            Err(LightingError::InvalidRequest)
+        );
+        let compatible = LightingAdvancedConditionalSceneCell {
+            layers: None,
+            indicators: None,
+            ..cell
+        };
+        let old = LightingExtendedConditionalSceneCell::try_from(compatible).unwrap();
+        assert_eq!(LightingAdvancedConditionalSceneCell::from(old), compatible);
+
+        let mut cells = Vec::new();
+        for _ in 0..LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE {
+            cells.push(cell).unwrap();
+        }
+        let page = LightingAdvancedRuntimeConditionalScenesPage {
+            revision: u32::MAX,
+            total_count: u16::MAX,
+            items: cells.clone(),
+        };
+        round_trip(&page);
+        assert_max_size_bound(&page);
+        assert!(LightingAdvancedRuntimeConditionalScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+
+        let request = PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
+            transaction_id: u32::MAX,
+            offset: u16::MAX,
+            cells,
+        };
+        round_trip(&request);
+        assert_max_size_bound(&request);
+        assert!(PutLightingAdvancedRuntimeConditionalSceneChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
     }
 
     #[test]
@@ -2059,5 +2139,73 @@ mod tests {
             step_ms: 100,
         };
         assert_eq!(valid.validate(), Err(LightingError::InvalidEffect));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct LightingExtendedRuntimeConditionalScenesPage {
+    pub revision: u32,
+    pub total_count: u16,
+    #[cfg_attr(feature = "wasm", tsify(type = "LightingExtendedConditionalSceneCell[]"))]
+    pub items: Vec<LightingExtendedConditionalSceneCell, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE>,
+}
+
+impl MaxSize for LightingExtendedRuntimeConditionalScenesPage {
+    const POSTCARD_MAX_SIZE: usize = u32::POSTCARD_MAX_SIZE
+        + u16::POSTCARD_MAX_SIZE
+        + crate::heapless_vec_max_size::<
+            LightingExtendedConditionalSceneCell,
+            LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE,
+        >();
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct PutLightingExtendedRuntimeConditionalSceneChunkRequest {
+    pub transaction_id: u32,
+    pub offset: u16,
+    #[cfg_attr(feature = "wasm", tsify(type = "LightingExtendedConditionalSceneCell[]"))]
+    pub cells: Vec<LightingExtendedConditionalSceneCell, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE>,
+}
+
+impl MaxSize for PutLightingExtendedRuntimeConditionalSceneChunkRequest {
+    const POSTCARD_MAX_SIZE: usize = u32::POSTCARD_MAX_SIZE
+        + u16::POSTCARD_MAX_SIZE
+        + crate::heapless_vec_max_size::<
+            LightingExtendedConditionalSceneCell,
+            LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE,
+        >();
+}
+
+pub type LightingExtendedRuntimeConditionalScenesPageResult =
+    LightingResult<LightingExtendedRuntimeConditionalScenesPage>;
+
+impl From<LightingExtendedConditionalSceneCell> for LightingAdvancedConditionalSceneCell {
+    fn from(value: LightingExtendedConditionalSceneCell) -> Self {
+        Self {
+            cell: value.cell,
+            connection: value.connection,
+            effects: value.effects,
+            layers: None,
+            indicators: None,
+        }
+    }
+}
+impl TryFrom<LightingAdvancedConditionalSceneCell> for LightingExtendedConditionalSceneCell {
+    type Error = LightingError;
+    fn try_from(value: LightingAdvancedConditionalSceneCell) -> LightingResult<Self> {
+        if value.layers.is_some() || value.indicators.is_some() {
+            return Err(LightingError::InvalidRequest);
+        }
+        Ok(Self {
+            cell: value.cell,
+            connection: value.connection,
+            effects: value.effects,
+        })
     }
 }
