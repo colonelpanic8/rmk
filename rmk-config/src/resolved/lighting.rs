@@ -139,6 +139,7 @@ pub struct LightingControls {
     pub output_toggle_user_action: Option<u8>,
     pub output_mode_cycle_user_action: Option<u8>,
     pub wake_layers: u64,
+    pub wake_linger_ms: u32,
     pub initial_output_mode: LightingOutputMode,
     pub powered_only_scope: LightingPoweredOnlyScope,
     pub output_mode_indicator: Option<LightingOutputModeIndicator>,
@@ -330,6 +331,7 @@ impl crate::KeyboardTomlConfig {
                     output_toggle_user_action: controls.output_toggle_user_action,
                     output_mode_cycle_user_action: controls.output_mode_cycle_user_action,
                     wake_layers,
+                    wake_linger_ms: controls.wake_linger_ms.unwrap_or(0),
                     initial_output_mode: match controls.initial_output_mode {
                         LightingOutputModeToml::AlwaysOn => LightingOutputMode::AlwaysOn,
                         LightingOutputModeToml::AlwaysOff => LightingOutputMode::AlwaysOff,

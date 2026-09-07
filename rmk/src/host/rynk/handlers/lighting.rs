@@ -2341,6 +2341,7 @@ mod tests {
                 output_toggle_user_action: Some(13),
                 output_mode_cycle_user_action: Some(14),
                 wake_layers: 1 << 1,
+                wake_linger_ms: 0,
                 initial_output_mode: OutputMode::PoweredOnly,
                 powered_only_scope: crate::lighting::PoweredOnlyScope::Local,
                 output_mode_indicator: Some(OutputModeIndicator {
