@@ -1094,6 +1094,7 @@ pub(crate) struct BehaviorConfig {
     pub morse: Option<MorsesConfig>,
     pub auto_mouse_layer: Option<Vec<AutoMouseLayerConfig>>,
     pub mouse_layer_scale: Option<Vec<MouseLayerScaleConfig>>,
+    pub unicode: Option<UnicodeConfig>,
 }
 
 /// Per-layer mouse movement and scroll scaling.
@@ -1103,6 +1104,16 @@ pub(crate) struct MouseLayerScaleConfig {
     pub layer: u8,
     pub r#move: Option<[u16; 2]>,
     pub scroll: Option<[u16; 2]>,
+}
+
+/// Configurations for unicode codepoint input
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UnicodeConfig {
+    /// Input method used until a `UnicodeModeCycle` key changes it.
+    pub default_mode: Option<crate::resolved::behavior::UnicodeMode>,
+    /// Codepoints addressed by `UNICODE(n)`, as hex without a `U+` prefix.
+    pub codepoints: Vec<String>,
 }
 
 /// Configurations for auto mouse layer
