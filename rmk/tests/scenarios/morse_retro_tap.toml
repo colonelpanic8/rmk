@@ -65,3 +65,17 @@ steps = [
   { release = [1, 1] },
 ]
 expect = [["A"], ["LShift", "A"], ["LShift"], []]
+
+# A press swallowed by an incomplete combo is still another key: the hold stays.
+[[test]]
+name = "retro_tap_suppressed_by_incomplete_combo_press"
+behavior.combo = { timeout = "100ms", combos = [{ actions = ["V", "B"], output = "A", layer = 0 }] }
+steps = [
+  { press = [1, 1] },
+  { delay = 260 },
+  { press = [2, 3] },  # V: waits for V+B until the combo times out
+  { release = [1, 1] },
+  { delay = 150 },
+  { release = [2, 3] },
+]
+expect = [["LShift"], ["LShift", "V"], ["V"], []]
