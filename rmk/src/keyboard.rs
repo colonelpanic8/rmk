@@ -1328,7 +1328,7 @@ impl<'a> Keyboard<'a> {
             Action::Unicode(idx) => {
                 // Typed on press, like a macro.
                 if event.pressed {
-                    self.emit_unicode(idx, event).await;
+                    self.emit_unicode(idx).await;
                 }
             }
             Action::TriggerMacro(macro_idx) => {
@@ -1800,57 +1800,55 @@ impl<'a> Keyboard<'a> {
 
     /// Type the codepoint at `idx` of the configured table, spelled the way the
     /// active [`UnicodeMode`]'s input method expects.
-    async fn emit_unicode(&mut self, idx: u16, event: KeyboardEvent) {
+    async fn emit_unicode(&mut self, idx: u16) {
         let Some(codepoint) = self.keymap.unicode_codepoint(idx) else {
             warn!("No codepoint configured at unicode index {}", idx);
             return;
         };
         match self.keymap.unicode_mode() {
             UnicodeMode::Linux => {
-                // IBus: Ctrl+Shift+U opens the sequence and Enter commits it.
                 let opener = ModifierCombination::LCTRL | ModifierCombination::LSHIFT;
-                self.register_modifiers(opener);
-                self.register_key(HidKeyCode::U, event);
-                self.send_keyboard_report_with_resolved_modifiers(true).await;
+                self.send_unicode_report(opener, HidKeyCode::U).await;
                 Timer::after_millis(UNICODE_TAP_INTERVAL_MS).await;
-                self.unregister_key(HidKeyCode::U, event);
-                self.unregister_modifiers(opener);
-                self.send_keyboard_report_with_resolved_modifiers(false).await;
-                self.type_hex_digits(codepoint, event).await;
-                self.tap_hid_key(HidKeyCode::Enter, event).await;
+                self.send_unicode_report(ModifierCombination::default(), HidKeyCode::No)
+                    .await;
+                self.type_hex_digits(codepoint, ModifierCombination::default()).await;
+                self.send_unicode_report(ModifierCombination::default(), HidKeyCode::Enter)
+                    .await;
+                Timer::after_millis(UNICODE_TAP_INTERVAL_MS).await;
             }
             UnicodeMode::MacOs => {
-                // The "Unicode Hex Input" layout reads exactly four hex digits per
-                // UTF-16 code unit, so anything outside the BMP is typed as its
-                // surrogate pair.
                 let Some(character) = char::from_u32(codepoint) else {
                     warn!("Unicode index {} is not a codepoint", idx);
                     return;
                 };
                 let mut units = [0u16; 2];
                 let len = character.encode_utf16(&mut units).len();
-                self.register_modifiers(ModifierCombination::LALT);
-                self.send_keyboard_report_with_resolved_modifiers(true).await;
+                self.send_unicode_report(ModifierCombination::LALT, HidKeyCode::No)
+                    .await;
                 for unit in &units[..len] {
-                    self.type_hex_digits(*unit as u32, event).await;
+                    self.type_hex_digits(*unit as u32, ModifierCombination::LALT).await;
                 }
-                self.unregister_modifiers(ModifierCombination::LALT);
-                self.send_keyboard_report_with_resolved_modifiers(false).await;
             }
             UnicodeMode::Windows => {
-                // WinCompose: RightAlt then `u` opens the sequence, Enter commits it.
-                self.tap_hid_key(HidKeyCode::RAlt, event).await;
-                self.tap_hid_key(HidKeyCode::U, event).await;
-                self.type_hex_digits(codepoint, event).await;
-                self.tap_hid_key(HidKeyCode::Enter, event).await;
+                self.send_unicode_report(ModifierCombination::RALT, HidKeyCode::No)
+                    .await;
+                Timer::after_millis(UNICODE_TAP_INTERVAL_MS).await;
+                self.send_unicode_report(ModifierCombination::default(), HidKeyCode::No)
+                    .await;
+                self.tap_unicode_key(HidKeyCode::U, ModifierCombination::default())
+                    .await;
+                self.type_hex_digits(codepoint, ModifierCombination::default()).await;
+                self.send_unicode_report(ModifierCombination::default(), HidKeyCode::Enter)
+                    .await;
+                Timer::after_millis(UNICODE_TAP_INTERVAL_MS).await;
             }
         }
+        self.send_keyboard_report_with_resolved_modifiers(false).await;
     }
 
-    /// Type `value` as zero-padded lowercase hex, four digits wide at minimum.
-    /// Every input method here accepts a shorter sequence, but a padded one
-    /// reads back as the `keyboard.toml` entry it came from.
-    async fn type_hex_digits(&mut self, value: u32, event: KeyboardEvent) {
+    /// Type zero-padded hex, four digits per UTF-16 unit or up to six per codepoint.
+    async fn type_hex_digits(&self, value: u32, modifiers: ModifierCombination) {
         let width = match value {
             0..=0xFFFF => 4,
             0x1_0000..=0xF_FFFF => 5,
@@ -1858,18 +1856,26 @@ impl<'a> Keyboard<'a> {
         };
         for place in (0..width).rev() {
             let nibble = (value >> (place * 4)) & 0xF;
-            self.tap_hid_key(hex_digit_keycode(nibble as u8), event).await;
+            self.tap_unicode_key(hex_digit_keycode(nibble as u8), modifiers).await;
         }
     }
 
-    /// Press and release one key, leaving held modifiers as they are so a
-    /// sequence can be typed under a held `LeftAlt`.
-    async fn tap_hid_key(&mut self, key: HidKeyCode, event: KeyboardEvent) {
-        self.register_key(key, event);
-        self.send_keyboard_report_with_resolved_modifiers(true).await;
+    async fn tap_unicode_key(&self, key: HidKeyCode, modifiers: ModifierCombination) {
+        self.send_unicode_report(modifiers, key).await;
         Timer::after_millis(UNICODE_TAP_INTERVAL_MS).await;
-        self.unregister_key(key, event);
-        self.send_keyboard_report_with_resolved_modifiers(false).await;
+        self.send_unicode_report(modifiers, HidKeyCode::No).await;
+    }
+
+    /// OS input sequences use literal reports without changing logical held-key state.
+    async fn send_unicode_report(&self, modifiers: ModifierCombination, key: HidKeyCode) {
+        self.send_report(Report::KeyboardReport(KeyboardReport {
+            modifier: modifiers.into_bits(),
+            reserved: 0,
+            leds: LOCK_LED_STATES.load(core::sync::atomic::Ordering::Relaxed),
+            keycodes: [key as u8, 0, 0, 0, 0, 0],
+        }))
+        .await;
+        yield_now().await;
     }
 
     async fn execute_macro(&mut self, macro_idx: u8, event: KeyboardEvent) {
