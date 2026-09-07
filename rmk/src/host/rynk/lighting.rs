@@ -1666,6 +1666,8 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
             cell,
             connection: None,
             effects: None,
+            layers: None,
+            indicators: None,
         })
     }
 
@@ -1684,6 +1686,15 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         conditions.connection = cell.connection.map(connection_condition_from_wire);
         conditions.effects = cell.effects.map(|effects| crate::lighting::EffectsCondition {
             enabled: effects.enabled,
+        });
+        conditions.layers = cell.layers.map(|layers| crate::lighting::LayersCondition {
+            active: layers.active,
+            inactive: layers.inactive,
+        });
+        conditions.indicators = cell.indicators.map(|indicators| crate::lighting::IndicatorCondition {
+            num_lock: indicators.num_lock,
+            caps_lock: indicators.caps_lock,
+            scroll_lock: indicators.scroll_lock,
         });
         Ok(RuntimeConditionalSceneCell {
             conditions,
@@ -1717,6 +1728,20 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 .map(|effects| rmk_types::protocol::rynk::LightingEffectsCondition {
                     enabled: effects.enabled,
                 }),
+            layers: cell
+                .conditions
+                .layers
+                .map(|layers| rmk_types::protocol::rynk::LightingLayersCondition {
+                    active: layers.active,
+                    inactive: layers.inactive,
+                }),
+            indicators: cell.conditions.indicators.map(|indicators| {
+                rmk_types::protocol::rynk::LightingIndicatorCondition {
+                    num_lock: indicators.num_lock,
+                    caps_lock: indicators.caps_lock,
+                    scroll_lock: indicators.scroll_lock,
+                }
+            }),
         })
     }
 }
@@ -1772,6 +1797,15 @@ pub fn install_lighting_runtime_conditional_scenes<
         conditions.connection = cell.connection.map(connection_condition_from_wire);
         conditions.effects = cell.effects.map(|effects| crate::lighting::EffectsCondition {
             enabled: effects.enabled,
+        });
+        conditions.layers = cell.layers.map(|layers| crate::lighting::LayersCondition {
+            active: layers.active,
+            inactive: layers.inactive,
+        });
+        conditions.indicators = cell.indicators.map(|indicators| crate::lighting::IndicatorCondition {
+            num_lock: indicators.num_lock,
+            caps_lock: indicators.caps_lock,
+            scroll_lock: indicators.scroll_lock,
         });
         let _ = engine.install_runtime_conditional_scene_cell(RuntimeConditionalSceneCell {
             conditions,
@@ -1962,6 +1996,8 @@ fn condition_set_from_wire(
         }),
         connection: None,
         effects: None,
+        layers: None,
+        indicators: None,
         output_mode: conditions.output_mode.map(|mode| match mode {
             rmk_types::protocol::rynk::LightingOutputMode::AlwaysOn => crate::lighting::OutputMode::AlwaysOn,
             rmk_types::protocol::rynk::LightingOutputMode::AlwaysOff => crate::lighting::OutputMode::AlwaysOff,
