@@ -1472,8 +1472,7 @@ pub(crate) struct HostConfig {
     /// with `vial_enabled` (the underlying Cargo features conflict).
     #[serde_inline_default(false)]
     pub rynk_enabled: bool,
-    /// Physical keys (row, col) held simultaneously to unlock (optional).
-    /// Shared by the Vial lock and the Rynk lock gate.
+    /// Physical keys (row, col) held simultaneously to unlock Vial (optional).
     pub unlock_keys: Option<Vec<[u8; 2]>>,
     /// Start (and stay) unlocked, bypassing the unlock-key combo (default:
     /// false). Renamed from `vial_insecure`; the old name still parses.
