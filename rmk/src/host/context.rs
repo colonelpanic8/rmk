@@ -232,6 +232,17 @@ impl<'a> KeyboardContext<'a> {
         }
         #[cfg(feature = "storage")]
         match definition {
+            // Empty definitions are tombstones regardless of their wire variant.
+            // Persist the legacy empty representation so older firmware also
+            // restores the slot as vacant.
+            definition if definition.is_empty() => {
+                FLASH_CHANNEL
+                    .send(FlashOperationMessage::Combo {
+                        idx,
+                        config: ComboConfig::empty(),
+                    })
+                    .await;
+            }
             ComboDefinition::Actions(config) => {
                 FLASH_CHANNEL.send(FlashOperationMessage::Combo { idx, config }).await;
             }

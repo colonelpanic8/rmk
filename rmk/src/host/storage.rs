@@ -1,4 +1,5 @@
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
+use rmk_types::action::KeyAction;
 use rmk_types::fork::Fork;
 use rmk_types::morse::Morse;
 use serde::de::{Error as DeError, SeqAccess, Visitor};
@@ -144,10 +145,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
 
             if let Some(StorageData::Combo(config)) = read_data {
                 debug!("Read combo config: {:?}", config);
-                *item = Some(Combo::new(config));
+                *item = (!config.actions.is_empty() || config.output != KeyAction::No).then(|| Combo::new(config));
             } else if let Some(StorageData::PositionCombo(config)) = read_data {
                 debug!("Read position combo config: {:?}", config);
-                *item = Some(Combo::new_positions(config));
+                *item = (!config.positions.is_empty() || config.output != KeyAction::No)
+                    .then(|| Combo::new_positions(config));
             }
         }
 

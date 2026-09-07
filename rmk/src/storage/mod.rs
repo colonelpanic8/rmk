@@ -1137,6 +1137,35 @@ mod tests {
         });
     }
 
+    #[cfg(feature = "host")]
+    #[test]
+    fn empty_combo_records_restore_as_vacant_slots() {
+        block_on(async {
+            type Flash = TestFlash<16_384, 4_096, 1>;
+            let mut storage = Storage::<Flash, 1, 1, 1, 0> {
+                flash: MapStorage::new(Flash::new(), MapConfig::new(8192..16_384), Cache::new_uncached()),
+                buffer: [0; get_buffer_size()],
+            };
+
+            storage
+                .store_data(StorageKey::combo(0), &StorageData::Combo(ComboConfig::empty()))
+                .await
+                .unwrap();
+            storage
+                .store_data(
+                    StorageKey::combo(1),
+                    &StorageData::PositionCombo(PositionComboConfig::empty()),
+                )
+                .await
+                .unwrap();
+
+            let mut combos = core::array::from_fn(|_| None);
+            storage.read_combos(&mut combos).await.unwrap();
+            assert!(combos[0].is_none());
+            assert!(combos[1].is_none());
+        });
+    }
+
     // A stored LayoutConfig must reach the Vial GUI again after a power
     // cycle: read_keymap restores layout_option into KeymapData and
     // KeyMap::build copies it into the runtime state that
