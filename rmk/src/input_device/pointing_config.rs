@@ -8,17 +8,22 @@
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use rmk_macro::processor;
+use rmk_macro::{event, processor};
 use rmk_types::protocol::rynk::{PointingConfig, RynkError};
+
 
 use crate::event::{LayerChangeEvent, PointingProcessorEvent, publish_event};
 #[cfg(feature = "storage")]
 use crate::storage::{StorageItem, store};
 
-/// The configuration and the layer it was last applied for.
+/// Requests that pointing processors refresh their runtime configuration.
+#[event(channel_size = 1, pubs = 1, subs = 4)]
+#[derive(Clone, Copy, Debug)]
+pub struct PointingConfigChangeEvent;
+
+/// The live configuration.
 struct State {
     config: PointingConfig,
-    layer: u8,
 }
 
 static STATE: Mutex<CriticalSectionRawMutex, State> = Mutex::new(State {
@@ -29,7 +34,6 @@ static STATE: Mutex<CriticalSectionRawMutex, State> = Mutex::new(State {
         override_count: 0,
         overrides: [EMPTY_OVERRIDE; rmk_types::protocol::rynk::POINTING_LAYER_OVERRIDE_CAPACITY],
     },
-    layer: 0,
 });
 
 // `Default` is not const, and a static needs one.
@@ -60,7 +64,7 @@ pub async fn init(stored: Option<PointingConfig>) {
     if let Some(config) = stored {
         STATE.lock().await.config = config;
     }
-    apply().await;
+    publish_event(PointingConfigChangeEvent);
 }
 
 /// The configuration as the host would read it.
@@ -86,24 +90,8 @@ pub async fn replace(next: PointingConfig) -> Result<PointingConfig, RynkError> 
             .await
             .or(Err(RynkError::StorageFault))?;
     }
-    apply().await;
+    publish_event(PointingConfigChangeEvent);
     Ok(get().await)
-}
-
-/// Tell every configured pad what it should be doing on the current layer.
-async fn apply() {
-    let (config, layer) = {
-        let state = STATE.lock().await;
-        (state.config, state.layer)
-    };
-    for device in config.devices() {
-        if let Some(mode) = config.mode_for(device.device_id, layer) {
-            publish_event(PointingProcessorEvent {
-                device_id: device.device_id,
-                mode,
-            });
-        }
-    }
 }
 
 /// Re-points the pads whenever the active layer changes.
@@ -116,7 +104,14 @@ pub struct PointingLayerModes;
 
 impl PointingLayerModes {
     async fn on_layer_change_event(&mut self, LayerChangeEvent(layer): LayerChangeEvent) {
-        STATE.lock().await.layer = layer;
-        apply().await;
+        let config = get().await;
+        for device in config.devices() {
+            if let Some(mode) = config.mode_for(device.device_id, layer) {
+                publish_event(PointingProcessorEvent {
+                    device_id: device.device_id,
+                    mode,
+                });
+            }
+        }
     }
 }

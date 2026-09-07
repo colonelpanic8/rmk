@@ -1109,4 +1109,28 @@ mod tests {
             assert_eq!(keymap.layout_option(), 42);
         });
     }
+    /// A stored pointing configuration seeds the live one at boot.
+    #[cfg(feature = "rynk")]
+    #[test]
+    fn pointing_configuration_restored_by_keymap_boot() {
+        use crate::keymap::{KeyMap, KeymapData};
+
+        block_on(async {
+            let config = PointingConfig {
+                revision: 17,
+                ..Default::default()
+            };
+            let flash = seeded(&[
+                (StorageKey::StorageConfig, StorageValue::StorageConfig(SCHEMA_HASH)),
+                (StorageKey::PointingConfig, StorageValue::PointingConfig(config)),
+            ])
+            .await;
+            let mut storage = new_storage(flash).await;
+            let mut data = KeymapData::new([[[KeyAction::No]]]);
+            let mut behavior = RuntimeBehaviorConfig::default();
+            let positional = crate::config::PositionalConfig::<1, 1>::default();
+            let _keymap = KeyMap::new_from_storage(&mut data, Some(&mut storage), &mut behavior, &positional).await;
+            assert_eq!(crate::input_device::pointing_config::get().await, config);
+        });
+    }
 }
