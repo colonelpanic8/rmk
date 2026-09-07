@@ -205,6 +205,8 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
     let mut central = stack.central();
     wait_for_stack_started().await;
     loop {
+        crate::split::selector::wait_wireless_selected().await;
+
         // The radio is the biggest draw while the keyboard sleeps, and a peripheral
         // that isn't connected can't wake it anyway. Established links stay up.
         while crate::state::current_sleep_state() {
@@ -239,13 +241,16 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                 },
             };
             info!("Start connecting, {} peripheral(s) pending", pending.len());
-            match with_timeout(
-                Duration::from_millis(super::KNOWN_PEER_CONNECT_REARM_MS),
-                central.connect(&config),
+            match select(
+                with_timeout(
+                    Duration::from_millis(super::KNOWN_PEER_CONNECT_REARM_MS),
+                    central.connect(&config),
+                ),
+                crate::split::selector::wait_wired_selected(),
             )
             .await
             {
-                Ok(Ok(conn)) => {
+                Either::First(Ok(Ok(conn))) => {
                     let peer = conn.peer_address();
                     if let Some(&(id, addr)) = pending.iter().find(|(_, addr)| Address::random(*addr) == peer) {
                         info!("Connected to peripheral {}", id);
@@ -256,13 +261,13 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                         warn!("Connected peer {:?} matches no pending slot", peer.addr);
                     }
                 }
-                Ok(Err(e)) => {
+                Either::First(Ok(Err(e))) => {
                     #[cfg(feature = "defmt")]
                     let e = defmt::Debug2Format(&e);
                     error!("Connect error: {:?}", e);
                     Timer::after_millis(500).await;
                 }
-                Err(_) => {
+                Either::First(Err(_)) => {
                     for &(id, _) in &pending {
                         if recoveries[id].missed() {
                             warn!("Connect to peripheral {} repeatedly timed out, rescanning", id);
@@ -277,17 +282,23 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                         }
                     }
                 }
+                Either::Second(_) => continue,
             }
         } else if peripheral_slots.iter().any(|s| matches!(s, SlotState::NoAddr)) {
             // No `Disconnected` peripherals, check `NoAddr` peripheral slot and scan new peripherals
             info!("Start scanning peripherals");
             let session = start_scan(stack, SPLIT_CENTRAL_SCAN_WINDOW, &[]).await;
-            let event = select(PERIPHERAL_FOUND.wait(), ended.ready_to_receive()).await;
+            let event = select3(
+                PERIPHERAL_FOUND.wait(),
+                ended.ready_to_receive(),
+                crate::split::selector::wait_wired_selected(),
+            )
+            .await;
             // Wait until the controller has confirmed the stop: it refuses an
             // initiator until then.
             session.stop().await;
             info!("Stop scanning");
-            if let Either::First((id, addr)) = event {
+            if let Either3::First((id, addr)) = event {
                 // The id comes off the air — bounds-check it. Keep the first
                 // address seen for a slot; an occupied slot is cleared only
                 // when connecting to it times out.
@@ -305,8 +316,8 @@ pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerC
                 }
             }
         } else {
-            // Fully linked: park until a session ends.
-            ended.ready_to_receive().await;
+            // Fully linked: park until a session ends or wired takes over.
+            let _ = select(ended.ready_to_receive(), crate::split::selector::wait_wired_selected()).await;
         }
     }
 }
@@ -364,12 +375,25 @@ pub(crate) async fn run_peripheral_session<
 ) {
     trace!("SPLIT_MESSAGE_MAX_SIZE: {}", SPLIT_MESSAGE_MAX_SIZE);
     loop {
-        let conn = conns.receive().await;
+        crate::split::selector::wait_wireless_selected().await;
+        let conn = match select(conns.receive(), crate::split::selector::wait_wired_selected()).await {
+            Either::First(conn) => conn,
+            Either::Second(_) => continue,
+        };
         set_peripheral_connected(id, true);
-        if let Err(e) = run_central_manager_task(id, stack, &conn, matrix_config).await {
-            #[cfg(feature = "defmt")]
-            let e = defmt::Debug2Format(&e);
-            error!("BLE central error: {:?}", e);
+        match select(
+            run_central_manager_task(id, stack, &conn, matrix_config),
+            crate::split::selector::wait_wired_selected(),
+        )
+        .await
+        {
+            Either::First(Err(e)) => {
+                #[cfg(feature = "defmt")]
+                let e = defmt::Debug2Format(&e);
+                error!("BLE central error: {:?}", e);
+            }
+            Either::First(Ok(())) => {}
+            Either::Second(_) => info!("Wired split selected; stopping BLE split session"),
         }
         set_peripheral_connected(id, false);
         // Dropping the last handle files a disconnect request that the stack

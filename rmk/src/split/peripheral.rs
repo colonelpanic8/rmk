@@ -1,7 +1,6 @@
 #[cfg(feature = "_ble")]
 use bt_hci::{cmd::le::LeSetPhy, controller::ControllerCmdAsync};
 use embassy_futures::select::{Either, select};
-#[cfg(not(feature = "_ble"))]
 use embedded_io_async::{Read, Write};
 use futures::FutureExt;
 #[cfg(all(feature = "_ble", feature = "storage"))]
@@ -21,8 +20,7 @@ use crate::event::WpmUpdateEvent;
 use crate::event::{
     KeyboardEvent, LayerChangeEvent, LedIndicatorEvent, PointingEvent, SubscribableEvent, publish_event,
 };
-#[cfg(not(feature = "_ble"))]
-use crate::split::serial::SerialSplitDriver;
+use crate::split::serial::{HalfDuplexPeripheralDriver, SerialSplitDriver};
 use crate::state::update_status;
 
 /// Run the split peripheral service. On BLE builds this owns the peripheral's
@@ -60,6 +58,71 @@ pub async fn run_rmk_split_peripheral<
             .set_random_address(Address::random(address))
             .build();
         crate::split::ble::peripheral::initialize_nrf_ble_split_peripheral_and_run(id, &stack).await;
+    }
+}
+
+/// Run a split peripheral over serial even when the keyboard also enables BLE
+/// for host communication.
+pub async fn run_rmk_split_peripheral_serial<S: Write + Read>(serial: S) {
+    let mut peripheral = SplitPeripheral::new(SerialSplitDriver::new(serial));
+    loop {
+        peripheral.run().await;
+    }
+}
+
+/// Run a split peripheral on a centrally-polled half-duplex serial bus.
+pub async fn run_rmk_split_peripheral_half_duplex<S: Write + Read>(serial: S) {
+    let mut peripheral = SplitPeripheral::new(HalfDuplexPeripheralDriver::new(serial));
+    loop {
+        peripheral.run().await;
+    }
+}
+
+/// Run a serial peripheral while automatic selection prefers the wired link.
+pub async fn run_rmk_split_peripheral_auto_half_duplex<S: Write + Read>(serial: S) {
+    let mut peripheral = SplitPeripheral::new(HalfDuplexPeripheralDriver::new(serial));
+    loop {
+        // Parked: keep the UARTE consumed so its ring cannot overrun and
+        // wedge reception while the central is still transmitting.
+        match select(
+            peripheral.split_driver.drain(),
+            crate::split::selector::wait_wired_selected(),
+        )
+        .await
+        {
+            Either::First(_) | Either::Second(_) => {}
+        }
+        match embassy_futures::select::select3(
+            peripheral.run(),
+            crate::split::selector::wait_wireless_selected(),
+            forced_wired_liveness_fallback(),
+        )
+        .await
+        {
+            embassy_futures::select::Either3::First(_)
+            | embassy_futures::select::Either3::Second(_)
+            | embassy_futures::select::Either3::Third(_) => {}
+        }
+    }
+}
+
+/// Revert a wired force whose link never carries anything. A force is only
+/// honoured while its transport is alive: the cable-detect input is ground
+/// truth, and a peripheral stranded on a dead forced link cannot receive the
+/// override that would free it.
+async fn forced_wired_liveness_fallback() {
+    use core::sync::atomic::Ordering;
+    if crate::split::selector::forced_mode() != crate::split::selector::FORCE_WIRED {
+        core::future::pending::<()>().await;
+    }
+    loop {
+        let before = crate::split::serial::counters::FRAMES_OK.load(Ordering::Relaxed);
+        embassy_time::Timer::after_secs(4).await;
+        if crate::split::serial::counters::FRAMES_OK.load(Ordering::Relaxed) == before {
+            info!("wired force reverted: link carried nothing");
+            crate::split::selector::set_forced(crate::split::selector::FORCE_AUTO);
+            return;
+        }
     }
 }
 
@@ -191,6 +254,10 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
             SplitMessage::LayerState(state) => {
                 super::update_layer_state(state);
                 publish_event(LayerChangeEvent::new(state.effective));
+            }
+            SplitMessage::TransportOverride(mode) => {
+                info!("Split transport force from central: {}", mode);
+                crate::split::selector::set_forced(mode);
             }
             #[cfg(feature = "display")]
             SplitMessage::Wpm(wpm) => publish_event(WpmUpdateEvent::new(wpm)),
