@@ -224,13 +224,14 @@ pub struct EffectsCondition {
 /// while it is.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct LayersCondition {
-    pub active: u64,
-    pub inactive: u64,
+    pub active: u32,
+    pub inactive: u32,
 }
 
 impl LayersCondition {
     pub const fn matches(self, active_bits: u64) -> bool {
-        active_bits & self.active == self.active && active_bits & self.inactive == 0
+        let active = active_bits as u32;
+        active & self.active == self.active && active & self.inactive == 0
     }
 }
 
