@@ -26,4 +26,6 @@ pub enum KeyboardAction {
     UnicodeModeCycle,
     /// Toggle whether the host may run maintenance operations.
     MaintenanceModeToggle,
+    /// Toggle Control/GUI swapping on both sides after the current chord ends.
+    CtrlGuiSwapToggle,
 }
