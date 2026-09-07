@@ -2366,9 +2366,8 @@ mod protocol_reference {
 
     use super::super::command::{ENDPOINT_META, EndpointMeta, TOPIC_META, TopicMeta};
     use super::super::{
-        RYNK_BLE_CHUNK_SIZE, RYNK_HEADER_SIZE, RYNK_HID_REPORT_SIZE, RYNK_INPUT_CHAR_UUID, RYNK_MAGIC,
-        RYNK_OUTPUT_CHAR_UUID, RYNK_SERVICE_UUID, RYNK_USB_INTERFACE_CLASS, RYNK_USB_INTERFACE_PROTOCOL,
-        RYNK_USB_INTERFACE_SUBCLASS, RynkError,
+        RYNK_BLE_CHUNK_SIZE, RYNK_HEADER_SIZE, RYNK_HID_REPORT_SIZE, RYNK_INPUT_CHAR_UUID, RYNK_OUTPUT_CHAR_UUID,
+        RYNK_SERVICE_UUID, RynkError,
     };
     use super::ProtocolVersion;
     use super::snapshot::assert_snapshot_at;
@@ -2542,7 +2541,7 @@ mod protocol_reference {
             "{header}\n\n\
              # Rynk Protocol Reference\n\n\
              Current protocol version: **{major}.{minor}**.\n\n\
-             Every transport (USB vendor bulk, BLE GATT, BLE HID) carries the same frame — a {header_size}-byte header plus a [postcard](https://docs.rs/postcard)-encoded payload:\n\n\
+             Every transport (USB HID, BLE GATT, BLE HID) carries the same frame — a {header_size}-byte header plus a [postcard](https://docs.rs/postcard)-encoded payload:\n\n\
              ```text\n\
              ┌──────────────┬───────────┐\n\
              │  CMD u16 LE  │  SEQ u8   │  ← 3-byte header\n\
@@ -2588,13 +2587,10 @@ mod protocol_reference {
                 &["Transport", "How the host reaches it"],
                 &[
                     alloc::vec![
-                        String::from("USB vendor bulk"),
+                        String::from("USB HID"),
                         format!(
-                            "A vendor-specific interface with class/subclass/protocol `0x{:02X}`/`0x{:02X}`/`0x{:02X}` and one bulk IN + one bulk OUT endpoint. Hosts discover keyboards by that interface triple, not by VID/PID. An MS OS 2.0 descriptor binds it to WinUSB, so Windows needs no driver. The firmware also prefixes its USB serial number with `{}` as an informational marker.",
-                            RYNK_USB_INTERFACE_CLASS,
-                            RYNK_USB_INTERFACE_SUBCLASS,
-                            RYNK_USB_INTERFACE_PROTOCOL,
-                            RYNK_MAGIC
+                            "A vendor HID application collection with usage page `0xFF14` and usage `0x61`. Unnumbered input/output reports carry {} bytes, with zero padding after a complete COBS frame. Native hosts use the platform HID driver; Chromium uses WebHID.",
+                            RYNK_HID_REPORT_SIZE
                         ),
                     ],
                     alloc::vec![
