@@ -1,7 +1,7 @@
 #[cfg(feature = "subrating")]
 use bt_hci::{cmd::le::LeSetHostFeature, controller::ControllerCmdSync};
 use embassy_futures::join::join;
-use embassy_futures::select::select;
+use embassy_futures::select::{select, select4};
 use embassy_time::{Duration, Timer};
 use rmk_types::connection::ConnectionStatus;
 use trouble_host::prelude::*;
@@ -10,7 +10,9 @@ use trouble_host::prelude::*;
 use super::PeerAddress;
 use super::{GattSplitMessage, SplitMessage};
 use crate::ble::adv::{Adv, advertise};
-use crate::event::{CentralConnectedEvent, KeyboardEvent, SleepStateEvent, SubscribableEvent, publish_event};
+use crate::event::{
+    CentralConnectedEvent, KeyboardEvent, PointingEvent, SleepStateEvent, SubscribableEvent, publish_event,
+};
 use crate::split::driver::{SplitDriverError, SplitReader, SplitWriter};
 use crate::split::peripheral::SplitPeripheral;
 use crate::state::update_status;
@@ -243,12 +245,22 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
                     info!("Disconnected from the central");
                 }
                 Err(BleHostError::BleHost(Error::Timeout)) => {
-                    // Timeout, wait new keys to continue
+                    // Park until there is a reason to advertise again: local
+                    // input, the selection moving (the cable going away, a
+                    // force), or a forced-BLE link proving dead.
                     error!("Connect to central timeout");
                     publish_event(SleepStateEvent::new(true));
-                    let mut sub = KeyboardEvent::subscriber();
-                    sub.clear();
-                    let _ = sub.next_message_pure().await;
+                    let mut keys = KeyboardEvent::subscriber();
+                    keys.clear();
+                    let mut pointing = PointingEvent::subscriber();
+                    pointing.clear();
+                    let _ = select4(
+                        keys.next_message_pure(),
+                        pointing.next_message_pure(),
+                        crate::split::selector::wait_selection_changed(),
+                        forced_ble_liveness_fallback(),
+                    )
+                    .await;
                     continue;
                 }
                 Err(e) => {
