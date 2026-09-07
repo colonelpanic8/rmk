@@ -415,20 +415,7 @@ impl<'a> KeyMap<'a> {
 
         // Read from storage BEFORE flattening (storage expects typed arrays).
         if let Some(storage) = storage
-            && {
-                Ok(())
-                    .and(storage.read_keymap(data, behavior).await)
-                    .and(storage.read_behavior_config(behavior).await)
-                    .and(
-                        storage
-                            .read_macro_cache(&mut behavior.keyboard_macros.macro_sequences)
-                            .await,
-                    )
-                    .and(storage.read_combos(&mut behavior.combo.combos).await)
-                    .and(storage.read_forks(&mut behavior.fork.forks).await)
-                    .and(storage.read_morses(&mut behavior.morse.morses).await)
-            }
-            .is_err()
+            && storage.read_boot_data(data, behavior).await.is_err()
         {
             error!("Failed to read from storage, clearing...");
             storage.flash.erase_all().await.ok();
