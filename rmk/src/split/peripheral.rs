@@ -94,6 +94,7 @@ pub async fn run_rmk_split_peripheral_auto_half_duplex<S: Write + Read>(serial: 
         {
             Either::First(_) | Either::Second(_) => {}
         }
+        peripheral.split_driver.begin_session();
         match embassy_futures::select::select3(
             peripheral.run(),
             crate::split::selector::wait_wireless_selected(),
