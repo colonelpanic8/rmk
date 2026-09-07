@@ -91,7 +91,7 @@ impl MorseProfile {
     pub fn unilateral_tap(self) -> Option<bool> {
         match (self.0 & UNI_TAP_MASK) >> 15 {
             3 => Some(true),
-            2 => Some(false),
+            1 | 2 => Some(false),
             _ => None,
         }
     }
@@ -99,6 +99,7 @@ impl MorseProfile {
     pub const fn with_unilateral_tap(self, b: Option<bool>) -> Self {
         let bits = match b {
             Some(true) => UNI_TAP_MASK,
+            Some(false) if self.0 & UNI_TAP_MASK == UNI_TAP_LOW_BIT => UNI_TAP_LOW_BIT,
             Some(false) => UNI_TAP_HIGH_BIT,
             // Preserve the distinct opposite-hand policy when clearing only
             // unilateral tap; otherwise retain the historical clear behavior.
@@ -112,12 +113,12 @@ impl MorseProfile {
     /// hand (or a bilateral key) activates its hold action.
     ///
     /// `Some(true)` is mutually exclusive with `unilateral_tap = Some(true)`.
-    /// `Some(false)` is the shared explicit-false code and lets a named profile
-    /// override an enabled default profile without widening the packed wire.
+    /// Selecting either hand policy explicitly disables the other, including
+    /// inheritance from the default profile. Only the empty code inherits both.
     pub fn opposite_hand_hold(self) -> Option<bool> {
         match (self.0 & UNI_TAP_MASK) >> 15 {
             1 => Some(true),
-            2 => Some(false),
+            2 | 3 => Some(false),
             _ => None,
         }
     }
@@ -125,6 +126,7 @@ impl MorseProfile {
     pub const fn with_opposite_hand_hold(self, b: Option<bool>) -> Self {
         let bits = match b {
             Some(true) => UNI_TAP_LOW_BIT,
+            Some(false) if self.0 & UNI_TAP_MASK == UNI_TAP_MASK => UNI_TAP_MASK,
             Some(false) => UNI_TAP_HIGH_BIT,
             // Preserve unilateral tap when this field is absent.
             None if self.0 & UNI_TAP_MASK == UNI_TAP_MASK => UNI_TAP_MASK,
@@ -859,7 +861,7 @@ mod tests {
         let enabled = base.with_opposite_hand_hold(Some(true));
         assert_eq!(u64::from(enabled) & UNI_TAP_MASK, UNI_TAP_LOW_BIT);
         assert_eq!(enabled.opposite_hand_hold(), Some(true));
-        assert_eq!(enabled.unilateral_tap(), None);
+        assert_eq!(enabled.unilateral_tap(), Some(false));
         assert_eq!(core::mem::size_of::<MorseProfile>(), 8);
         assert_eq!(MorseProfile::POSTCARD_MAX_SIZE, u64::POSTCARD_MAX_SIZE);
 
@@ -869,7 +871,7 @@ mod tests {
 
         let unilateral = base.with_unilateral_tap(Some(true));
         assert_eq!(unilateral.unilateral_tap(), Some(true));
-        assert_eq!(unilateral.opposite_hand_hold(), None);
+        assert_eq!(unilateral.opposite_hand_hold(), Some(false));
         assert_eq!(unilateral.with_opposite_hand_hold(None), unilateral);
         assert_eq!(enabled.with_unilateral_tap(None), enabled);
     }
