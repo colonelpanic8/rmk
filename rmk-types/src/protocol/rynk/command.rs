@@ -7,10 +7,6 @@
 //! - `0x8000..=0xFFFF` (Bit 15 = 1): Topics (Server -> Host push).
 //!
 
-#[cfg(feature = "lighting")]
-use super::{
-    LightingExtendedRuntimeConditionalScenesPageResult, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
-};
 #[cfg(not(feature = "host"))]
 use postcard::experimental::max_size::MaxSize;
 use serde::Serialize;
@@ -23,6 +19,10 @@ use super::{
     GetMorseBulkResponse, KeyPosition, LayerState, LayoutChunk, LockStatus, MacroData, MatrixState, ProtocolVersion,
     RynkError, SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest,
     SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, StorageResetMode,
+};
+#[cfg(feature = "lighting")]
+use super::{
+    LightingExtendedRuntimeConditionalScenesPageResult, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -508,16 +508,22 @@ endpoints! {
     #[cfg(feature = "lighting")]
     SetLightingExtensionLayers = 0x092F: SetLightingExtensionLayersRequest => LightingStateResult;
     /// Original connection/effects conditional endpoint.
+    #[cfg(feature = "lighting")]
     GetLightingExtendedRuntimeConditionalSceneStatus = 0x0930: () => LightingRuntimeConditionalSceneStatusResult;
     /// Original connection/effects conditional endpoint.
+    #[cfg(feature = "lighting")]
     GetLightingExtendedRuntimeConditionalScenes = 0x0931: LightingRuntimeConditionalScenePageRequest => LightingExtendedRuntimeConditionalScenesPageResult;
     /// Original connection/effects conditional endpoint.
+    #[cfg(feature = "lighting")]
     BeginLightingExtendedRuntimeConditionalSceneReplace = 0x0932: BeginLightingRuntimeConditionalSceneReplaceRequest => LightingRuntimeConditionalSceneTransactionResult;
     /// Original connection/effects conditional endpoint.
+    #[cfg(feature = "lighting")]
     PutLightingExtendedRuntimeConditionalSceneChunk = 0x0933: PutLightingExtendedRuntimeConditionalSceneChunkRequest => LightingUnitResult;
     /// Original connection/effects conditional endpoint.
+    #[cfg(feature = "lighting")]
     CommitLightingExtendedRuntimeConditionalSceneReplace = 0x0934: CommitLightingRuntimeConditionalSceneReplaceRequest => LightingStateResult;
     /// Original connection/effects conditional endpoint.
+    #[cfg(feature = "lighting")]
     AbortLightingExtendedRuntimeConditionalSceneReplace = 0x0935: AbortLightingRuntimeConditionalSceneReplaceRequest => LightingUnitResult;
     /// Discover connection-aware runtime conditional limits and occupancy.
     #[cfg(feature = "lighting")]
