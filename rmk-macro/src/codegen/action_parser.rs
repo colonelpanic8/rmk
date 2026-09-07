@@ -343,9 +343,10 @@ pub(crate) fn parse_action(key: &str) -> TokenStream2 {
 
     // Check if it's a keyboard control, light control, or special key action (case-insensitive).
     // Use strum::VariantNames to automatically get all enum variants.
+    let control_name = KEYCODE_ALIAS.get(lower.as_str()).copied().unwrap_or(&lower);
     if let Some(action) = rmk_types::action::KeyboardAction::VARIANTS
         .iter()
-        .find(|&&a| a.to_lowercase() == lower)
+        .find(|&&a| a.eq_ignore_ascii_case(control_name))
     {
         let action_ident = format_ident!("{}", action);
         return quote! {

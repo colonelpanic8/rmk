@@ -22,4 +22,6 @@ pub enum KeyboardAction {
     ComboOff,
     ComboToggle,
     CapsWordToggle,
+    /// Toggle Control/GUI swapping on both sides after the current chord ends.
+    CtrlGuiSwapToggle,
 }

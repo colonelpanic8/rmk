@@ -77,6 +77,7 @@ pub(crate) fn to_via_keycode(key_action: KeyAction) -> u16 {
                 KeyboardAction::ComboOff => 0x7c51,
                 KeyboardAction::ComboToggle => 0x7c52,
                 KeyboardAction::CapsWordToggle => 0x7c73,
+                KeyboardAction::CtrlGuiSwapToggle => 0x701d,
                 _ => {
                     warn!("KeyboardAction: {:?} vial is not supported yet", c);
                     0
@@ -214,6 +215,7 @@ pub(crate) fn from_via_keycode(via_keycode: u16) -> KeyAction {
             let index = (via_keycode & 0xFF) as u8;
             KeyAction::Morse(index)
         }
+        0x701D => KeyAction::Single(Action::KeyboardControl(KeyboardAction::CtrlGuiSwapToggle)),
         0x7000..=0x701F => {
             // TODO: QMK functions, such as swap ctrl/caps, gui on, haptic, music, clicky, combo, RGB, etc
             warn!("QMK functions {:#X} not supported", via_keycode);
@@ -300,6 +302,13 @@ mod test {
     use rmk_types::keycode::HidKeyCode;
 
     use super::*;
+
+    #[test]
+    fn ctrl_gui_swap_vial_round_trip() {
+        let action = KeyAction::Single(Action::KeyboardControl(KeyboardAction::CtrlGuiSwapToggle));
+        assert_eq!(from_via_keycode(0x701d), action);
+        assert_eq!(to_via_keycode(action), 0x701d);
+    }
 
     #[test]
     fn test_convert_via_keycode_to_key_action() {
