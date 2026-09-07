@@ -1011,7 +1011,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
             total = page.total;
         }
         FLASH_CHANNEL
-            .send(FlashOperationMessage::LightingSceneTable {
+            .send(FlashOperationMessage::LightingSceneCommit {
                 len: offset,
                 policy: policy_to_wire(state.scene_policy),
             })
@@ -1059,7 +1059,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
             total = page.total;
         }
         FLASH_CHANNEL
-            .send(FlashOperationMessage::LightingRuntimeConditionalSceneTable { len: offset })
+            .send(FlashOperationMessage::LightingRuntimeConditionalSceneCommit { len: offset })
             .await;
     }
 

@@ -2925,7 +2925,7 @@ mod tests {
             }
 
             // Every scene mutation rewrote the durable table: the last
-            // header reflects the final one-cell removal and policy change.
+            // commit reflects the final one-cell removal and policy change.
             #[cfg(feature = "storage")]
             {
                 use crate::storage::FlashOperationMessage;
@@ -2935,10 +2935,10 @@ mod tests {
                     .iter()
                     .rev()
                     .find_map(|message| match message {
-                        FlashOperationMessage::LightingSceneTable { len, policy } => Some((*len, *policy)),
+                        FlashOperationMessage::LightingSceneCommit { len, policy } => Some((*len, *policy)),
                         _ => None,
                     })
-                    .expect("scene mutations persist a table header");
+                    .expect("scene mutations persist a commit");
                 assert_eq!(last_table, (0, LightingLayerPolicy::EffectiveOnly));
                 assert!(persisted.iter().any(|message| matches!(
                     message,
@@ -2946,7 +2946,7 @@ mod tests {
                 )));
                 assert!(persisted.iter().any(|message| matches!(
                     message,
-                    FlashOperationMessage::LightingRuntimeConditionalSceneTable { len: 1 }
+                    FlashOperationMessage::LightingRuntimeConditionalSceneCommit { len: 1 }
                 )));
             }
         });
