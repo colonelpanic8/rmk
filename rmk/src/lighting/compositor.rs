@@ -1,6 +1,7 @@
 use rmk_types::action::LightAction;
 
 use super::effect::EffectSample;
+use super::source::OutputMode;
 use super::topology::LedSlot;
 
 /// One source contribution. Transparent samples may carry a deadline because
@@ -11,11 +12,21 @@ pub enum Contribution<C> {
     Opaque(EffectSample<C>),
 }
 
+/// Engine-owned state that no source can read from the context: the output
+/// policy and whether the extension band is rendering. `None` where the engine
+/// cannot answer, which leaves a rule gated on that predicate unsatisfiable.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct RenderPolicy {
+    pub output_mode: Option<OutputMode>,
+    pub effects_enabled: Option<bool>,
+}
+
 /// Inputs common to all sources in one render transaction.
 #[derive(Copy, Clone, Debug)]
 pub struct RenderInput<'a, Context> {
     pub now_ms: u64,
     pub context: &'a Context,
+    pub policy: RenderPolicy,
 }
 
 /// Allocation-free pull interface for sparse or dense sources.
@@ -232,6 +243,7 @@ impl<C: Copy + Eq, const N: usize> Compositor<C, N> {
         &'a self,
         now_ms: u64,
         context: &'context Context,
+        policy: RenderPolicy,
         fill: C,
         frame: &'a mut LogicalFrame<C, N>,
     ) -> RenderTransaction<'a, 'context, C, Context, N> {
@@ -240,7 +252,11 @@ impl<C: Copy + Eq, const N: usize> Compositor<C, N> {
             compositor: self,
             frame,
             deadlines: [None; N],
-            input: RenderInput { now_ms, context },
+            input: RenderInput {
+                now_ms,
+                context,
+                policy,
+            },
             last_priority: None,
         }
     }
@@ -392,7 +408,7 @@ mod tests {
             },
         )]);
         let mut high = Source([opaque(0, Rgb8::new(0, 1, 0), None)]);
-        let mut tx = compositor.begin(0, &context, Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(0, &context, RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         tx.apply(1, &mut low).unwrap();
         tx.apply(1, &mut transparent).unwrap();
         tx.apply(2, &mut high).unwrap();
@@ -410,7 +426,7 @@ mod tests {
         let mut frame = LogicalFrame::new(Rgb8::BLACK);
         let mut good = Source([opaque(0, Rgb8::new(3, 0, 0), None)]);
         let mut bad = Source([opaque(0, Rgb8::new(9, 0, 0), None), opaque(2, Rgb8::new(8, 0, 0), None)]);
-        let mut tx = compositor.begin(0, &(), Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(0, &(), RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         assert!(matches!(tx.apply(5, &mut bad), Err(RenderError::SlotOutOfRange { .. })));
         tx.apply(4, &mut good).unwrap();
         assert_eq!(tx.finish().next_wake_ms, None);
@@ -423,12 +439,12 @@ mod tests {
         let mut frame = LogicalFrame::new(Rgb8::BLACK);
         let mut source = Source([opaque(0, Rgb8::new(1, 2, 3), None)]);
         for _ in 0..2 {
-            let mut tx = compositor.begin(0, &(), Rgb8::BLACK, &mut frame);
+            let mut tx = compositor.begin(0, &(), RenderPolicy::default(), Rgb8::BLACK, &mut frame);
             tx.apply(0, &mut source).unwrap();
             assert!(tx.finish().changed);
         }
         compositor.commit(&frame);
-        let mut tx = compositor.begin(0, &(), Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(0, &(), RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         tx.apply(0, &mut source).unwrap();
         assert!(!tx.finish().changed);
     }

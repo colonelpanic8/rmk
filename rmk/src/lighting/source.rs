@@ -223,13 +223,14 @@ pub struct ConditionSet {
     pub layer: Option<LayerCondition>,
     pub battery: Option<BatteryCondition>,
     pub connection: Option<ConnectionCondition>,
-    /// Satisfied when the live output-mode policy equals this. Sources that
-    /// cannot observe the policy treat it as unsatisfiable rather than true,
-    /// so a rule gated on it never fires where it cannot be evaluated.
+    /// Satisfied when the live output-mode policy equals this. The engine
+    /// hands the policy to every source through the render input; where it
+    /// is absent the rule is unsatisfiable rather than true, so it never
+    /// fires where it cannot be evaluated.
     pub output_mode: Option<OutputMode>,
-    /// Satisfied when the extension band's enabled state matches. Sources
-    /// without a view of the extension treat it as unsatisfiable, on the same
-    /// grounds as `output_mode`.
+    /// Satisfied when the extension band's enabled state matches. Absent
+    /// (an extension with no state) it is unsatisfiable, on the same grounds
+    /// as `output_mode`.
     pub effects: Option<EffectsCondition>,
 }
 
@@ -406,16 +407,19 @@ impl<'a, E, Batteries: ?Sized> ConditionalScenes<'a, E, Batteries> {
         self.cells.len()
     }
 
-    fn cell_at<Context>(&self, context: &Context, mut wanted: usize) -> &ConditionalSceneCell<E>
+    fn cell_at<Context>(&self, input: &RenderInput<'_, Context>, mut wanted: usize) -> &ConditionalSceneCell<E>
     where
         Context: LightingContextProvider,
         Batteries: BatteryStatusProvider,
     {
-        for cell in self
-            .cells
-            .iter()
-            .filter(|cell| cell.conditions.matches(context, self.batteries, None, None))
-        {
+        for cell in self.cells.iter().filter(|cell| {
+            cell.conditions.matches(
+                input.context,
+                self.batteries,
+                input.policy.output_mode,
+                input.policy.effects_enabled,
+            )
+        }) {
             if wanted == 0 {
                 return cell;
             }
@@ -434,16 +438,23 @@ where
     fn len(&self, input: &RenderInput<'_, Context>) -> usize {
         self.cells
             .iter()
-            .filter(|cell| cell.conditions.matches(input.context, self.batteries, None, None))
+            .filter(|cell| {
+                cell.conditions.matches(
+                    input.context,
+                    self.batteries,
+                    input.policy.output_mode,
+                    input.policy.effects_enabled,
+                )
+            })
             .count()
     }
 
     fn slot(&self, index: usize, input: &RenderInput<'_, Context>) -> LedSlot {
-        self.cell_at(input.context, index).slot
+        self.cell_at(input, index).slot
     }
 
     fn contribution(&mut self, index: usize, input: &RenderInput<'_, Context>) -> Contribution<C> {
-        Contribution::Opaque(self.cell_at(input.context, index).effect.sample(input.now_ms))
+        Contribution::Opaque(self.cell_at(input, index).effect.sample(input.now_ms))
     }
 }
 
@@ -722,6 +733,7 @@ mod tests {
     use rmk_types::ble::{BleState, BleStatus};
     use rmk_types::connection::{ConnectionStatus, ConnectionType, UsbState};
 
+    use super::super::compositor::RenderPolicy;
     use super::super::{BuiltinEffect, Compositor, LayerState, LogicalFrame, Rgb8};
     use super::*;
     use crate::types::battery::{BatteryStatus, ChargeState};
@@ -930,7 +942,7 @@ mod tests {
         };
         let compositor = Compositor::<Rgb8, 2>::new(Rgb8::BLACK);
         let mut frame = LogicalFrame::new(Rgb8::BLACK);
-        let mut tx = compositor.begin(0, &context, Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(0, &context, RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         tx.apply(10, &mut source).unwrap();
         tx.finish();
         assert_eq!(frame.as_slice(), &[BLUE, GREEN]);
@@ -982,10 +994,10 @@ mod tests {
 
         let compositor = Compositor::<Rgb8, 2>::new(Rgb8::BLACK);
         let mut frame = LogicalFrame::new(Rgb8::BLACK);
-        let mut tx = compositor.begin(9, &(), Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(9, &(), RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         tx.apply(0, &mut overlay).unwrap();
         assert_eq!(tx.finish().next_wake_ms, Some(10));
-        let mut tx = compositor.begin(10, &(), Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(10, &(), RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         tx.apply(0, &mut overlay).unwrap();
         tx.finish();
         assert_eq!(frame.as_slice(), &[Rgb8::BLACK, GREEN]);
@@ -1069,7 +1081,7 @@ mod tests {
         };
         let compositor = Compositor::<Rgb8, 2>::new(Rgb8::BLACK);
         let mut frame = LogicalFrame::new(Rgb8::BLACK);
-        let mut tx = compositor.begin(0, &context, Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(0, &context, RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         tx.apply(0, &mut source).unwrap();
         tx.finish();
         assert_eq!(frame.as_slice(), &[RED, Rgb8::BLACK]);
@@ -1101,7 +1113,7 @@ mod tests {
         context.lighting.indicators.caps_lock = true;
         let compositor = Compositor::<Rgb8, 1>::new(Rgb8::BLACK);
         let mut frame = LogicalFrame::new(Rgb8::BLACK);
-        let mut tx = compositor.begin(0, &context, Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(0, &context, RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         tx.apply(0, &mut source).unwrap();
         tx.finish();
         assert_eq!(frame.as_slice(), &[RED]);

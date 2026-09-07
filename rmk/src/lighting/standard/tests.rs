@@ -5,7 +5,7 @@ use rmk_types::action::LightAction;
 use super::*;
 use crate::lighting::compositor::{
     Contribution, ExtensionDescriptor, ExtensionLayerState, ExtensionParamSpec, ExtensionState, LightingSource,
-    LogicalFrame, RenderInput as SourceRenderInput,
+    LogicalFrame, RenderInput as SourceRenderInput, RenderPolicy,
 };
 use crate::lighting::effect::{BuiltinEffect, LightingEffect};
 use crate::lighting::service::{Invalidation, LightingEngine, RenderInput};
@@ -1321,7 +1321,11 @@ fn scene_table_render<const CAP: usize>(
     context: &LightingContext,
     now_ms: u64,
 ) -> std::vec::Vec<(LedSlot, Rgb8)> {
-    let input = SourceRenderInput { now_ms, context };
+    let input = SourceRenderInput {
+        now_ms,
+        context,
+        policy: RenderPolicy::default(),
+    };
     let len = <SceneTable<CAP> as LightingSource<Rgb8, LightingContext>>::len(table, &input);
     let mut rendered = std::vec::Vec::with_capacity(len);
     for index in 0..len {
@@ -2271,6 +2275,89 @@ fn output_mode_conditions_select_between_runtime_rules() {
     assert_eq!(frame.as_slice()[0], GREEN);
 
     // Flipping the policy swaps which rule matches, with no edit to the table.
+    let revision = engine.state().revision;
+    engine
+        .handle_command(
+            0,
+            StandardCommand::SetOutputModeIfRevision {
+                expected_revision: revision,
+                mode: OutputMode::PoweredOnly,
+            },
+            &snapshot,
+        )
+        .unwrap();
+    render(&mut engine, &mut frame);
+    assert_eq!(frame.as_slice()[0], RED);
+}
+
+/// A compiled rule gated on the output mode is the same predicate as a
+/// runtime one, so it must see the same engine-owned policy: the board's
+/// source has no view of the mode on its own.
+#[test]
+fn compiled_output_mode_conditions_observe_the_engine_policy() {
+    use rmk_types::battery::BatteryStatus;
+
+    use crate::lighting::{ConditionalSceneCell, ConditionalScenes};
+
+    struct NoBatteries;
+    impl BatteryStatusProvider for NoBatteries {
+        fn battery_status(&self, _node: u8) -> BatteryStatus {
+            BatteryStatus::Unavailable
+        }
+    }
+    static NO_BATTERIES: NoBatteries = NoBatteries;
+    const fn rule(mode: OutputMode, color: Rgb8) -> ConditionalSceneCell<BuiltinEffect> {
+        ConditionalSceneCell {
+            conditions: ConditionSet {
+                layer: None,
+                battery: None,
+                connection: None,
+                output_mode: Some(mode),
+                effects: None,
+            },
+            slot: LedSlot(0),
+            effect: BuiltinEffect::Solid { color },
+        }
+    }
+    static COMPILED: [ConditionalSceneCell<BuiltinEffect>; 2] =
+        [rule(OutputMode::AlwaysOn, GREEN), rule(OutputMode::PoweredOnly, RED)];
+
+    type CompiledEngine =
+        StandardLightingEngine<'static, EmptySource, ConditionalScenes<'static, BuiltinEffect, NoBatteries>, 2, 2, 4>;
+    let mut engine: CompiledEngine = StandardLightingEngine::new(
+        BackgroundState::default(),
+        LayerScenes {
+            scenes: &[],
+            policy: LayerPolicy::EffectiveOnly,
+        },
+        EmptySource,
+        ConditionalScenes::new(&COMPILED, &NO_BATTERIES),
+    );
+
+    let snapshot = LightingContext {
+        layers: LayerState::new(0, 0, 1),
+        indicators: Default::default(),
+        powered: true,
+        connection: Default::default(),
+        bonded_slots: 0,
+    };
+    let mut frame = LogicalFrame::new(Rgb8::BLACK);
+    let render = |engine: &mut CompiledEngine, frame: &mut LogicalFrame<Rgb8, 2>| {
+        engine
+            .render(
+                RenderInput {
+                    now_ms: 0,
+                    snapshot: &snapshot,
+                },
+                frame,
+            )
+            .unwrap();
+    };
+
+    assert_eq!(engine.output_mode(), OutputMode::AlwaysOn);
+    render(&mut engine, &mut frame);
+    assert_eq!(frame.as_slice()[0], GREEN);
+
     let revision = engine.state().revision;
     engine
         .handle_command(

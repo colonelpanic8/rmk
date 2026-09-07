@@ -5,7 +5,7 @@ use rmk_types::action::LightAction;
 #[allow(unused_imports)]
 use super::*;
 use crate::lighting::Rgb8;
-use crate::lighting::compositor::{Compositor, LightingSource, LogicalFrame};
+use crate::lighting::compositor::{Compositor, LightingSource, LogicalFrame, RenderPolicy};
 use crate::lighting::context::{LightingContext, LightingContextProvider};
 use crate::lighting::effect::BuiltinEffect;
 use crate::lighting::output::BrightnessTransform;
@@ -1277,12 +1277,13 @@ where
             slot: indicator.slot,
             effect: indicator.effect(self.output_mode),
         });
-        // Captured before the destructuring below borrows the rest of `self`;
-        // the runtime conditional source needs them to evaluate output-mode
-        // and effects rules. A source that reports no extension state cannot
-        // answer whether effects are on, so such rules stay unsatisfiable.
-        let output_mode = self.output_mode;
-        let effects_enabled = self.extension.extension_state().map(|state| state.value != 0);
+        // Every source evaluates output-mode and effects rules against this
+        // one snapshot. An extension that reports no state cannot answer
+        // whether effects are on, so such rules stay unsatisfiable.
+        let policy = RenderPolicy {
+            output_mode: Some(self.output_mode),
+            effects_enabled: self.extension.extension_state().map(|state| state.value != 0),
+        };
         let Self {
             compositor,
             background,
@@ -1312,7 +1313,7 @@ where
             presented: _,
             rendered: _,
         } = self;
-        let mut transaction = compositor.begin(effect_now_ms, input.snapshot, Rgb8::BLACK, frame);
+        let mut transaction = compositor.begin(effect_now_ms, input.snapshot, policy, Rgb8::BLACK, frame);
         transaction.apply(priority::BACKGROUND, background)?;
         transaction.apply(priority::EXTENSION, extension)?;
         transaction.apply(priority::LAYER, layers)?;
@@ -1326,8 +1327,6 @@ where
         let mut runtime_conditional_source = RuntimeConditionalSource {
             table: runtime_conditional_scenes,
             batteries: *battery_status,
-            output_mode,
-            effects_enabled,
         };
         transaction.apply(priority::STATUS, &mut runtime_conditional_source)?;
         if wake_active && let Some(indicator_cell) = indicator_cell.as_ref() {

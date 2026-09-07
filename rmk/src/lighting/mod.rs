@@ -23,7 +23,7 @@ pub mod standard;
 pub mod topology;
 
 pub use color::Rgb8;
-pub use compositor::{Compositor, LogicalFrame, RenderError, RenderResult, RenderTransaction};
+pub use compositor::{Compositor, LogicalFrame, RenderError, RenderPolicy, RenderResult, RenderTransaction};
 pub use context::{IndicatorState, LayerState, LightingContext, LightingContextProvider};
 pub use effect::{BuiltinEffect, EffectSample, LightingEffect};
 pub use output::{

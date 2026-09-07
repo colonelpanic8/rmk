@@ -265,7 +265,7 @@ impl OutputTransform<Rgb8> for BrightnessTransform {
 
 #[cfg(test)]
 mod tests {
-    use super::super::compositor::{Compositor, Contribution, LightingSource, RenderInput};
+    use super::super::compositor::{Compositor, Contribution, LightingSource, RenderInput, RenderPolicy};
     use super::super::effect::EffectSample;
     use super::super::topology::{LedMetadata, MatrixSize, OutputCoverage, PhysicalLayout, PhysicalRoute, ZoneSpan};
     use super::*;
@@ -557,14 +557,14 @@ mod tests {
         let mut frame = LogicalFrame::new(Rgb8::BLACK);
         let mut half = BrightnessTransform::new(128);
         let mut source = AnimatedSource;
-        let mut tx = compositor.begin(0, &(), Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(0, &(), RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         tx.apply(0, &mut source).unwrap();
         let result = tx.finish_with(&mut half);
         assert_eq!(frame.as_slice(), &[Rgb8::new(128, 64, 32)]);
         assert_eq!(result.next_wake_ms, Some(25));
 
         let mut off = BrightnessTransform::OFF;
-        let mut tx = compositor.begin(0, &(), Rgb8::BLACK, &mut frame);
+        let mut tx = compositor.begin(0, &(), RenderPolicy::default(), Rgb8::BLACK, &mut frame);
         tx.apply(0, &mut source).unwrap();
         let result = tx.finish_with(&mut off);
         assert_eq!(frame.as_slice(), &[Rgb8::BLACK]);
