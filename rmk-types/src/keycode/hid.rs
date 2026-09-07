@@ -336,12 +336,6 @@ pub enum HidKeyCode {
     Assistant = 0x00C0,
     MissionControl = 0x00C1,
     Launchpad = 0x00C2,
-    /// Brightness Minimum
-    BrightnessMinimum = 0x00C3,
-    /// Brightness Maximum
-    BrightnessMaximum = 0x00C4,
-    /// Auto Brightness
-    BrightnessAuto = 0x00C5,
     /// Mouse Up
     MouseUp = 0x00CD,
     /// Mouse Down
@@ -386,6 +380,12 @@ pub enum HidKeyCode {
     RAlt = 0x00E6,
     /// Right GUI
     RGui = 0x00E7,
+    /// Brightness Minimum
+    BrightnessMinimum = 0x00C3,
+    /// Brightness Maximum
+    BrightnessMaximum = 0x00C4,
+    /// Auto Brightness
+    BrightnessAuto = 0x00C5,
 }
 
 impl HidKeyCode {

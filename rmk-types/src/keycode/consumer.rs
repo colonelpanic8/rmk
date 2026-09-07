@@ -20,9 +20,6 @@ pub enum ConsumerKey {
     /// <https://www.usb.org/sites/default/files/hutrr41_0.pdf>
     BrightnessUp,
     BrightnessDown,
-    BrightnessMinimum,
-    BrightnessMaximum,
-    BrightnessAuto,
     // 15.7 Transport Controls
     Play,
     Pause,
@@ -75,6 +72,9 @@ pub enum ConsumerKey {
     NextKeyboardLayoutSelect,
     DesktopShowAllWindows,
     AcSoftKeyLeft,
+    BrightnessMinimum,
+    BrightnessMaximum,
+    BrightnessAuto,
 }
 
 impl From<u16> for ConsumerKey {
