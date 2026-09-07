@@ -445,6 +445,20 @@ impl<'a> Keyboard<'a> {
         keymap.morse_default_profile().retro_tap().unwrap_or(false)
     }
 
+    /// The idle window that resolves a morse key as a tap during a key streak. A profile may
+    /// override the global `[behavior.morse] prior_idle_time`, so home row mods and thumb keys
+    /// can run different flow-tap windows.
+    pub fn prior_idle_time(keymap: &KeyMap, key_action: &KeyAction) -> Duration {
+        let per_key = match key_action {
+            KeyAction::TapHold(_, _, idx) => keymap.morse_profile(*idx).prior_idle_time_ms(),
+            KeyAction::Morse(idx) => keymap
+                .get_morse(*idx as usize)
+                .and_then(|m| m.profile.prior_idle_time_ms()),
+            _ => None,
+        };
+        per_key
+            .map(|t| Duration::from_millis(t as u64))
+            .unwrap_or_else(|| keymap.morse_prior_idle_time())
     pub fn is_flow_tap_enabled(keymap: &KeyMap, key_action: &KeyAction) -> bool {
         let per_key = match key_action {
             KeyAction::TapHold(_, _, idx) => keymap.morse_profile(*idx).enable_flow_tap(),
