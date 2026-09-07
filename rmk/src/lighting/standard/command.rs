@@ -206,7 +206,9 @@ pub struct StandardState {
 ///
 /// Recorded at render time and promoted when the output acknowledges the
 /// write, so it describes what the LEDs show rather than what the engine now
-/// holds. On a split renderer replica the context is the *replicated* one, so
+/// holds. While a released wake layer lingers this is the linger-adjusted
+/// context the sources rendered from, not the snapshot the engine was handed.
+/// On a split renderer replica the context is the *replicated* one, so
 /// comparing it against the authority's is how a stale replica becomes
 /// visible instead of merely suspected.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

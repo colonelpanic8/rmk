@@ -1316,7 +1316,7 @@ where
         }
         self.rendered = PresentedFrame {
             revision: self.revision,
-            context: *context,
+            context: *snapshot.lighting_context(),
         };
         let indicator_cell = self.controls.output_mode_indicator.map(|indicator| SceneCell {
             slot: indicator.slot,

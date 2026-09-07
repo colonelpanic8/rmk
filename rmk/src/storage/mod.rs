@@ -1,6 +1,4 @@
 use core::fmt::Debug;
-#[cfg(all(feature = "lighting", feature = "rynk"))]
-use rmk_types::protocol::rynk::{LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE, LightingExtendedConditionalSceneCell};
 
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_sync::signal::Signal;
@@ -16,6 +14,8 @@ use rmk_types::protocol::rynk::{
     LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_SCENE_CHUNK_SIZE, LightingAdvancedConditionalSceneCell,
     LightingConditionalSceneCell, LightingLayerPolicy, LightingSceneCell,
 };
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+use rmk_types::protocol::rynk::{LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE, LightingExtendedConditionalSceneCell};
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
