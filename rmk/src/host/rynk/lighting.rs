@@ -298,6 +298,7 @@ impl<'a> RynkLightingController<'a> {
                 output_toggle_user_action: None,
                 output_mode_cycle_user_action: None,
                 wake_layers: 0,
+                wake_linger_ms: 0,
                 initial_output_mode: crate::lighting::OutputMode::AlwaysOn,
                 powered_only_scope: crate::lighting::PoweredOnlyScope::Authority,
                 output_mode_indicator: None,

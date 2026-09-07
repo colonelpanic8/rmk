@@ -1258,6 +1258,9 @@ impl MaxSize for LightingFramePage {
 /// Canonical digest schema implemented by the first lighting replica
 /// attestation protocol.
 pub const LIGHTING_REPLICA_DIGEST_SCHEMA_V1: u8 = 1;
+/// Digest schema for replicas whose conditional cells also carry the layers
+/// and indicator predicates.
+pub const LIGHTING_REPLICA_DIGEST_SCHEMA_V2: u8 = 2;
 
 wire_type! {
     /// FNV-1a-32 digests of the durable right-half projection at `revision`.

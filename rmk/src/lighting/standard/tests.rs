@@ -571,6 +571,7 @@ fn output_mode_cycles_and_wake_layer_temporarily_overrides_policy() {
         output_toggle_user_action: None,
         output_mode_cycle_user_action: Some(13),
         wake_layers: 1 << 2,
+        wake_linger_ms: 0,
         initial_output_mode: OutputMode::PoweredOnly,
         powered_only_scope: super::super::source::PoweredOnlyScope::Local,
         output_mode_indicator: Some(super::super::source::OutputModeIndicator {
@@ -2217,6 +2218,68 @@ fn wake_layers_accept_any_layer_set_and_are_settable() {
         .unwrap();
     assert!(lit(&mut engine, 3));
     assert!(!lit(&mut engine, 2), "the old mask no longer wakes");
+}
+
+/// A tapped status layer is gone before anyone can read it. With a linger,
+/// releasing the wake layer keeps lighting awake and keeps that layer's
+/// scene rendering until the deadline, which the render outcome reports so
+/// the driver re-renders the moment it expires.
+#[test]
+fn a_released_wake_layer_lingers_for_the_configured_time() {
+    type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4>;
+    let mut engine: SceneEngine = StandardLightingEngine::new(
+        BackgroundState::default(),
+        LayerScenes {
+            scenes: &[],
+            policy: LayerPolicy::EffectiveOnly,
+        },
+        EmptySource,
+        EmptySource,
+    )
+    .with_controls(LightingControls {
+        initial_output_mode: OutputMode::AlwaysOff,
+        wake_layers: 1 << 2,
+        wake_linger_ms: 1_000,
+        ..LightingControls::default()
+    });
+    engine
+        .install_scene_cell(SceneTableCell {
+            layer: 2,
+            slot: LedSlot(0),
+            effect: BuiltinEffect::Solid { color: GREEN },
+        })
+        .unwrap();
+
+    let mut frame = LogicalFrame::new(Rgb8::BLACK);
+    let mut render = |engine: &mut SceneEngine, now_ms: u64, layer: u8| {
+        let snapshot = context(layer);
+        let outcome = engine
+            .render(
+                RenderInput {
+                    now_ms,
+                    snapshot: &snapshot,
+                },
+                &mut frame,
+            )
+            .unwrap();
+        (frame.as_slice()[0], outcome.next_wake_in_ms.map(|delay| delay.get()))
+    };
+
+    assert_eq!(render(&mut engine, 0, 2), (GREEN, None));
+    assert!(engine.state().wake_active);
+
+    // Released at 10 ms: still awake, still showing layer 2, due back at 1010.
+    assert_eq!(render(&mut engine, 10, 0), (GREEN, Some(1_000)));
+    assert!(engine.state().wake_active);
+    assert_eq!(render(&mut engine, 500, 0), (GREEN, Some(510)));
+
+    // Holding it again mid-linger is just an active layer; the release after
+    // that starts a fresh linger.
+    assert_eq!(render(&mut engine, 600, 2), (GREEN, None));
+    assert_eq!(render(&mut engine, 700, 0), (GREEN, Some(1_000)));
+
+    assert_eq!(render(&mut engine, 1_700, 0), (Rgb8::BLACK, None));
+    assert!(!engine.state().wake_active);
 }
 
 /// The point of the output-mode condition: the mode indicator stops being

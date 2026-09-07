@@ -618,6 +618,10 @@ pub(crate) struct LightingControlsTomlConfig {
     /// Layers that wake lighting while held. A list, since any set of layers
     /// may wake it; the host can replace the resolved mask at runtime.
     pub wake_layers: Option<Vec<u8>>,
+    /// How long lighting stays awake, still showing the released layer's
+    /// lighting, after the last wake layer releases. Zero (the default) means
+    /// it stops with the release.
+    pub wake_linger_ms: Option<u32>,
     #[serde(default)]
     pub initial_output_mode: LightingOutputModeToml,
     #[serde(default)]
