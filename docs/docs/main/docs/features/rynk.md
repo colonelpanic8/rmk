@@ -74,16 +74,16 @@ restarts. See [Storage](./storage).
 
 Rynk works over the connection you already use:
 
-- **USB** — plug the keyboard in. RMK exposes Rynk on its own vendor interface
-  (class `0xFF`, subclass and protocol `0x52`), so host tools find RMK keyboards
-  by that interface instead of asking you to pick a port.
+- **USB** — plug the keyboard in. RMK exposes Rynk on its own HID interface
+  (usage page `0xFF14`, usage `0x61`). Native tools use the platform HID driver
+  and discover that interface independently of the keyboard's VID/PID.
+  On Linux, the user needs access to the corresponding `/dev/hidraw*` device.
 - **Bluetooth** — native tools connect to an already-connected keyboard (the OS
   must have it bonded and currently connected).
 - **Dongle** — a [dongle](./dongle) relays Rynk to the keyboard behind it, so
   the host tool talks to the dongle as if it were the keyboard.
-- **Browser** — Chromium browsers (Chrome or Edge) reach a Bluetooth keyboard
-  through WebHID. Browser USB is not available yet: nothing implements a WebUSB
-  link to the vendor interface. Firefox and Safari are not supported.
+- **Browser** — Chromium browsers (Chrome or Edge) reach USB and Bluetooth
+  keyboards through WebHID. Firefox and Safari are not supported.
 
 Rynk tooling is still young. Today you have two options:
 

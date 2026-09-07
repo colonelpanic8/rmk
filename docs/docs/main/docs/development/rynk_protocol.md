@@ -7,7 +7,7 @@
 
 Current protocol version: **0.1**.
 
-Every transport (USB vendor bulk, BLE GATT, BLE HID) carries the same frame — a 3-byte header plus a [postcard](https://docs.rs/postcard)-encoded payload:
+Every transport (USB HID, BLE GATT, BLE HID) carries the same frame — a 3-byte header plus a [postcard](https://docs.rs/postcard)-encoded payload:
 
 ```text
 ┌──────────────┬───────────┐
@@ -31,7 +31,7 @@ The same COBS-framed byte stream runs over every transport; only how a host find
 
 | Transport       | How the host reaches it                                                                                                                                                                                                                                                                                                                                                            |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| USB vendor bulk | A vendor-specific interface with class/subclass/protocol `0xFF`/`0x52`/`0x52` and one bulk IN + one bulk OUT endpoint. Hosts discover keyboards by that interface triple, not by VID/PID. An MS OS 2.0 descriptor binds it to WinUSB, so Windows needs no driver. The firmware also prefixes its USB serial number with `rynk:` as an informational marker.                        |
+| USB HID | A vendor HID application collection with usage page `0xFF14` and usage `0x61`. Unnumbered input/output reports carry 32 bytes, with zero padding after a complete COBS frame. Native hosts use the platform HID driver; Chromium uses WebHID. |
 | BLE GATT        | Service `10900067-537f-4f0a-9b55-929e271f61ab` with two characteristics: the host writes request bytes to `output_data` (`19802524-6f90-4346-93c2-63dbc509ab55`) and subscribes to notifications on `input_data` (`80f9319b-0c74-43a5-9738-c59d6dda3db9`). Both require an encrypted link. A single write or notification carries at most 244 bytes; a longer frame spans several. |
 | BLE HID         | A vendor HID report (usage page `0xFF14`, usage `0x61`) alongside the keyboard's HID-over-GATT service, so a bonded keyboard is reachable through the OS HID stack (for example WebHID) without a second pairing. Each report is exactly 32 bytes: the host splits a frame across reports and zero-pads the last one, and the receiver treats padding as empty COBS frames.        |
 
