@@ -28,9 +28,9 @@ use rynk::rmk_types::protocol::rynk::{
     BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig, BuildInfo,
     ClearLightingOverlayRequest, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
-    DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, LayerState, LightingCapabilities,
-    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
-    LightingConditionalScenesPage, LightingAdvancedRuntimeConditionalScenesPage, LightingExtension,
+    DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, LayerState,
+    LightingAdvancedRuntimeConditionalScenesPage, LightingCapabilities, LightingCompiledSceneStatus,
+    LightingCompiledScenesPage, LightingConditionalSceneStatus, LightingConditionalScenesPage, LightingExtension,
     LightingExtensionLayers, LightingExtensionNamesPage, LightingExtensionNamesRequest, LightingExtensionParamsPage,
     LightingExtensionParamsRequest, LightingKeysPage, LightingLedsPage, LightingOutputModeState, LightingOutputsPage,
     LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest,
@@ -45,6 +45,9 @@ use rynk::rmk_types::protocol::rynk::{
     SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest, SetMorseBulkRequest,
     SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
     UnsetLightingSceneCellRequest,
+};
+use rynk::rmk_types::protocol::rynk::{
+    LightingExtendedRuntimeConditionalScenesPage, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
