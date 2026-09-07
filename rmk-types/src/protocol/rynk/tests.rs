@@ -1529,6 +1529,15 @@ fn lighting_wire_frames_locked() {
             usb_connected: Some(true),
         }),
         effects: Some(LightingEffectsCondition { enabled: true }),
+        layers: Some(LightingLayersCondition {
+            active: 1 << 2 | 1 << 5,
+            inactive: 1 << 3,
+        }),
+        indicators: Some(LightingIndicatorCondition {
+            num_lock: Some(true),
+            caps_lock: None,
+            scroll_lock: Some(false),
+        }),
     };
     let extended_runtime_conditional_page = LightingExtendedRuntimeConditionalScenesPage {
         revision: state.revision,

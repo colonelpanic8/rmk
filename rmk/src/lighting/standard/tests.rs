@@ -10,8 +10,8 @@ use crate::lighting::compositor::{
 use crate::lighting::effect::{BuiltinEffect, LightingEffect};
 use crate::lighting::service::{Invalidation, LightingEngine, RenderInput};
 use crate::lighting::source::{
-    BatteryStatusProvider, ConditionSet, EffectsCondition, LayerScenes, LightingControls, OutputMode, OverlayError,
-    PoweredOnlyScope, SparseScene,
+    BatteryStatusProvider, ConditionSet, EffectsCondition, IndicatorCondition, LayerScenes, LayersCondition,
+    LightingControls, OutputMode, OverlayError, PoweredOnlyScope, SparseScene,
 };
 use crate::lighting::topology::LedSlot;
 use crate::lighting::{LayerPolicy, LayerScene, LayerState, LightingContext, Rgb8, SceneCell};
@@ -1805,6 +1805,8 @@ fn runtime_conditional_replace_preserves_order_and_output_mode_is_revision_check
                 connection: None,
                 output_mode: None,
                 effects: None,
+                layers: None,
+                indicators: None,
             },
             slot: LedSlot(1),
             effect: BuiltinEffect::Solid { color: RED },
@@ -1818,6 +1820,8 @@ fn runtime_conditional_replace_preserves_order_and_output_mode_is_revision_check
                 connection: None,
                 output_mode: None,
                 effects: None,
+                layers: None,
+                indicators: None,
             },
             slot: LedSlot(1),
             effect: BuiltinEffect::Solid { color: GREEN },
@@ -2087,6 +2091,8 @@ fn conditional_rules_share_styles_without_losing_order_or_conditions() {
                 connection: None,
                 output_mode: Some(OutputMode::AlwaysOn),
                 effects: None,
+                layers: None,
+                indicators: None,
             },
             slot: LedSlot(3),
             effect,
@@ -2098,6 +2104,8 @@ fn conditional_rules_share_styles_without_losing_order_or_conditions() {
                 connection: None,
                 output_mode: Some(OutputMode::PoweredOnly),
                 effects: None,
+                layers: None,
+                indicators: None,
             },
             slot: LedSlot(3),
             effect,
@@ -2230,6 +2238,8 @@ fn output_mode_conditions_select_between_runtime_rules() {
             connection: None,
             output_mode: Some(mode),
             effects: None,
+            layers: None,
+            indicators: None,
         },
         slot: LedSlot(0),
         effect: BuiltinEffect::Solid { color },
@@ -2317,6 +2327,8 @@ fn compiled_output_mode_conditions_observe_the_engine_policy() {
                 connection: None,
                 output_mode: Some(mode),
                 effects: None,
+            layers: None,
+            indicators: None,
             },
             slot: LedSlot(0),
             effect: BuiltinEffect::Solid { color },
@@ -2377,6 +2389,79 @@ fn compiled_output_mode_conditions_observe_the_engine_policy() {
     assert_eq!(frame.as_slice()[0], RED);
 }
 
+/// A status layer wants to show which other layers are held while it is:
+/// one rule watching two layers at once, plus a lock indicator the host
+/// reports. Both read the context directly, so no source has to answer.
+#[test]
+fn layer_mask_and_indicator_rules_read_the_context() {
+    let rule = |conditions: ConditionSet, slot: u16, color: Rgb8| RuntimeConditionalSceneCell {
+        conditions,
+        slot: LedSlot(slot),
+        effect: BuiltinEffect::Solid { color },
+    };
+    let both_layers = ConditionSet {
+        layers: Some(LayersCondition {
+            active: 0b101,
+            inactive: 0b010,
+        }),
+        ..ConditionSet::default()
+    };
+    let caps = ConditionSet {
+        indicators: Some(IndicatorCondition {
+            caps_lock: Some(true),
+            ..IndicatorCondition::default()
+        }),
+        ..ConditionSet::default()
+    };
+
+    type ConditionalEngine = StandardLightingEngine<'static, ReplicaExtension, EmptySource, 2, 2, 4>;
+    let mut engine: ConditionalEngine = StandardLightingEngine::new(
+        BackgroundState::default(),
+        LayerScenes {
+            scenes: &[],
+            policy: LayerPolicy::EffectiveOnly,
+        },
+        ReplicaExtension {
+            state: ExtensionState {
+                effect: 0,
+                palette: 0,
+                value: 0,
+                speed: 0,
+            },
+            overlay: None,
+            accept: true,
+            params: [0, 0],
+        },
+        EmptySource,
+    );
+    for cell in [rule(both_layers, 0, GREEN), rule(caps, 1, RED)] {
+        engine.install_runtime_conditional_scene_cell(cell).unwrap();
+    }
+
+    let mut snapshot = LightingContext {
+        layers: LayerState::new(0, 0, 0b001),
+        ..LightingContext::default()
+    };
+    let mut frame = LogicalFrame::new(Rgb8::BLACK);
+    let mut render = |engine: &mut ConditionalEngine, snapshot: &LightingContext| {
+        engine.render(RenderInput { now_ms: 0, snapshot }, &mut frame).unwrap();
+        [frame.as_slice()[0], frame.as_slice()[1]]
+    };
+
+    let idle = render(&mut engine, &snapshot);
+    assert!(!idle.contains(&GREEN) && !idle.contains(&RED));
+
+    snapshot.layers = LayerState::new(2, 0, 0b101);
+    snapshot.indicators.caps_lock = true;
+    assert_eq!(render(&mut engine, &snapshot), [GREEN, RED]);
+
+    // An excluded layer joining the set breaks the mask even though every
+    // required layer is still active.
+    snapshot.layers = LayerState::new(2, 0, 0b111);
+    snapshot.indicators.caps_lock = false;
+    assert_eq!(render(&mut engine, &snapshot), idle);
+}
+
 /// The effects condition exists so a key can report whether the extension band
 /// is rendering — the state `RgbTog` flips. Zeroing the extension's value is
 /// what "off" means, so the two rules trade places with no edit to the table.
@@ -2389,6 +2474,8 @@ fn effects_conditions_follow_the_extension_value() {
             connection: None,
             output_mode: None,
             effects: Some(EffectsCondition { enabled }),
+            layers: None,
+            indicators: None,
         },
         slot: LedSlot(0),
         effect: BuiltinEffect::Solid { color },
@@ -2485,6 +2572,8 @@ fn runtime_conditional_cells_outrank_layer_scenes_and_compiled_conditional_rules
             connection: None,
             output_mode: None,
             effects: None,
+            layers: None,
+            indicators: None,
         },
         slot: LedSlot(0),
         effect: BuiltinEffect::Solid { color: GREEN },
@@ -2536,6 +2625,8 @@ fn runtime_conditional_cells_outrank_layer_scenes_and_compiled_conditional_rules
                 connection: None,
                 output_mode: None,
                 effects: None,
+                layers: None,
+                indicators: None,
             },
             slot: LedSlot(0),
             effect: BuiltinEffect::Solid { color: BLUE },

@@ -1155,6 +1155,8 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                             cell,
                             connection: None,
                             effects: None,
+                            layers: None,
+                            indicators: None,
                         })
                         .is_err()
                 {
@@ -1879,6 +1881,8 @@ mod tests {
                     usb_connected: None,
                 }),
                 effects: None,
+                layers: None,
+                indicators: None,
             };
             let mut shard = heapless::Vec::<
                 LightingExtendedConditionalSceneCell,
@@ -2068,6 +2072,8 @@ mod tests {
                 },
                 connection: None,
                 effects: None,
+                layers: None,
+                indicators: None,
             };
             let shard = |led: u16| {
                 let mut shard = heapless::Vec::<
