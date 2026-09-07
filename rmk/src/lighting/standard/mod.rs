@@ -21,11 +21,13 @@ pub const CONDITIONAL_SCENE_CHUNK_SIZE: usize = 7;
 /// Nothing tied the two together before, which is exactly how that happened.
 // `core::assert!` explicitly: with defmt enabled the bare macro resolves to
 // defmt's, which is not const-evaluable.
+#[cfg(feature = "rynk")]
 const _: () = core::assert!(
     CONDITIONAL_SCENE_CHUNK_SIZE == rmk_types::protocol::rynk::LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE,
     "engine conditional page size must equal the wire chunk size"
 );
 
+#[cfg(feature = "rynk")]
 const _: () = core::assert!(
     command::FRAME_CHUNK_SIZE == rmk_types::protocol::rynk::LIGHTING_FRAME_CHUNK_SIZE,
     "engine frame page size must equal the wire chunk size"
