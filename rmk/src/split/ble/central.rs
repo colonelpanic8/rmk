@@ -251,7 +251,6 @@ pub(crate) async fn run_peripheral_sessions<
                     Either::First(conn) => conn,
                     Either::Second(_) => continue,
                 };
-                set_peripheral_connected(id, true);
                 match select(
                     run_central_manager_task(id, stack, &conn, matrix_configs[id]),
                     crate::split::selector::wait_wired_selected(),
@@ -515,6 +514,8 @@ async fn discover_and_run_manager<C: Controller + ControllerCmdAsync<LeSetPhy>, 
         client,
     };
     #[cfg(not(feature = "custom_message"))]
+    set_peripheral_connected(id, true);
+    #[cfg(not(feature = "custom_message"))]
     PeripheralManager::new(split_ble_driver, id, matrix_config).run().await;
     // A peripheral built without `custom_message` has no such characteristics;
     #[cfg(feature = "custom_message")]
@@ -574,6 +575,7 @@ async fn discover_and_run_manager<C: Controller + ControllerCmdAsync<LeSetPhy>, 
             .await
         };
 
+        set_peripheral_connected(id, true);
         select3(
             PeripheralManager::new(split_ble_driver, id, matrix_config).run(),
             from_peripheral,
