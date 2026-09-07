@@ -238,7 +238,6 @@ pub(crate) async fn run_peripheral_session<
             Either::First(conn) => conn,
             Either::Second(_) => continue,
         };
-        set_peripheral_connected(id, true);
         match select(
             run_central_manager_task(id, stack, &conn, matrix_config),
             crate::split::selector::wait_wired_selected(),
@@ -499,6 +498,10 @@ async fn discover_and_run_manager<C: Controller + ControllerCmdAsync<LeSetPhy>, 
         message_to_peripheral,
         client,
     };
+    // Connected means a manager can talk to the peripheral, not merely that
+    // a link is up: anything replicated before this point would be lost
+    // with a session that fails discovery.
+    set_peripheral_connected(id, true);
     PeripheralManager::new(split_ble_driver, id, matrix_config).run().await;
     info!("Peripheral manager stopped");
     Ok(())
