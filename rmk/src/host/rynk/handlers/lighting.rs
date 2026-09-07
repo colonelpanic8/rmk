@@ -1193,7 +1193,8 @@ fn capabilities(binding: RynkLightingController<'_>) -> LightingCapabilities {
     if binding.runtime_conditional_scene_capacity > 0 {
         features.0 |= LightingFeatureFlags::RUNTIME_CONDITIONAL_SCENES
             | LightingFeatureFlags::RUNTIME_CONNECTION_CONDITIONS
-            | LightingFeatureFlags::RUNTIME_EFFECTS_CONDITIONS;
+            | LightingFeatureFlags::RUNTIME_EFFECTS_CONDITIONS
+            | LightingFeatureFlags::RUNTIME_LAYER_INDICATOR_CONDITIONS;
     }
     // The standard engine always owns an output-mode policy, so this advertises
     // the engine's support rather than whether a board happened to bind a key to
@@ -1740,6 +1741,8 @@ mod tests {
             connection: None,
             output_mode: None,
             effects: None,
+            layers: None,
+            indicators: None,
         },
         slot: crate::lighting::LedSlot(0),
         effect: BuiltinEffect::Solid {
@@ -2226,6 +2229,8 @@ mod tests {
                     usb_connected: None,
                 }),
                 effects: None,
+                layers: None,
+                indicators: None,
             };
             let mut cells = Vec::new();
             cells.push(cell).unwrap();
@@ -2802,6 +2807,8 @@ mod tests {
                     cell: conditional_cell,
                     connection: Some(connection),
                     effects: None,
+                    layers: None,
+                    indicators: None,
                 };
                 let mut extended_cells = Vec::new();
                 extended_cells.push(extended_cell).unwrap();

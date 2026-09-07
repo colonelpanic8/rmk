@@ -2,7 +2,7 @@ use rmk_types::ble::BleState;
 use rmk_types::connection::ConnectionType;
 
 use super::compositor::{Contribution, LightingSource, RenderInput};
-use super::context::{LightingContext, LightingContextProvider};
+use super::context::{IndicatorState, LightingContext, LightingContextProvider};
 use super::effect::{BuiltinEffect, EffectSample, LightingEffect};
 use super::topology::LedSlot;
 use crate::types::battery::{BatteryStatus, ChargeState};
@@ -218,6 +218,42 @@ pub struct EffectsCondition {
     pub enabled: bool,
 }
 
+/// Satisfied when every layer in `active` is active and none in `inactive`
+/// is, both as bitmasks (bit N = layer N). `LayerCondition` watches one layer;
+/// this is what a status layer needs to show which *other* layers are held
+/// while it is.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct LayersCondition {
+    pub active: u64,
+    pub inactive: u64,
+}
+
+impl LayersCondition {
+    pub const fn matches(self, active_bits: u64) -> bool {
+        active_bits & self.active == self.active && active_bits & self.inactive == 0
+    }
+}
+
+/// Satisfied when every named host lock indicator has the wanted state.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct IndicatorCondition {
+    pub num_lock: Option<bool>,
+    pub caps_lock: Option<bool>,
+    pub scroll_lock: Option<bool>,
+}
+
+impl IndicatorCondition {
+    pub fn matches(self, indicators: IndicatorState) -> bool {
+        [
+            (self.num_lock, indicators.num_lock),
+            (self.caps_lock, indicators.caps_lock),
+            (self.scroll_lock, indicators.scroll_lock),
+        ]
+        .into_iter()
+        .all(|(wanted, actual)| wanted.is_none_or(|wanted| wanted == actual))
+    }
+}
+
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConditionSet {
     pub layer: Option<LayerCondition>,
@@ -231,6 +267,11 @@ pub struct ConditionSet {
     /// without a view of the extension treat it as unsatisfiable, on the same
     /// grounds as `output_mode`.
     pub effects: Option<EffectsCondition>,
+    /// Satisfied when the context's active-layer set contains every layer in
+    /// `active` and none in `inactive`.
+    pub layers: Option<LayersCondition>,
+    /// Satisfied when the host's lock indicators match every named one.
+    pub indicators: Option<IndicatorCondition>,
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -320,6 +361,16 @@ impl ConditionSet {
         }
         if let Some(condition) = self.layer
             && context.lighting_context().layers.is_active(condition.layer) != condition.active
+        {
+            return false;
+        }
+        if let Some(condition) = self.layers
+            && !condition.matches(context.lighting_context().layers.active_bits())
+        {
+            return false;
+        }
+        if let Some(condition) = self.indicators
+            && !condition.matches(context.lighting_context().indicators)
         {
             return false;
         }
@@ -790,10 +841,14 @@ mod tests {
         let context = LightingContext::default();
         let on = ConditionSet {
             effects: Some(EffectsCondition { enabled: true }),
+            layers: None,
+            indicators: None,
             ..ConditionSet::default()
         };
         let off = ConditionSet {
             effects: Some(EffectsCondition { enabled: false }),
+            layers: None,
+            indicators: None,
             ..ConditionSet::default()
         };
 
@@ -806,6 +861,81 @@ mod tests {
         // rather than letting one of them fire wherever it cannot be judged.
         assert!(!on.matches(&context, &NoBatteries, None, None));
         assert!(!off.matches(&context, &NoBatteries, None, None));
+    }
+
+    #[test]
+    fn layers_condition_needs_every_named_layer_state() {
+        let context = LightingContext {
+            layers: LayerState::new(2, 0, 0b0000_0101),
+            ..LightingContext::default()
+        };
+        let both = ConditionSet {
+            layers: Some(LayersCondition {
+                active: 0b101,
+                inactive: 0,
+            }),
+            ..ConditionSet::default()
+        };
+        let missing = ConditionSet {
+            layers: Some(LayersCondition {
+                active: 0b011,
+                inactive: 0,
+            }),
+            ..ConditionSet::default()
+        };
+        let excluded = ConditionSet {
+            layers: Some(LayersCondition {
+                active: 0b100,
+                inactive: 0b001,
+            }),
+            ..ConditionSet::default()
+        };
+        let excluded_absent = ConditionSet {
+            layers: Some(LayersCondition {
+                active: 0b100,
+                inactive: 0b010,
+            }),
+            ..ConditionSet::default()
+        };
+
+        assert!(both.matches(&context, &NoBatteries, None, None));
+        assert!(!missing.matches(&context, &NoBatteries, None, None));
+        assert!(!excluded.matches(&context, &NoBatteries, None, None));
+        assert!(excluded_absent.matches(&context, &NoBatteries, None, None));
+    }
+
+    #[test]
+    fn indicator_condition_reads_the_host_lock_state() {
+        let mut context = LightingContext::default();
+        context.indicators.caps_lock = true;
+        let caps_on = ConditionSet {
+            indicators: Some(IndicatorCondition {
+                caps_lock: Some(true),
+                ..IndicatorCondition::default()
+            }),
+            ..ConditionSet::default()
+        };
+        let caps_off_num_off = ConditionSet {
+            indicators: Some(IndicatorCondition {
+                num_lock: Some(false),
+                caps_lock: Some(false),
+                scroll_lock: None,
+            }),
+            ..ConditionSet::default()
+        };
+        let num_off = ConditionSet {
+            indicators: Some(IndicatorCondition {
+                num_lock: Some(false),
+                ..IndicatorCondition::default()
+            }),
+            ..ConditionSet::default()
+        };
+
+        assert!(caps_on.matches(&context, &NoBatteries, None, None));
+        assert!(!caps_off_num_off.matches(&context, &NoBatteries, None, None));
+        assert!(num_off.matches(&context, &NoBatteries, None, None));
+        context.indicators.caps_lock = false;
+        assert!(!caps_on.matches(&context, &NoBatteries, None, None));
     }
 
     #[test]
@@ -1020,6 +1150,8 @@ mod tests {
                     connection: None,
                     output_mode: None,
                     effects: None,
+                    layers: None,
+                    indicators: None,
                 },
                 slot: LedSlot(0),
                 effect: BuiltinEffect::solid(GREEN),
@@ -1036,6 +1168,8 @@ mod tests {
                     connection: None,
                     output_mode: None,
                     effects: None,
+                    layers: None,
+                    indicators: None,
                 },
                 slot: LedSlot(1),
                 effect: BuiltinEffect::solid(BLUE),
@@ -1053,6 +1187,8 @@ mod tests {
                     connection: None,
                     output_mode: None,
                     effects: None,
+                    layers: None,
+                    indicators: None,
                 },
                 slot: LedSlot(0),
                 effect: BuiltinEffect::solid(RED),

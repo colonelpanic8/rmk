@@ -762,11 +762,11 @@ impl Client {
         )
     }
 
-    /// Read connection- and effects-aware runtime conditional cells. The
-    /// extended cell's encoding is described by
-    /// `RUNTIME_EFFECTS_CONDITIONS`, so callers that cannot see that bit
-    /// should use the legacy endpoints rather than risk a misparse against
-    /// firmware speaking the earlier extended cell.
+    /// Read connection-, effects-, layers- and indicator-aware runtime
+    /// conditional cells. The extended cell's encoding is described by
+    /// `RUNTIME_LAYER_INDICATOR_CONDITIONS`, so callers that cannot see that
+    /// bit should use the legacy endpoints rather than risk a misparse
+    /// against firmware speaking an earlier extended cell.
     pub async fn get_lighting_extended_runtime_conditional_scene_status(
         &self,
     ) -> Result<LightingRuntimeConditionalSceneStatus, RynkHostError> {
