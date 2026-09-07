@@ -363,12 +363,23 @@ impl Handle<GetLightingCompiledScenes> for RynkService<'_> {
 
 impl Handle<GetLightingConditionalSceneStatus> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<LightingConditionalSceneStatusResult, RynkError> {
-        Ok(controller(self).map(|controller| LightingConditionalSceneStatus {
-            topology_revision: controller.descriptor.topology_revision,
-            cell_len: count(controller.conditional_scenes.len()),
-            chunk_capacity: LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE as u8,
-            controls: controller.controls_to_wire(),
-        }))
+        Ok(match controller(self) {
+            Ok(controller) => {
+                controller
+                    .request(RynkLightingCommand::ReadOutputMode)
+                    .await
+                    .and_then(|reply| match reply {
+                        RynkLightingReadback::OutputMode(state) => Ok(LightingConditionalSceneStatus {
+                            topology_revision: controller.descriptor.topology_revision,
+                            cell_len: count(controller.conditional_scenes.len()),
+                            chunk_capacity: LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE as u8,
+                            controls: controller.controls_to_wire(state.wake_layers),
+                        }),
+                        _ => Err(LightingError::InvalidRequest),
+                    })
+            }
+            Err(error) => Err(error),
+        })
     }
 }
 
@@ -2294,13 +2305,13 @@ mod tests {
             GetLightingCompiledSceneStatus, GetLightingCompiledScenes, GetLightingConditionalSceneStatus,
             GetLightingConditionalScenes, GetLightingOutputMode, GetLightingOverlay, GetLightingSceneStatus,
             GetLightingScenes, PutLightingSceneChunk, SetLightingLayerPolicy, SetLightingOverlay, SetLightingSceneCell,
-            UnsetLightingSceneCell,
+            SetLightingWakeLayers, UnsetLightingSceneCell,
         };
         use rmk_types::protocol::rynk::{
             BeginLightingSceneReplaceRequest, CommitLightingSceneReplaceRequest, LightingLayerPolicy,
             LightingOverlayPageRequest, LightingPageRequest, LightingScenePageRequest, PutLightingSceneChunkRequest,
             SetLightingLayerPolicyRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest,
-            UnsetLightingSceneCellRequest,
+            SetLightingWakeLayersRequest, UnsetLightingSceneCellRequest,
         };
 
         use crate::lighting::{
@@ -2869,6 +2880,23 @@ mod tests {
                         current: 8,
                     })
                 );
+                let wake = call::<SetLightingWakeLayers>(
+                    &service,
+                    &session,
+                    &SetLightingWakeLayersRequest {
+                        expected_revision: 8,
+                        layers: 1 << 2,
+                    },
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                assert_eq!(wake.wake_layers, 1 << 2);
+                let conditional_status = call::<GetLightingConditionalSceneStatus>(&service, &session, &())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(conditional_status.controls.wake_layers, 1 << 2);
             };
 
             let adapter_loop = async {
@@ -2931,6 +2959,10 @@ mod tests {
                 assert!(persisted.iter().any(|message| matches!(
                     message,
                     FlashOperationMessage::LightingRuntimeConditionalSceneTable { len: 1 }
+                )));
+                assert!(persisted.iter().any(|message| matches!(
+                    message,
+                    FlashOperationMessage::LightingWakeLayers(layers) if *layers == 1 << 2
                 )));
             }
         });
