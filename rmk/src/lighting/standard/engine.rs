@@ -304,11 +304,13 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
     }
 
     fn set_mutable_state(&mut self, state: StandardMutableState) {
-        self.output_mode = if state.output_enabled {
-            OutputMode::AlwaysOn
-        } else {
-            OutputMode::AlwaysOff
-        };
+        if state.output_enabled != self.effective_output() {
+            self.output_mode = if state.output_enabled {
+                OutputMode::AlwaysOn
+            } else {
+                OutputMode::AlwaysOff
+            };
+        }
         self.output_brightness = state.output_brightness;
         self.background.set_state(state.background);
     }

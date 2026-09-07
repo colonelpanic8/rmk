@@ -2465,3 +2465,53 @@ fn runtime_conditional_cells_outrank_layer_scenes_and_compiled_conditional_rules
         "a runtime conditional cell replaces the compiled rule on the same slot"
     );
 }
+
+#[test]
+fn state_round_trip_preserves_powered_only_and_future_power_transitions() {
+    for powered in [false, true] {
+        let mut engine = engine().with_controls(LightingControls {
+            initial_output_mode: OutputMode::PoweredOnly,
+            ..LightingControls::default()
+        });
+        let mut snapshot = context(0);
+        snapshot.powered = powered;
+        let mut frame = LogicalFrame::new(Rgb8::BLACK);
+        engine
+            .render(
+                RenderInput {
+                    now_ms: 0,
+                    snapshot: &snapshot,
+                },
+                &mut frame,
+            )
+            .unwrap();
+        let before = engine.state();
+        engine
+            .handle_command(
+                1,
+                StandardCommand::SetStateIfRevision {
+                    expected_revision: before.revision,
+                    state: StandardMutableState {
+                        output_enabled: before.output_enabled,
+                        output_brightness: 77,
+                        background: before.background,
+                    },
+                },
+                &snapshot,
+            )
+            .unwrap();
+        assert_eq!(engine.state().output_mode, OutputMode::PoweredOnly);
+        assert_eq!(engine.state().output_brightness, 77);
+        snapshot.powered = !powered;
+        engine
+            .render(
+                RenderInput {
+                    now_ms: 2,
+                    snapshot: &snapshot,
+                },
+                &mut frame,
+            )
+            .unwrap();
+        assert_eq!(engine.state().output_enabled, !powered);
+    }
+}

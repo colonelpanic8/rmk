@@ -177,6 +177,7 @@ pub enum StandardCommand<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
 /// engine-owned optimistic-concurrency revision.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct StandardMutableState {
+    /// An unchanged effective value preserves the output policy. Use the output-mode command to pin a policy.
     pub output_enabled: bool,
     pub output_brightness: u8,
     pub background: BackgroundState,
