@@ -58,8 +58,14 @@ pub struct IndicatorState {
 pub struct LightingContext {
     pub layers: LayerState,
     pub indicators: IndicatorState,
-    /// USB/VBUS power is present. This remains true while USB is suspended.
+    /// USB/VBUS power is present at the authority. This remains true while
+    /// USB is suspended. A split replica receives the authority's value in
+    /// its replicated context.
     pub powered: bool,
+    /// USB/VBUS power is present at the node doing the rendering. Equal to
+    /// `powered` on the authority; a replica substitutes its own VBUS so a
+    /// `PoweredOnlyScope::Local` board can follow it.
+    pub local_powered: bool,
     /// Authoritative transport, BLE profile, and BLE lifecycle snapshot.
     pub connection: ConnectionStatus,
     /// BLE profile slots holding a stored bond, as a bitmap (bit N = slot N).

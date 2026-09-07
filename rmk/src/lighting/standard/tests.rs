@@ -11,7 +11,7 @@ use crate::lighting::effect::{BuiltinEffect, LightingEffect};
 use crate::lighting::service::{Invalidation, LightingEngine, RenderInput};
 use crate::lighting::source::{
     BatteryStatusProvider, ConditionSet, EffectsCondition, LayerScenes, LightingControls, OutputMode, OverlayError,
-    SparseScene,
+    PoweredOnlyScope, SparseScene,
 };
 use crate::lighting::topology::LedSlot;
 use crate::lighting::{LayerPolicy, LayerScene, LayerState, LightingContext, Rgb8, SceneCell};
@@ -175,6 +175,7 @@ fn context(layer: u8) -> LightingContext {
         layers: LayerState::new(layer, 0, 1 | (1 << layer)),
         indicators: Default::default(),
         powered: false,
+        local_powered: false,
         connection: Default::default(),
         bonded_slots: 0,
     }
@@ -598,6 +599,7 @@ fn output_mode_cycles_and_wake_layer_temporarily_overrides_policy() {
 
     let mut powered_context = battery_context;
     powered_context.powered = true;
+    powered_context.local_powered = true;
     engine
         .render(
             RenderInput {
@@ -2253,6 +2255,7 @@ fn output_mode_conditions_select_between_runtime_rules() {
         layers: LayerState::new(0, 0, 1),
         indicators: Default::default(),
         powered: true,
+        local_powered: true,
         connection: Default::default(),
         bonded_slots: 0,
     };
@@ -2338,6 +2341,7 @@ fn compiled_output_mode_conditions_observe_the_engine_policy() {
         layers: LayerState::new(0, 0, 1),
         indicators: Default::default(),
         powered: true,
+        local_powered: true,
         connection: Default::default(),
         bonded_slots: 0,
     };
@@ -2418,6 +2422,7 @@ fn effects_conditions_follow_the_extension_value() {
         layers: LayerState::new(0, 0, 1),
         indicators: Default::default(),
         powered: true,
+        local_powered: true,
         connection: Default::default(),
         bonded_slots: 0,
     };
@@ -2551,6 +2556,42 @@ fn runtime_conditional_cells_outrank_layer_scenes_and_compiled_conditional_rules
         BLUE,
         "a runtime conditional cell replaces the compiled rule on the same slot"
     );
+}
+
+/// The split replica path is where the two power bits differ: the
+/// replicated context carries the central's VBUS while the peripheral has
+/// its own. The scope decides which one `PoweredOnly` follows.
+#[test]
+fn powered_only_scope_selects_authority_or_local_power() {
+    for (scope, authority_lit, local_lit) in [
+        (PoweredOnlyScope::Authority, true, false),
+        (PoweredOnlyScope::Local, false, true),
+    ] {
+        let mut engine = engine().with_controls(LightingControls {
+            initial_output_mode: OutputMode::PoweredOnly,
+            powered_only_scope: scope,
+            ..LightingControls::default()
+        });
+        let mut frame = LogicalFrame::new(Rgb8::BLACK);
+        for (powered, local_powered, expected) in [(true, false, authority_lit), (false, true, local_lit)] {
+            let snapshot = LightingContext {
+                powered,
+                local_powered,
+                ..context(0)
+            };
+            engine
+                .render(
+                    RenderInput {
+                        now_ms: 0,
+                        snapshot: &snapshot,
+                    },
+                    &mut frame,
+                )
+                .unwrap();
+            assert_eq!(engine.state().output_enabled, expected, "{scope:?}");
+            assert_eq!(engine.state().powered, expected, "{scope:?}");
+        }
+    }
 }
 
 #[test]

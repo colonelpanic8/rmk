@@ -11,8 +11,8 @@ use crate::lighting::effect::BuiltinEffect;
 use crate::lighting::output::BrightnessTransform;
 use crate::lighting::service::{CommandResult, Invalidation, LightingEngine, RenderInput, RenderOutcome};
 use crate::lighting::source::{
-    BatteryStatusProvider, LayerPolicy, LayerScenes, LightingControls, OutputMode, OverlayUpdate, SceneCell,
-    SparseScene, TtlOverlay,
+    BatteryStatusProvider, LayerPolicy, LayerScenes, LightingControls, OutputMode, OverlayUpdate, PoweredOnlyScope,
+    SceneCell, SparseScene, TtlOverlay,
 };
 use crate::lighting::topology::LedSlot;
 
@@ -169,10 +169,23 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         self.wake_active
     }
 
-    const fn effective_output(&self) -> bool {
-        self.wake_active
+    /// The power bit `PoweredOnly` follows, per the board's configured scope.
+    /// `state()` reports the value the last render selected.
+    const fn scoped_power(&self, context: &LightingContext) -> bool {
+        match self.controls.powered_only_scope {
+            PoweredOnlyScope::Authority => context.powered,
+            PoweredOnlyScope::Local => context.local_powered,
+        }
+    }
+
+    const fn output_enabled_for(&self, powered: bool, wake_active: bool) -> bool {
+        wake_active
             || matches!(self.output_mode, OutputMode::AlwaysOn)
-            || matches!(self.output_mode, OutputMode::PoweredOnly) && self.powered
+            || matches!(self.output_mode, OutputMode::PoweredOnly) && powered
+    }
+
+    const fn effective_output(&self) -> bool {
+        self.output_enabled_for(self.powered, self.wake_active)
     }
 
     pub fn state(&self) -> StandardState {
@@ -1255,11 +1268,9 @@ where
             self.advance_revision();
         }
         let context = input.snapshot.lighting_context();
-        let powered = context.powered;
+        let powered = self.scoped_power(context);
         let wake_active = context.layers.active_bits() & self.controls.wake_layers != 0;
-        let effective_output_enabled = wake_active
-            || matches!(self.output_mode, OutputMode::AlwaysOn)
-            || matches!(self.output_mode, OutputMode::PoweredOnly) && powered;
+        let effective_output_enabled = self.output_enabled_for(powered, wake_active);
         if self.powered != powered
             || self.wake_active != wake_active
             || self.effective_output_enabled != effective_output_enabled

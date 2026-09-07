@@ -937,6 +937,7 @@ mod tests {
             layers: LayerState::new(3, 0, 0b1101),
             indicators: Default::default(),
             powered: false,
+            local_powered: false,
             connection: Default::default(),
             bonded_slots: 0,
         };
@@ -1076,6 +1077,7 @@ mod tests {
             layers: LayerState::new(2, 0, 0b101),
             indicators: Default::default(),
             powered: false,
+            local_powered: false,
             connection: Default::default(),
             bonded_slots: 0,
         };
