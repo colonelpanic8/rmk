@@ -391,14 +391,13 @@ impl<'a> Keyboard<'a> {
         is_combo: bool,
         event_time: Instant,
     ) {
-        // A retro tap only survives while nothing else is pressed, so any other key press
-        // demotes the candidates to plain holds.
         if event.pressed {
             for k in self.held_buffer.keys.iter_mut() {
-                if let KeyState::RetroTapCandidate(hold_action) = k.state
-                    && k.event.pos != event.pos
-                {
-                    k.state = KeyState::ProcessedButReleaseNotReportedYet(hold_action);
+                if k.event.pos != event.pos {
+                    k.retro_tap_interrupted = true;
+                    if let KeyState::RetroTapCandidate(hold_action) = k.state {
+                        k.state = KeyState::ProcessedButReleaseNotReportedYet(hold_action);
+                    }
                 }
             }
         }

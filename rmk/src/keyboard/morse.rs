@@ -26,6 +26,7 @@ impl<'a> Keyboard<'a> {
                     // Only a bare hold can retro-tap: deeper morse patterns have no single tap
                     // action to fall back to.
                     let retro_tap = pattern == HOLD
+                        && !key.retro_tap_interrupted
                         && Self::is_retro_tap_enabled(self.keymap, &key.action)
                         && Self::action_from_pattern(self.keymap, &key.action, TAP) != Action::No;
                     if let Some(k) = self.held_buffer.find_pos_mut(key.event.pos) {

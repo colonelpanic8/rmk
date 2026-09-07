@@ -144,6 +144,7 @@ pub struct HeldKey {
     pub press_time: Instant,
     /// The timeout time for the key
     pub timeout_time: Instant,
+    pub retro_tap_interrupted: bool,
 }
 
 impl HeldKey {
@@ -160,6 +161,7 @@ impl HeldKey {
             state,
             press_time,
             timeout_time,
+            retro_tap_interrupted: false,
         }
     }
 }
