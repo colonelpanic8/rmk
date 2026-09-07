@@ -534,11 +534,17 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         // An empty slot is written as an empty config, so a combo the user added over the host
         // protocol is cleared, not left behind.
         for (idx, combo) in behavior.combo.combos.iter().enumerate() {
-            let definition = combo.as_ref().map(|c| c.definition()).unwrap_or_else(rmk_types::combo::ComboDefinition::empty);
+            let definition = combo
+                .as_ref()
+                .map(|c| c.definition())
+                .unwrap_or_else(rmk_types::combo::ComboDefinition::empty);
             put(match definition {
                 rmk_types::combo::ComboDefinition::Actions(config) => StorageItem::Combo { idx: idx as u8, config },
-                rmk_types::combo::ComboDefinition::Positions(config) => StorageItem::PositionCombo { idx: idx as u8, config },
-            }).await;
+                rmk_types::combo::ComboDefinition::Positions(config) => {
+                    StorageItem::PositionCombo { idx: idx as u8, config }
+                }
+            })
+            .await;
         }
         for (idx, fork) in behavior.fork.forks.iter().enumerate() {
             put(StorageItem::Fork {
@@ -789,6 +795,37 @@ mod tests {
                 read(StorageKey::ConnectionType).await,
                 Ok(Some(StorageValue::ConnectionType(ConnectionType::Ble)))
             ));
+        });
+    }
+
+    #[cfg(feature = "host")]
+    #[test]
+    fn empty_combo_records_restore_as_vacant_slots() {
+        block_on(async {
+            let mut storage = new_storage(async_flash_wrapper(Part::new())).await;
+            storage
+                .put(StorageItem::Combo {
+                    idx: 0,
+                    config: ComboConfig::empty(),
+                })
+                .await
+                .unwrap();
+            storage
+                .put(StorageItem::PositionCombo {
+                    idx: 1,
+                    config: PositionComboConfig::empty(),
+                })
+                .await
+                .unwrap();
+            let mut behavior = RuntimeBehaviorConfig::default();
+            behavior.combo.combos[0] = Some(crate::keyboard::combo::Combo::default());
+            behavior.combo.combos[1] = Some(crate::keyboard::combo::Combo::default());
+            storage
+                .read_keymap(&mut crate::keymap::KeymapData::new([[[KeyAction::No]]]), &mut behavior)
+                .await
+                .unwrap();
+            assert!(behavior.combo.combos[0].is_none());
+            assert!(behavior.combo.combos[1].is_none());
         });
     }
 

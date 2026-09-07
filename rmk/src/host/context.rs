@@ -179,12 +179,19 @@ impl<'a> KeyboardContext<'a> {
             };
             true
         });
-        if !valid { return Ok(false); }
+        if !valid {
+            return Ok(false);
+        }
         #[cfg(feature = "storage")]
         store(match definition {
+            definition if definition.is_empty() => StorageItem::Combo {
+                idx,
+                config: ComboConfig::empty(),
+            },
             ComboDefinition::Actions(config) => StorageItem::Combo { idx, config },
             ComboDefinition::Positions(config) => StorageItem::PositionCombo { idx, config },
-        }).await?;
+        })
+        .await?;
         Ok(true)
     }
 

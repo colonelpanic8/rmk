@@ -1,5 +1,6 @@
 use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
+use rmk_types::action::KeyAction;
 use rmk_types::constants::MACRO_CHUNK_SIZE;
 
 use crate::keyboard::combo::Combo;
@@ -62,12 +63,14 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 }
                 (StorageKey::Combo(idx), StorageValue::Combo(config)) => {
                     if let Some(slot) = behavior.combo.combos.get_mut(idx as usize) {
-                        *slot = Some(Combo::new(config));
+                        *slot =
+                            (!config.actions.is_empty() || config.output != KeyAction::No).then(|| Combo::new(config));
                     }
                 }
                 (StorageKey::Combo(idx), StorageValue::PositionCombo(config)) => {
                     if let Some(slot) = behavior.combo.combos.get_mut(idx as usize) {
-                        *slot = Some(Combo::new_positions(config));
+                        *slot = (!config.positions.is_empty() || config.output != KeyAction::No)
+                            .then(|| Combo::new_positions(config));
                     }
                 }
                 (StorageKey::Fork(idx), StorageValue::Fork(fork)) => {
