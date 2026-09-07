@@ -54,3 +54,14 @@ steps = [
   { tap = { pos = [3, 7], duration = 300 } },  # MT(B, LShift, p1) -- retro_tap = true
 ]
 expect = [["LShift"], [], ["LShift"], [], ["B"], []]
+
+[[test]]
+name = "other_key_before_timeout_suppresses_retro_tap"
+steps = [
+  { press = [1, 1] },
+  { press = [1, 0] },
+  { delay = 300 },
+  { release = [1, 0] },
+  { release = [1, 1] },
+]
+expect = [["A"], ["LShift", "A"], ["LShift"], []]
