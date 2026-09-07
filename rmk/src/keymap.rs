@@ -425,6 +425,8 @@ impl<'a> KeyMap<'a> {
         // Read from storage BEFORE flattening (storage expects typed arrays).
         if let Some(storage) = storage
             && {
+                #[cfg(feature = "rynk")]
+                crate::input_device::pointing_config::init(storage.read_pointing_config().await).await;
                 Ok(())
                     .and(storage.read_keymap(data, behavior).await)
                     .and(storage.read_behavior_config(behavior).await)

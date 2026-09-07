@@ -11,7 +11,11 @@ pub use rmk_types::pointing::{
 };
 use usbd_hid::descriptor::{MediaKeyboardReport, MouseReport, SystemControlReport};
 
+#[cfg(feature = "rynk")]
+use super::pointing_config::PointingConfigChangeEvent;
 use crate::channel::send_hid_report;
+#[cfg(feature = "rynk")]
+use crate::event::LayerChangeEvent;
 use crate::event::{Axis, AxisEvent, AxisValType, PointingEvent, PointingProcessorEvent, PointingSetCpiEvent};
 use crate::hid::{KeyboardReport, Report};
 use crate::keymap::KeyMap;
@@ -365,7 +369,8 @@ impl Default for PointingProcessorConfig {
 }
 
 /// PointingProcessor that converts motion events to mouse reports
-#[processor(subscribe = [PointingEvent, PointingProcessorEvent])]
+#[cfg_attr(feature = "rynk", processor(subscribe = [PointingConfigChangeEvent, LayerChangeEvent, PointingProcessorEvent, PointingEvent]))]
+#[cfg_attr(not(feature = "rynk"), processor(subscribe = [PointingEvent, PointingProcessorEvent]))]
 pub struct PointingProcessor<'a> {
     /// Reference to the keymap (used for mouse_buttons)
     keymap: &'a KeyMap<'a>,
@@ -374,6 +379,12 @@ pub struct PointingProcessor<'a> {
     accumulator: MotionAccumulator,
     /// current active mode
     current_mode: PointingMode,
+    #[cfg(feature = "rynk")]
+    last_device: Option<u8>,
+    #[cfg(feature = "rynk")]
+    runtime_layer: u8,
+    #[cfg(feature = "rynk")]
+    explicit_mode: bool,
     /// Device-originated button state from the last processed event
     device_buttons: u8,
     /// Whether drag mode currently holds its button down
@@ -390,6 +401,12 @@ impl<'a> PointingProcessor<'a> {
             config,
             accumulator: MotionAccumulator::default(),
             current_mode: PointingMode::default(),
+            #[cfg(feature = "rynk")]
+            last_device: None,
+            #[cfg(feature = "rynk")]
+            runtime_layer: keymap.active_layer(),
+            #[cfg(feature = "rynk")]
+            explicit_mode: false,
             device_buttons: 0,
             drag_latched: false,
             touching: false,
@@ -423,6 +440,14 @@ impl<'a> PointingProcessor<'a> {
         // Filter: only process events from the configured device
         if self.config.device_id != ALL_POINTING_DEVICES && event.device_id != self.config.device_id {
             return;
+        }
+
+        #[cfg(feature = "rynk")]
+        {
+            if !self.explicit_mode && self.last_device != Some(event.device_id) {
+                self.refresh_configured_mode(event.device_id).await;
+            }
+            self.last_device = Some(event.device_id);
         }
 
         let mut x = 0i16;
@@ -560,27 +585,59 @@ impl<'a> PointingProcessor<'a> {
         };
     }
 
-    // pointing device events are used to change the mode (cursor/scroll/sniper) of the processor based on the device id. This allows users to trigger different modes if desired.
+    #[cfg(feature = "rynk")]
+    async fn refresh_configured_mode(&mut self, device_id: u8) {
+        let config = super::pointing_config::get().await;
+        if let Some(mode) = config.mode_for(device_id, self.runtime_layer) {
+            self.apply_mode(mode).await;
+        }
+    }
+
+    #[cfg(feature = "rynk")]
+    async fn on_layer_change_event(&mut self, LayerChangeEvent(layer): LayerChangeEvent) {
+        self.runtime_layer = layer;
+        self.on_pointing_config_change_event(PointingConfigChangeEvent).await;
+    }
+
+    #[cfg(feature = "rynk")]
+    async fn on_pointing_config_change_event(&mut self, _: PointingConfigChangeEvent) {
+        self.explicit_mode = false;
+        let device_id = if self.config.device_id == ALL_POINTING_DEVICES {
+            self.last_device
+        } else {
+            Some(self.config.device_id)
+        };
+        if let Some(device_id) = device_id {
+            self.refresh_configured_mode(device_id).await;
+        }
+    }
+
     pub async fn on_pointing_processor_event(&mut self, event: PointingProcessorEvent) {
         if self.config.device_id == ALL_POINTING_DEVICES || self.config.device_id == event.device_id {
-            debug!(
-                "PointingProcessor {}: setting mode to {:?}",
-                self.config.device_id, event.mode
-            );
-            // A mode change with the latch engaged would otherwise leave the
-            // host holding a button no further event will release.
-            let release_latch = self.latched_buttons() != 0;
-            self.set_pointing_mode(event.mode);
-            if release_latch {
-                send_hid_report(Report::MouseReport(MouseReport {
-                    buttons: self.keymap.mouse_buttons() | self.device_buttons,
-                    x: 0,
-                    y: 0,
-                    wheel: 0,
-                    pan: 0,
-                }))
-                .await;
+            #[cfg(feature = "rynk")]
+            {
+                self.explicit_mode = true;
             }
+            self.apply_mode(event.mode).await;
+        }
+    }
+
+    async fn apply_mode(&mut self, mode: PointingMode) {
+        if self.current_mode == mode {
+            return;
+        }
+        let release_latch = self.latched_buttons() != 0;
+        self.set_pointing_mode(mode);
+        self.accumulator = MotionAccumulator::default();
+        if release_latch {
+            send_hid_report(Report::MouseReport(MouseReport {
+                buttons: self.keymap.mouse_buttons() | self.device_buttons,
+                x: 0,
+                y: 0,
+                wheel: 0,
+                pan: 0,
+            }))
+            .await;
         }
     }
 }
@@ -1596,7 +1653,7 @@ mod tests {
         match report_for_keycode(HidKeyCode::MediaNextTrack, true) {
             Report::MediaKeyboardReport(report) => {
                 let usage_id = report.usage_id;
-                assert_eq!(usage_id, rmk_types::keycode::ConsumerKey::NextTrack.into());
+                assert_eq!(usage_id, u16::from(rmk_types::keycode::ConsumerKey::NextTrack));
             }
             _ => panic!("media key did not produce a consumer report"),
         }
@@ -2041,5 +2098,96 @@ mod tests {
         assert!(!drag_latch_after(false, 0, secondary, toggled_by));
         // A held drag is not dropped by an unrelated button.
         assert!(drag_latch_after(true, 0, secondary, toggled_by));
+    }
+}
+
+#[cfg(all(test, feature = "rynk"))]
+mod runtime_mode_tests {
+    use rmk_types::protocol::rynk::{PointingConfig, PointingDeviceConfig, PointingLayerOverride};
+
+    use super::*;
+    use crate::config::{BehaviorConfig, PositionalConfig};
+    use crate::keymap::KeymapData;
+
+    #[test]
+    fn restored_modes_follow_remote_layers_and_preserve_explicit_commands() {
+        crate::test_support::test_block_on(async {
+            let mut data = KeymapData::<1, 1, 2>::new([[[crate::k!(A)]], [[crate::k!(B)]]]);
+            let mut behavior = BehaviorConfig::default();
+            let positional = PositionalConfig::<1, 1>::default();
+            let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
+            let default_mode = PointingMode::Scroll(Default::default());
+            let layer_mode = PointingMode::Sniper(Default::default());
+            let mut config = PointingConfig {
+                device_count: 1,
+                override_count: 1,
+                ..Default::default()
+            };
+            config.devices[0] = PointingDeviceConfig {
+                device_id: 0,
+                mode: default_mode,
+            };
+            config.overrides[0] = PointingLayerOverride {
+                device_id: 0,
+                layer: 1,
+                mode: layer_mode,
+            };
+            super::super::pointing_config::init(Some(config)).await;
+            let mut processor = PointingProcessor::new(&keymap, PointingProcessorConfig::default());
+            processor
+                .on_pointing_event(PointingEvent {
+                    device_id: 0,
+                    buttons: 0,
+                    axes: [
+                        AxisEvent {
+                            axis: Axis::X,
+                            typ: AxisValType::Rel,
+                            value: 0,
+                        },
+                        AxisEvent {
+                            axis: Axis::Y,
+                            typ: AxisValType::Rel,
+                            value: 0,
+                        },
+                        AxisEvent {
+                            axis: Axis::Z,
+                            typ: AxisValType::Rel,
+                            value: 0,
+                        },
+                    ],
+                })
+                .await;
+            assert_eq!(processor.current_mode, default_mode);
+            // Split layer notifications do not mutate the peripheral keymap.
+            assert_eq!(keymap.active_layer(), 0);
+            processor.on_layer_change_event(LayerChangeEvent(1)).await;
+            assert_eq!(processor.current_mode, layer_mode);
+            let explicit_mode = PointingMode::Cursor(Default::default());
+            processor
+                .on_pointing_processor_event(PointingProcessorEvent {
+                    device_id: 0,
+                    mode: explicit_mode,
+                })
+                .await;
+            processor
+                .on_pointing_event(PointingEvent {
+                    device_id: 0,
+                    buttons: 0,
+                    axes: [AxisEvent {
+                        axis: Axis::X,
+                        typ: AxisValType::Rel,
+                        value: 0,
+                    }; 3],
+                })
+                .await;
+            assert_eq!(processor.current_mode, explicit_mode);
+            processor
+                .on_pointing_config_change_event(PointingConfigChangeEvent)
+                .await;
+            assert_eq!(processor.current_mode, layer_mode);
+            assert_eq!(keymap.active_layer(), 0);
+            processor.on_layer_change_event(LayerChangeEvent(0)).await;
+            assert_eq!(processor.current_mode, default_mode);
+        });
     }
 }
