@@ -99,7 +99,7 @@ pub(crate) async fn run_half_duplex_peripheral_manager<S: Read + Write>(
     matrix_config: crate::split::PeripheralMatrixConfig,
     #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) {
-    let driver = HalfDuplexCentralDriver::new(serial, HalfDuplexTiming::from_baud(baud));
+    let driver = HalfDuplexCentralDriver::new(serial, id, HalfDuplexTiming::from_baud(baud));
     let mut peripheral_manager = PeripheralManager::new(
         driver,
         id,
@@ -108,7 +108,6 @@ pub(crate) async fn run_half_duplex_peripheral_manager<S: Read + Write>(
         policy,
     );
     info!("Running half-duplex peripheral manager {}", id);
-    set_peripheral_connected(id, true);
     peripheral_manager.run().await;
 }
 
@@ -120,7 +119,7 @@ pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
     matrix_config: crate::split::PeripheralMatrixConfig,
     #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) {
-    let driver = HalfDuplexCentralDriver::new(serial, HalfDuplexTiming::from_baud(baud));
+    let driver = HalfDuplexCentralDriver::new(serial, id, HalfDuplexTiming::from_baud(baud));
     let mut peripheral_manager = PeripheralManager::new(
         driver,
         id,
@@ -138,7 +137,6 @@ pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
         {
             embassy_futures::select::Either::First(_) | embassy_futures::select::Either::Second(_) => {}
         }
-        set_peripheral_connected(id, true);
         peripheral_manager.transceiver_mut().begin_session();
         match embassy_futures::select::select(
             peripheral_manager.run(),
@@ -531,6 +529,9 @@ const CONTROL_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 /// Consecutive exchanges without acknowledgement progress before the central
 /// assumes the peer rebooted and renegotiates the sequence session.
 const STUCK_ACK_EXCHANGES: u8 = 24;
+/// Consecutive unanswered exchanges before the central reports the wired
+/// peripheral gone and renegotiates the session once it answers again.
+const PEER_LOST_EXCHANGES: u8 = 64;
 
 /// Wire-time budget of one half-duplex exchange, derived from the baud rate
 /// so the receive phase outlasts the longest valid reply burst.
@@ -572,7 +573,12 @@ impl HalfDuplexTiming {
 pub(crate) struct HalfDuplexCentralDriver<S> {
     serial: SerialSplitDriver<S>,
     link: LinkEndpoint,
+    /// Peripheral slot whose connected state this driver reports: up once
+    /// the peripheral answers the session handshake, down after
+    /// [`PEER_LOST_EXCHANGES`] unanswered polls.
+    id: usize,
     timing: HalfDuplexTiming,
+    silent_exchanges: u8,
     /// A poll may have reached the wire whose reply has not been listened
     /// out. Set for the whole transmit and receive phases, so an exchange
     /// dropped at any point makes the next one drain the bus before driving
@@ -584,11 +590,13 @@ pub(crate) struct HalfDuplexCentralDriver<S> {
 }
 
 impl<S> HalfDuplexCentralDriver<S> {
-    pub(crate) fn new(serial: S, timing: HalfDuplexTiming) -> Self {
+    pub(crate) fn new(serial: S, id: usize, timing: HalfDuplexTiming) -> Self {
         Self {
             serial: SerialSplitDriver::new(serial),
             link: LinkEndpoint::new(),
+            id,
             timing,
+            silent_exchanges: 0,
             reply_pending: false,
             session_fresh: true,
         }
@@ -629,6 +637,7 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
                         if ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0 {
                             self.link.reset();
                             self.session_fresh = false;
+                            set_peripheral_connected(self.id, true);
                             break;
                         }
                     } else {
@@ -688,7 +697,19 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
         self.serial
             .write_frame(ctrl, ack, self.link.credit(), &SplitMessage::HalfDuplexPoll)
             .await?;
-        Ok(self.listen_reply().await? > 0)
+        let answered = self.listen_reply().await? > 0;
+        if answered {
+            self.silent_exchanges = 0;
+        } else if self.silent_exchanges < PEER_LOST_EXCHANGES {
+            self.silent_exchanges += 1;
+            if self.silent_exchanges == PEER_LOST_EXCHANGES {
+                // Whatever answers next may be a rebooted peer with fresh
+                // sequence state; start over with it.
+                self.session_fresh = true;
+                set_peripheral_connected(self.id, false);
+            }
+        }
+        Ok(answered)
     }
 }
 
@@ -999,7 +1020,7 @@ mod tests {
     }
 
     fn central<S>(serial: S) -> HalfDuplexCentralDriver<S> {
-        HalfDuplexCentralDriver::new(serial, HalfDuplexTiming::from_baud(HALF_DUPLEX_DEFAULT_BAUD))
+        HalfDuplexCentralDriver::new(serial, 0, HalfDuplexTiming::from_baud(HALF_DUPLEX_DEFAULT_BAUD))
     }
 
     fn encode_with(ctrl: u8, ack: u8, credit: u8, msg: &SplitMessage) -> Vec<u8> {
@@ -1332,7 +1353,7 @@ mod tests {
         burst.push(encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle));
         let burst_bytes: usize = burst.iter().map(Vec::len).sum();
         let wire = TimedSerial::new(BAUD, [vec![reset_echo()], burst]);
-        let mut driver = HalfDuplexCentralDriver::new(wire, HalfDuplexTiming::from_baud(BAUD));
+        let mut driver = HalfDuplexCentralDriver::new(wire, 0, HalfDuplexTiming::from_baud(BAUD));
 
         let (first, elapsed) = crate::test_support::test_block_on(async {
             let started = Instant::now();
@@ -1363,7 +1384,7 @@ mod tests {
         const BAUD: u32 = 9_600;
         let timing = HalfDuplexTiming::from_baud(BAUD);
         let wire = TimedSerial::new(BAUD, [vec![reset_echo()]]);
-        let mut driver = HalfDuplexCentralDriver::new(wire, timing);
+        let mut driver = HalfDuplexCentralDriver::new(wire, 0, timing);
 
         let (answered, elapsed) = crate::test_support::test_block_on(async {
             assert!(driver.exchange().await.unwrap(), "handshake answered");
@@ -1465,5 +1486,30 @@ mod tests {
         block_on(driver.write(&SplitMessage::TransportOverrideAck(7))).unwrap();
         block_on(driver.flush()).expect_err("never acknowledged");
         assert!(driver.link.control_outstanding());
+    }
+
+    /// The wired slot counts as connected only between the peripheral's
+    /// handshake answer and it falling silent.
+    #[test]
+    fn wired_peripheral_is_connected_only_while_it_answers() {
+        use crate::split::driver::any_peripheral_connected;
+
+        const BAUD: u32 = 115_200;
+        let wire = TimedSerial::new(BAUD, [vec![reset_echo()]]);
+        let mut driver = HalfDuplexCentralDriver::new(wire, 0, HalfDuplexTiming::from_baud(BAUD));
+        assert!(!any_peripheral_connected(), "a running driver alone proves nothing");
+
+        crate::test_support::test_block_on(async {
+            assert!(driver.exchange().await.unwrap());
+            assert!(any_peripheral_connected(), "handshake answered");
+            for _ in 0..PEER_LOST_EXCHANGES - 1 {
+                assert!(!driver.exchange().await.unwrap());
+                assert!(any_peripheral_connected(), "still within the silence allowance");
+            }
+            assert!(!driver.exchange().await.unwrap());
+        });
+
+        assert!(!any_peripheral_connected(), "silent for the whole allowance");
+        assert!(driver.session_fresh, "the next answer renegotiates the session");
     }
 }
