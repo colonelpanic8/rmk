@@ -25,15 +25,19 @@ pub async fn run_peripheral_manager<S: Read + Write>(
 }
 
 /// Run the manager task for one peripheral on a polled half-duplex bus.
+/// `baud` sizes the reply deadlines; see
+/// [`HALF_DUPLEX_DEFAULT_BAUD`](crate::split::serial::HALF_DUPLEX_DEFAULT_BAUD).
 pub async fn run_half_duplex_peripheral_manager<S: Read + Write>(
     id: usize,
     serial: S,
+    baud: u32,
     matrix_config: crate::split::PeripheralMatrixConfig,
     #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) {
     crate::split::serial::run_half_duplex_peripheral_manager(
         id,
         serial,
+        baud,
         matrix_config,
         #[cfg(feature = "dfu_split")]
         policy,
@@ -45,12 +49,14 @@ pub async fn run_half_duplex_peripheral_manager<S: Read + Write>(
 pub async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
     id: usize,
     serial: S,
+    baud: u32,
     matrix_config: crate::split::PeripheralMatrixConfig,
     #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) {
     crate::split::serial::run_auto_half_duplex_peripheral_manager(
         id,
         serial,
+        baud,
         matrix_config,
         #[cfg(feature = "dfu_split")]
         policy,

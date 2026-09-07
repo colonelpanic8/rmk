@@ -95,10 +95,11 @@ pub(crate) async fn run_serial_peripheral_manager<S: Read + Write>(
 pub(crate) async fn run_half_duplex_peripheral_manager<S: Read + Write>(
     id: usize,
     serial: S,
+    baud: u32,
     matrix_config: crate::split::PeripheralMatrixConfig,
     #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) {
-    let driver = HalfDuplexCentralDriver::new(serial);
+    let driver = HalfDuplexCentralDriver::new(serial, HalfDuplexTiming::from_baud(baud));
     let mut peripheral_manager = PeripheralManager::new(
         driver,
         id,
@@ -115,10 +116,11 @@ pub(crate) async fn run_half_duplex_peripheral_manager<S: Read + Write>(
 pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
     id: usize,
     serial: S,
+    baud: u32,
     matrix_config: crate::split::PeripheralMatrixConfig,
     #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
 ) {
-    let driver = HalfDuplexCentralDriver::new(serial);
+    let driver = HalfDuplexCentralDriver::new(serial, HalfDuplexTiming::from_baud(baud));
     let mut peripheral_manager = PeripheralManager::new(
         driver,
         id,
@@ -188,8 +190,8 @@ const RETRANSMIT_AFTER_EXCHANGES: u8 = 3;
 const INBOX_CAPACITY: usize = 8;
 /// Queued outgoing frames per lane.
 const LANE_CAPACITY: usize = 8;
-/// Sequenced frames sent per exchange, so one exchange stays well under the
-/// response timeout even when the whole window retransmits.
+/// Sequenced frames sent per exchange; bounds the reply burst the central
+/// budgets wire time for.
 const FRAMES_PER_EXCHANGE: usize = 4;
 
 /// `true` if sequence `a` precedes `b` in mod-64 arithmetic.
@@ -508,16 +510,52 @@ impl<S: Write> SplitWriter for SerialSplitDriver<S> {
 }
 
 const HALF_DUPLEX_POLL_INTERVAL: Duration = Duration::from_millis(1);
-const HALF_DUPLEX_RESPONSE_TIMEOUT: Duration = Duration::from_millis(5);
 /// How long the peripheral waits after a poll before answering, so the
 /// central's receiver is provably enabled before the reply's first byte.
 const HALF_DUPLEX_REPLY_GAP: Duration = Duration::from_millis(2);
+/// Scheduling and interrupt latency allowed on top of pure wire time for
+/// every reply deadline.
+const HALF_DUPLEX_REPLY_SLACK: Duration = Duration::from_millis(3);
+/// Poll bytes that may still be leaving a TX FIFO when the write returns.
+/// A poll encodes to ten bytes.
+const HALF_DUPLEX_POLL_BYTES: u32 = 16;
+/// Baud rate assumed when the board does not configure one.
+pub const HALF_DUPLEX_DEFAULT_BAUD: u32 = 115_200;
 /// Exchanges a control-lane write waits for its acknowledgement before
 /// reporting the link dead.
 const CONTROL_ACK_EXCHANGES: usize = 32;
 /// Consecutive exchanges without acknowledgement progress before the central
 /// assumes the peer rebooted and renegotiates the sequence session.
 const STUCK_ACK_EXCHANGES: u8 = 24;
+
+/// Wire-time budget of one half-duplex exchange, derived from the baud rate
+/// so the receive phase outlasts the longest valid reply burst.
+#[derive(Clone, Copy)]
+pub(crate) struct HalfDuplexTiming {
+    /// From the poll's write returning until its first reply frame is
+    /// complete: poll bytes still in flight, the reply gap, one full frame,
+    /// and slack.
+    first_frame: Duration,
+    /// Allowance for each further frame of a burst.
+    next_frame: Duration,
+    /// Longest valid burst: a full window of data frames plus the
+    /// terminator, after the gap.
+    burst: Duration,
+}
+
+impl HalfDuplexTiming {
+    pub(crate) fn from_baud(baud: u32) -> Self {
+        // 8N1: ten bit times per byte.
+        let byte = Duration::from_micros(10_000_000u64.div_ceil(baud.max(1) as u64));
+        let frame = byte * SPLIT_MESSAGE_MAX_SIZE as u32;
+        let poll = byte * HALF_DUPLEX_POLL_BYTES;
+        Self {
+            first_frame: poll + HALF_DUPLEX_REPLY_GAP + frame + HALF_DUPLEX_REPLY_SLACK,
+            next_frame: frame + HALF_DUPLEX_REPLY_SLACK,
+            burst: poll + HALF_DUPLEX_REPLY_GAP + frame * (FRAMES_PER_EXCHANGE as u32 + 1) + HALF_DUPLEX_REPLY_SLACK,
+        }
+    }
+}
 
 /// Central side of the polled half-duplex bus.
 ///
@@ -530,20 +568,24 @@ const STUCK_ACK_EXCHANGES: u8 = 24;
 pub(crate) struct HalfDuplexCentralDriver<S> {
     serial: SerialSplitDriver<S>,
     link: LinkEndpoint,
-    /// Deadline until which the peripheral may still be answering the last
-    /// poll. `None` when the bus is known quiet.
-    response_deadline: Option<Instant>,
+    timing: HalfDuplexTiming,
+    /// A poll may have reached the wire whose reply has not been listened
+    /// out. Set for the whole transmit and receive phases, so an exchange
+    /// dropped at any point makes the next one drain the bus before driving
+    /// it.
+    reply_pending: bool,
     /// The sequence handshake is pending: polls carry [`RESET_FLAG`] and
     /// data transfer waits until the peripheral echoes it.
     session_fresh: bool,
 }
 
 impl<S> HalfDuplexCentralDriver<S> {
-    pub(crate) fn new(serial: S) -> Self {
+    pub(crate) fn new(serial: S, timing: HalfDuplexTiming) -> Self {
         Self {
             serial: SerialSplitDriver::new(serial),
             link: LinkEndpoint::new(),
-            response_deadline: None,
+            timing,
+            reply_pending: false,
             session_fresh: true,
         }
     }
@@ -557,12 +599,23 @@ impl<S> HalfDuplexCentralDriver<S> {
 }
 
 impl<S: Read + Write> HalfDuplexCentralDriver<S> {
-    /// Listen until the current response window closes: the peripheral's
-    /// terminator arrived, a frame proved corrupt, or the deadline passed.
-    /// Data frames land in the link inbox. Returns how many frames arrived.
-    async fn drain_response_window(&mut self) -> Result<usize, SplitDriverError> {
+    /// Listen out the reply to the last poll: until the peripheral's
+    /// terminator, until the bus stays quiet for a frame time, or until the
+    /// longest valid burst has elapsed. Accepted frames land in the link
+    /// inbox. A corrupt frame is skipped, not treated as the end of the
+    /// burst: the peripheral keeps the bus until its terminator regardless.
+    /// A transport fault is reported only once the bus has gone quiet, so
+    /// the caller never transmits into the rest of a burst. Returns how many
+    /// frames, corrupt ones included, arrived.
+    async fn listen_reply(&mut self) -> Result<usize, SplitDriverError> {
+        if !self.reply_pending {
+            return Ok(0);
+        }
+        let end = Instant::now() + self.timing.burst;
+        let mut deadline = Instant::now() + self.timing.first_frame;
         let mut frames = 0;
-        while let Some(deadline) = self.response_deadline {
+        let mut fault = None;
+        loop {
             match with_deadline(deadline, self.serial.read_frame()).await {
                 Ok(Ok((ctrl, ack, credit, message))) => {
                     frames += 1;
@@ -572,59 +625,66 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
                         if ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0 {
                             self.link.reset();
                             self.session_fresh = false;
-                            self.response_deadline = None;
+                            break;
                         }
-                        continue;
-                    }
-                    self.link.on_header(ack, credit);
-                    if ctrl & SEQ_FLAG != 0 {
-                        self.link.accept(ctrl & SEQ_MASK, message);
-                    } else if matches!(message, SplitMessage::HalfDuplexIdle) {
-                        self.response_deadline = None;
+                    } else {
+                        self.link.on_header(ack, credit);
+                        if ctrl & SEQ_FLAG != 0 {
+                            self.link.accept(ctrl & SEQ_MASK, message);
+                        } else if matches!(message, SplitMessage::HalfDuplexIdle) {
+                            break;
+                        }
                     }
                 }
-                Ok(Err(e)) => {
-                    self.response_deadline = None;
-                    return Err(e);
-                }
-                Err(_timeout) => self.response_deadline = None,
+                Ok(Err(SplitDriverError::SerializeError)) => frames += 1,
+                Ok(Err(e)) => fault = Some(e),
+                Err(_quiet) => break,
             }
+            let now = Instant::now();
+            if now >= end {
+                break;
+            }
+            deadline = (now + self.timing.next_frame).min(end);
         }
-        Ok(frames)
+        self.reply_pending = false;
+        match fault {
+            Some(e) => Err(e),
+            None => Ok(frames),
+        }
     }
 
     /// One full exchange: transmit queued and retransmitted frames plus a
-    /// poll, then listen out the response window. Returns `true` if the
-    /// peripheral answered at all.
+    /// poll, then listen out the reply. Returns `true` if the peripheral
+    /// answered at all.
     async fn exchange(&mut self) -> Result<bool, SplitDriverError> {
-        self.drain_response_window().await?;
+        self.listen_reply().await?;
         // A peer whose responses arrive but never acknowledge anything is
         // running a different sequence session (it rebooted); renegotiate.
         if self.link.exchanges_without_ack >= STUCK_ACK_EXCHANGES {
             self.session_fresh = true;
         }
-        if self.session_fresh {
-            self.response_deadline = Some(Instant::now() + HALF_DUPLEX_RESPONSE_TIMEOUT);
-            self.serial
-                .write_frame(RESET_FLAG, 0, self.link.credit(), &SplitMessage::HalfDuplexPoll)
-                .await?;
-            return Ok(self.drain_response_window().await? > 0);
-        }
         let mut burst: Deque<(u8, SplitMessage), FRAMES_PER_EXCHANGE> = Deque::new();
-        self.link.fill_burst(&mut burst);
-        // Armed BEFORE the writes: if this future is dropped mid-send the
+        if !self.session_fresh {
+            self.link.fill_burst(&mut burst);
+        }
+        // Set BEFORE the writes: if this future is dropped mid-send the
         // poll may still reach the wire, and the next transmission must not
         // drive over the reply it provokes.
-        self.response_deadline = Some(Instant::now() + HALF_DUPLEX_RESPONSE_TIMEOUT);
+        self.reply_pending = true;
         while let Some((seq, message)) = burst.pop_front() {
             self.serial
                 .write_frame(SEQ_FLAG | seq, self.link.expected, self.link.credit(), &message)
                 .await?;
         }
+        let (ctrl, ack) = if self.session_fresh {
+            (RESET_FLAG, 0)
+        } else {
+            (0, self.link.expected)
+        };
         self.serial
-            .write_frame(0, self.link.expected, self.link.credit(), &SplitMessage::HalfDuplexPoll)
+            .write_frame(ctrl, ack, self.link.credit(), &SplitMessage::HalfDuplexPoll)
             .await?;
-        Ok(self.drain_response_window().await? > 0)
+        Ok(self.listen_reply().await? > 0)
     }
 }
 
@@ -797,16 +857,21 @@ mod tests {
     use super::*;
 
     /// Fake `embedded_io_async::Read`: each `serial.read()` call returns the
-    /// next scripted chunk. Panics if the driver calls `read()` more times
-    /// than we scripted — that is itself a useful assertion.
+    /// next scripted chunk, or a transport error for a `None` entry. Panics
+    /// if the driver calls `read()` more times than we scripted — that is
+    /// itself a useful assertion.
     struct FakeSerial {
-        chunks: VecDeque<Vec<u8>>,
+        chunks: VecDeque<Option<Vec<u8>>>,
         read_calls: usize,
         writes: Vec<Vec<u8>>,
     }
 
     impl FakeSerial {
         fn new<I: IntoIterator<Item = Vec<u8>>>(chunks: I) -> Self {
+            Self::scripted(chunks.into_iter().map(Some))
+        }
+
+        fn scripted<I: IntoIterator<Item = Option<Vec<u8>>>>(chunks: I) -> Self {
             Self {
                 chunks: chunks.into_iter().collect(),
                 read_calls: 0,
@@ -816,7 +881,7 @@ mod tests {
     }
 
     impl ErrorType for FakeSerial {
-        type Error = Infallible;
+        type Error = embedded_io_async::ErrorKind;
     }
 
     impl Read for FakeSerial {
@@ -825,7 +890,8 @@ mod tests {
             let chunk = self
                 .chunks
                 .pop_front()
-                .expect("SerialSplitDriver made an unexpected underlying read() call");
+                .expect("SerialSplitDriver made an unexpected underlying read() call")
+                .ok_or(embedded_io_async::ErrorKind::Other)?;
             assert!(
                 chunk.len() <= buf.len(),
                 "scripted chunk larger than driver's read slice"
@@ -844,6 +910,66 @@ mod tests {
         async fn flush(&mut self) -> Result<(), Self::Error> {
             Ok(())
         }
+    }
+
+    /// A peripheral on a wire with real byte times, on the mock clock. Every
+    /// write takes its wire time; the reply scripted for the n-th write then
+    /// arrives frame by frame, each after the reply gap or its own wire time.
+    /// With nothing scripted the bus is silent.
+    struct TimedSerial {
+        byte: Duration,
+        replies: VecDeque<Vec<Vec<u8>>>,
+        pending: VecDeque<(Instant, Vec<u8>)>,
+        writes: Vec<Vec<u8>>,
+    }
+
+    impl TimedSerial {
+        fn new<I: IntoIterator<Item = Vec<Vec<u8>>>>(baud: u32, replies: I) -> Self {
+            Self {
+                byte: Duration::from_micros(10_000_000 / baud as u64),
+                replies: replies.into_iter().collect(),
+                pending: VecDeque::new(),
+                writes: Vec::new(),
+            }
+        }
+    }
+
+    impl ErrorType for TimedSerial {
+        type Error = Infallible;
+    }
+
+    impl Read for TimedSerial {
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+            let arrives = match self.pending.front() {
+                Some((at, _)) => *at,
+                None => core::future::pending().await,
+            };
+            Timer::at(arrives).await;
+            let (_, frame) = self.pending.pop_front().unwrap();
+            buf[..frame.len()].copy_from_slice(&frame);
+            Ok(frame.len())
+        }
+    }
+
+    impl Write for TimedSerial {
+        async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+            self.writes.push(buf.to_vec());
+            Timer::after(self.byte * buf.len() as u32).await;
+            let mut at = Instant::now() + HALF_DUPLEX_REPLY_GAP;
+            for frame in self.replies.pop_front().unwrap_or_default() {
+                at += self.byte * frame.len() as u32;
+                self.pending.push_back((at, frame));
+            }
+            Ok(buf.len())
+        }
+
+        async fn flush(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    fn central<S>(serial: S) -> HalfDuplexCentralDriver<S> {
+        HalfDuplexCentralDriver::new(serial, HalfDuplexTiming::from_baud(HALF_DUPLEX_DEFAULT_BAUD))
     }
 
     fn encode_with(ctrl: u8, ack: u8, credit: u8, msg: &SplitMessage) -> Vec<u8> {
@@ -889,7 +1015,7 @@ mod tests {
         let mut reply = seq_frame(0, 0, &SplitMessage::LedState(true));
         reply.extend_from_slice(&encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle));
         let fake = FakeSerial::new([reset_echo(), reply]);
-        let mut driver = HalfDuplexCentralDriver::new(fake);
+        let mut driver = central(fake);
 
         let message = block_on(driver.read()).unwrap();
 
@@ -908,7 +1034,7 @@ mod tests {
         let mut second = seq_frame(1, 0, &SplitMessage::LedState(false));
         second.extend_from_slice(&encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle));
         let fake = FakeSerial::new([reset_echo(), reply, second]);
-        let mut driver = HalfDuplexCentralDriver::new(fake);
+        let mut driver = central(fake);
 
         let first = block_on(driver.read()).unwrap();
         assert!(matches!(first, SplitMessage::LedState(true)));
@@ -1048,7 +1174,7 @@ mod tests {
         let credit_grant = encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle);
         let window_ack = encode_with(0, 4, 8, &SplitMessage::HalfDuplexIdle);
         let fake = FakeSerial::new([reset_echo(), credit_grant, window_ack]);
-        let mut driver = HalfDuplexCentralDriver::new(fake);
+        let mut driver = central(fake);
 
         for _ in 0..LANE_CAPACITY {
             block_on(driver.write(&SplitMessage::HalfDuplexIdle)).unwrap();
@@ -1162,5 +1288,125 @@ mod tests {
         let writes = decoded_writes(&driver.serial.serial.writes);
         let echo = writes.iter().find(|w| w.0 & RESET_FLAG != 0).expect("reset echoed");
         assert!(matches!(echo.3, SplitMessage::HalfDuplexIdle));
+    }
+
+    /// At a slow baud a full reply burst takes far longer than any fixed
+    /// millisecond window; the receive phase must still take it whole.
+    #[test]
+    fn slow_baud_reply_burst_is_received_in_one_exchange() {
+        const BAUD: u32 = 9_600;
+        let status = rmk_types::connection::ConnectionStatus::default();
+        let mut burst: Vec<Vec<u8>> = (0..FRAMES_PER_EXCHANGE as u8)
+            .map(|seq| seq_frame(seq, 0, &SplitMessage::ConnectionStatus(status)))
+            .collect();
+        burst.push(encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle));
+        let burst_bytes: usize = burst.iter().map(Vec::len).sum();
+        let wire = TimedSerial::new(BAUD, [vec![reset_echo()], burst]);
+        let mut driver = HalfDuplexCentralDriver::new(wire, HalfDuplexTiming::from_baud(BAUD));
+
+        let (first, elapsed) = crate::test_support::test_block_on(async {
+            let started = Instant::now();
+            let first = driver.read().await.unwrap();
+            (first, Instant::now() - started)
+        });
+
+        assert!(matches!(first, SplitMessage::ConnectionStatus(_)));
+        let wire_time = Duration::from_micros(10_000_000 / BAUD as u64) * burst_bytes as u32;
+        assert!(
+            elapsed >= wire_time,
+            "burst needs {:?} of wire time, read took {:?}",
+            wire_time,
+            elapsed
+        );
+        assert_eq!(driver.link.inbox.len(), FRAMES_PER_EXCHANGE - 1, "whole burst accepted");
+        assert_eq!(
+            driver.serial.serial.writes.len(),
+            2,
+            "handshake poll and one data poll: nothing transmitted into the burst"
+        );
+    }
+
+    /// A silent peripheral is given one frame time after the gap, not the
+    /// whole burst budget, so idle polling stays responsive.
+    #[test]
+    fn silent_peripheral_bounds_the_listen_phase() {
+        const BAUD: u32 = 9_600;
+        let timing = HalfDuplexTiming::from_baud(BAUD);
+        let wire = TimedSerial::new(BAUD, [vec![reset_echo()]]);
+        let mut driver = HalfDuplexCentralDriver::new(wire, timing);
+
+        let (answered, elapsed) = crate::test_support::test_block_on(async {
+            assert!(driver.exchange().await.unwrap(), "handshake answered");
+            let started = Instant::now();
+            let answered = driver.exchange().await.unwrap();
+            (answered, Instant::now() - started)
+        });
+
+        assert!(!answered);
+        assert!(
+            elapsed >= timing.first_frame,
+            "listened at least a frame time: {:?}",
+            elapsed
+        );
+        assert!(elapsed < timing.burst, "gave up before the burst budget: {:?}", elapsed);
+    }
+
+    /// A corrupt frame mid-burst is skipped; the central keeps listening
+    /// until the terminator instead of driving into the rest of the burst.
+    #[test]
+    fn corrupt_reply_frame_keeps_the_listen_phase_open() {
+        let status = rmk_types::connection::ConnectionStatus::default();
+        let mut reply = seq_frame(0, 0, &SplitMessage::LedState(true));
+        let mut bad = seq_frame(1, 0, &SplitMessage::LedState(false));
+        let idx = bad.len() / 2;
+        bad[idx] = if bad[idx] == 0xFF { 0xFE } else { 0xFF };
+        reply.extend_from_slice(&bad);
+        reply.extend_from_slice(&seq_frame(2, 0, &SplitMessage::ConnectionStatus(status)));
+        reply.extend_from_slice(&encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle));
+        let fake = FakeSerial::new([reset_echo(), reply]);
+        let mut driver = central(fake);
+
+        let first = block_on(driver.read()).expect("the good frame is delivered despite the corrupt one");
+
+        assert!(matches!(first, SplitMessage::LedState(true)));
+        assert_eq!(
+            driver.serial.n_bytes_part, 0,
+            "the burst was consumed through its terminator"
+        );
+        assert_eq!(
+            driver.link.expected, 1,
+            "seq 2 after the lost seq 1 is out of order and awaits retransmit"
+        );
+        assert_eq!(
+            driver.serial.serial.writes.len(),
+            2,
+            "no poll transmitted into the burst"
+        );
+    }
+
+    /// A transport fault during a burst surfaces only after the bus has gone
+    /// quiet; frames that followed the fault are still delivered.
+    #[test]
+    fn transport_fault_is_reported_after_the_bus_goes_quiet() {
+        let mut tail = seq_frame(0, 0, &SplitMessage::LedState(true));
+        tail.extend_from_slice(&encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle));
+        let fake = FakeSerial::scripted([Some(reset_echo()), None, Some(tail)]);
+        let mut driver = central(fake);
+
+        let err = block_on(driver.read()).expect_err("the fault is reported");
+        assert!(matches!(err, SplitDriverError::SerialError));
+        assert_eq!(
+            driver.serial.serial.writes.len(),
+            2,
+            "no poll between the fault and the terminator"
+        );
+
+        let next = block_on(driver.read()).unwrap();
+        assert!(matches!(next, SplitMessage::LedState(true)));
+        assert_eq!(
+            driver.serial.serial.writes.len(),
+            2,
+            "delivered from the inbox without a new exchange"
+        );
     }
 }

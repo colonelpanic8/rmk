@@ -196,17 +196,22 @@ pub(crate) fn rmk_entry_select(
                             } else {
                                 quote! {}
                             };
-                            let manager = if automatic {
-                                quote! { ::rmk::split::central::run_auto_half_duplex_peripheral_manager }
+                            let baud = match central_serials[idx].baudrate {
+                                Some(baud) => quote! { #baud, },
+                                None => quote! { ::rmk::split::serial::HALF_DUPLEX_DEFAULT_BAUD, },
+                            };
+                            let (manager, baud) = if automatic {
+                                (quote! { ::rmk::split::central::run_auto_half_duplex_peripheral_manager }, baud)
                             } else if central_serials[idx].half_duplex {
-                                quote! { ::rmk::split::central::run_half_duplex_peripheral_manager }
+                                (quote! { ::rmk::split::central::run_half_duplex_peripheral_manager }, baud)
                             } else {
-                                quote! { ::rmk::split::central::run_peripheral_manager }
+                                (quote! { ::rmk::split::central::run_peripheral_manager }, quote! {})
                             };
                             tasks.push(quote! {
                                 #manager(
                                     #idx,
                                     #uart_instance,
+                                    #baud
                                     ::rmk::split::PeripheralMatrixConfig {
                                         rows: #row,
                                         cols: #col,

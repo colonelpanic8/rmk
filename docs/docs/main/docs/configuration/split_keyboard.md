@@ -171,7 +171,8 @@ serial = [{
 
 `timer` and `ppi_channels` are optional together; they default to `TIMER2`,
 `PPI_CH0`, and `PPI_CH1`. Choose different resources if the board already uses
-those peripherals.
+those peripherals. `baudrate` defaults to 115200; the central also derives its
+reply deadlines from it, so set it on both halves and keep them equal.
 
 To prefer that wired link while a cable is present and otherwise use BLE
 between the halves, select `auto` and add the cable-detect GPIO to both boards:
