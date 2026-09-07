@@ -157,6 +157,12 @@ macro_rules! endpoints {
             $( core::assert!(!Cmd::from_raw($cmd).is_topic(), "request CMD value in the topic range"); )*
             assert_unique(&[$($cmd),*]);
         };
+        impl Cmd {
+            /// Every request command compiled in, in table order.
+            pub const ENDPOINTS: &'static [Cmd] = &[
+                $( $(#[$meta])* Cmd::$name, )*
+            ];
+        }
         /// Largest request-or-wrapped-response across the whole endpoint table
         /// (bulk included) — folded firmware-side only, where every payload is a
         /// bounded type with a `MaxSize`.

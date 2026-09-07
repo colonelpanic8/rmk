@@ -40,13 +40,22 @@ impl<'a> RynkService<'a> {
         }
     }
 
-    /// Whether `cmd` is available only while maintenance mode is enabled.
+    /// Whether the maintenance lock covers `cmd`. A command missing from both
+    /// lists in [`Self::maintenance_policy`] is treated as locked, so a new
+    /// endpoint cannot bypass the lock by omission.
     fn requires_maintenance_mode(cmd: Cmd) -> bool {
+        Self::maintenance_policy(cmd).unwrap_or(true)
+    }
+
+    /// `Some(true)` for mutations and sensitive operations, `Some(false)` for
+    /// plain reads, `None` for a command nobody has classified yet (the
+    /// `every_endpoint_has_a_maintenance_policy` test keeps that set empty).
+    fn maintenance_policy(cmd: Cmd) -> Option<bool> {
         match cmd {
-            Cmd::Reboot | Cmd::BootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => true,
+            Cmd::Reboot | Cmd::BootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => Some(true),
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
             #[cfg(feature = "_ble")]
-            Cmd::ClearBleProfile => true,
+            Cmd::ClearBleProfile => Some(true),
             Cmd::SetKeyAction
             | Cmd::SetDefaultLayer
             | Cmd::SetEncoderAction
@@ -57,8 +66,37 @@ impl<'a> RynkService<'a> {
             | Cmd::SetBehaviorConfig
             | Cmd::SetKeymapBulk
             | Cmd::SetComboBulk
-            | Cmd::SetMorseBulk => true,
-            _ => false,
+            | Cmd::SetMorseBulk => Some(true),
+            Cmd::GetVersion
+            | Cmd::GetCapabilities
+            | Cmd::GetLockStatus
+            | Cmd::UnlockPoll
+            | Cmd::Lock
+            | Cmd::GetLayout
+            | Cmd::GetDeviceInfo
+            | Cmd::GetMaintenanceMode
+            | Cmd::GetKeyAction
+            | Cmd::GetDefaultLayer
+            | Cmd::GetEncoderAction
+            | Cmd::GetKeymapBulk
+            | Cmd::GetMacro
+            | Cmd::GetCombo
+            | Cmd::GetComboBulk
+            | Cmd::GetMorse
+            | Cmd::GetMorseBulk
+            | Cmd::GetFork
+            | Cmd::GetBehaviorConfig
+            | Cmd::GetConnectionType
+            | Cmd::GetConnectionStatus
+            | Cmd::GetCurrentLayer
+            | Cmd::GetWpm
+            | Cmd::GetSleepState
+            | Cmd::GetLedIndicator => Some(false),
+            #[cfg(feature = "_ble")]
+            Cmd::GetBleStatus | Cmd::SwitchBleProfile | Cmd::GetBatteryStatus => Some(false),
+            #[cfg(feature = "split")]
+            Cmd::GetPeripheralStatus => Some(false),
+            _ => None,
         }
     }
 
@@ -322,6 +360,16 @@ mod tests {
 
     /// A read carrying more than one frame serves them all, in order: the
     /// pipelined tail is parked out of each reply's way, never dropped.
+    #[test]
+    fn every_endpoint_has_a_maintenance_policy() {
+        let unclassified: Vec<Cmd> = Cmd::ENDPOINTS
+            .iter()
+            .copied()
+            .filter(|cmd| RynkService::maintenance_policy(*cmd).is_none())
+            .collect();
+        assert!(unclassified.is_empty(), "unclassified commands: {unclassified:?}");
+    }
+
     #[test]
     fn run_session_serves_every_frame_of_a_coalesced_read() {
         let mut behavior = BehaviorConfig::default();
