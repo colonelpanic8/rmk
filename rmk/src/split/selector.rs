@@ -138,6 +138,15 @@ pub async fn wait_wired_selected() {
     }
 }
 
+/// Suspend until the effective selection next changes.
+pub async fn wait_selection_changed() {
+    let mut changed = SELECTION_CHANGED
+        .dyn_receiver()
+        .expect("selection watch sized for all concurrent waiters");
+    let _ = changed.try_get();
+    changed.changed().await;
+}
+
 pub async fn wait_wireless_selected() {
     let mut changed = SELECTION_CHANGED
         .dyn_receiver()
