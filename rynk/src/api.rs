@@ -28,11 +28,10 @@ use rmk_types::protocol::rynk::{
     BehaviorOptions, BleName, BuildInfo, ClearLightingOverlayRequest, Cmd, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
     DeviceDataDescriptor, DeviceDataRecord, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
-    GetComboDefinitionBulkResponse, GetEncoderRequest,
-    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerMetadata,
-    LayerState,
-    LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
+    GetComboDefinitionBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest,
+    GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse,
+    GetMorseProfileStateRequest, KeyPosition, LayerMetadata, LayerState, LightingCapabilities,
+    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
     LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage, LightingExtension,
     LightingExtensionLayers, LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionNamesRequest,
     LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest,
@@ -45,18 +44,15 @@ use rmk_types::protocol::rynk::{
     LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MaintenanceMode, MatrixState,
     MorseHoldTriggerPositionState, MorseProfileEntry, MorseProfileState, PeripheralStatus, PointingCapabilities,
     PointingConfig, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
-    PutLightingOverlayChunkRequest,
-    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetAutoMouseLayerConfigsRequest,
-    SetComboBulkRequest, SetComboDefinitionBulkRequest, SetComboDefinitionRequest, SetComboRequest, SetEncoderRequest,
-    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
-    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
-    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetLightingWakeLayersRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest,
-    SetMorseProfileBulkRequest,
-    SetLayerMetadataRequest, SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest,
-    SetPointingConfigRequest,
-    SplitCentralLatencyPolicy, SplitCentralLatencyState, SplitTransportForce, SplitTransportState, StorageResetMode,
-    UnsetLightingOverlayRequest,
+    PutLightingOverlayChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
+    SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboDefinitionBulkRequest, SetComboDefinitionRequest,
+    SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLayerMetadataRequest,
+    SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
+    SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
+    SetLightingSceneCellRequest, SetLightingStateRequest, SetLightingWakeLayersRequest, SetMacroRequest,
+    SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
+    SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, SplitCentralLatencyPolicy,
+    SplitCentralLatencyState, SplitTransportForce, SplitTransportState, StorageResetMode, UnsetLightingOverlayRequest,
     UnsetLightingSceneCellRequest, command,
 };
 #[cfg(feature = "alloc")]
@@ -231,10 +227,7 @@ impl Client {
     /// Persist one fixed layer slot's logical occupancy and name.
     pub async fn set_layer_metadata(&self, layer: u8, metadata: LayerMetadata) -> Result<(), RynkHostError> {
         if !self.capabilities.storage_enabled {
-            return Err(RynkHostError::Unsupported(
-                Cmd::SetLayerMetadata,
-                "storage not enabled",
-            ));
+            return Err(RynkHostError::Unsupported(Cmd::SetLayerMetadata, "storage not enabled"));
         }
         self.request::<command::SetLayerMetadata>(&SetLayerMetadataRequest { layer, metadata })
             .await
