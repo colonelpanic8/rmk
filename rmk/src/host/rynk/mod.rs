@@ -167,12 +167,14 @@ impl<'a> RynkService<'a> {
             | Cmd::SetEncoderAction
             | Cmd::SetMacro
             | Cmd::SetCombo
+            | Cmd::SetComboDefinition
             | Cmd::SetMorse
             | Cmd::SetFork
             | Cmd::SetBehaviorConfig
             | Cmd::SetPointingConfig
             | Cmd::SetKeymapBulk
             | Cmd::SetComboBulk
+            | Cmd::SetComboDefinitionBulk
             | Cmd::SetMorseBulk
             | Cmd::SetMorseHoldTriggerPositions
             | Cmd::SetMorseProfile
@@ -255,6 +257,10 @@ impl<'a> RynkService<'a> {
             Cmd::SetCombo => serve::<command::SetCombo, _>(self, msg).await,
             Cmd::GetComboBulk => serve_bulk::<command::GetComboBulk, _>(self, msg).await,
             Cmd::SetComboBulk => serve_bulk::<command::SetComboBulk, _>(self, msg).await,
+            Cmd::GetComboDefinition => serve::<command::GetComboDefinition, _>(self, msg).await,
+            Cmd::SetComboDefinition => serve::<command::SetComboDefinition, _>(self, msg).await,
+            Cmd::GetComboDefinitionBulk => serve_bulk::<command::GetComboDefinitionBulk, _>(self, msg).await,
+            Cmd::SetComboDefinitionBulk => serve_bulk::<command::SetComboDefinitionBulk, _>(self, msg).await,
             Cmd::GetMorse => serve::<command::GetMorse, _>(self, msg).await,
             Cmd::SetMorse => serve::<command::SetMorse, _>(self, msg).await,
             Cmd::GetMorseBulk => serve_bulk::<command::GetMorseBulk, _>(self, msg).await,
