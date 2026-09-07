@@ -101,10 +101,8 @@ impl MorseProfile {
             Some(true) => UNI_TAP_MASK,
             Some(false) if self.0 & UNI_TAP_MASK == UNI_TAP_LOW_BIT => UNI_TAP_LOW_BIT,
             Some(false) => UNI_TAP_HIGH_BIT,
-            // Preserve the distinct opposite-hand policy when clearing only
-            // unilateral tap; otherwise retain the historical clear behavior.
-            None if self.0 & UNI_TAP_MASK == UNI_TAP_LOW_BIT => UNI_TAP_LOW_BIT,
-            None => 0,
+            // Absent leaves the packed hand policy untouched.
+            None => self.0 & UNI_TAP_MASK,
         };
         Self((self.0 & !UNI_TAP_MASK) | bits)
     }
@@ -128,9 +126,8 @@ impl MorseProfile {
             Some(true) => UNI_TAP_LOW_BIT,
             Some(false) if self.0 & UNI_TAP_MASK == UNI_TAP_MASK => UNI_TAP_MASK,
             Some(false) => UNI_TAP_HIGH_BIT,
-            // Preserve unilateral tap when this field is absent.
-            None if self.0 & UNI_TAP_MASK == UNI_TAP_MASK => UNI_TAP_MASK,
-            None => 0,
+            // Absent leaves the packed hand policy untouched.
+            None => self.0 & UNI_TAP_MASK,
         };
         Self((self.0 & !UNI_TAP_MASK) | bits)
     }
@@ -874,6 +871,18 @@ mod tests {
         assert_eq!(unilateral.opposite_hand_hold(), Some(false));
         assert_eq!(unilateral.with_opposite_hand_hold(None), unilateral);
         assert_eq!(enabled.with_unilateral_tap(None), enabled);
+    }
+
+    #[test]
+    fn absent_hand_policy_keeps_explicit_false() {
+        // Codegen builds `new(Some(false), ..)` and then chains the other
+        // policy's absent option; neither may erase the explicit false.
+        let profile = MorseProfile::new(Some(false), None, None, None).with_opposite_hand_hold(None);
+        assert_eq!(profile.unilateral_tap(), Some(false));
+        let profile = MorseProfile::const_default()
+            .with_opposite_hand_hold(Some(false))
+            .with_unilateral_tap(None);
+        assert_eq!(profile.opposite_hand_hold(), Some(false));
     }
 
     #[test]
