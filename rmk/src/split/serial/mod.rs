@@ -355,6 +355,17 @@ impl LinkEndpoint {
         self.exchanges_without_ack = 0;
     }
 
+    /// Drop everything queued for or received from the old session. Nothing
+    /// survives an epoch: a key event, override, or snapshot that was still
+    /// queued when the session ended belongs to a state the peer no longer
+    /// has, and the layers above re-send their snapshots on link-up.
+    fn clear_queues(&mut self) {
+        self.control.clear();
+        self.input.clear();
+        self.bulk.clear();
+        self.inbox.clear();
+    }
+
     /// A control-lane message is still queued or awaiting acknowledgement.
     fn control_outstanding(&self) -> bool {
         !self.control.is_empty() || self.unacked.iter().any(|(_, m)| matches!(lane_of(m), Lane::Control))
@@ -602,10 +613,13 @@ impl<S> HalfDuplexCentralDriver<S> {
         }
     }
 
-    /// Restart the sequence handshake at the next exchange. Called whenever
+    /// Start a session: drop whatever the previous one left queued and
+    /// restart the sequence handshake at the next exchange. Called whenever
     /// a wired session (re)starts: the peer may have rebooted since the last
     /// one, and stale sequence state would deadlock the link.
     pub(crate) fn begin_session(&mut self) {
+        self.link.clear_queues();
+        self.link.reset();
         self.session_fresh = true;
     }
 }
@@ -784,6 +798,9 @@ pub(crate) struct HalfDuplexPeripheralDriver<S> {
     serial: SerialSplitDriver<S>,
     link: LinkEndpoint,
     reply_gap: Duration,
+    /// Session handshakes served, so a flush can tell that its frame was
+    /// dropped by a reset rather than acknowledged.
+    resets: u32,
 }
 
 impl<S> HalfDuplexPeripheralDriver<S> {
@@ -798,7 +815,15 @@ impl<S> HalfDuplexPeripheralDriver<S> {
             serial: SerialSplitDriver::new(serial),
             link: LinkEndpoint::new(),
             reply_gap,
+            resets: 0,
         }
+    }
+
+    /// Start a session: drop whatever the previous one left queued. The
+    /// sequence state follows the central's handshake.
+    pub(crate) fn begin_session(&mut self) {
+        self.link.clear_queues();
+        self.link.reset();
     }
 }
 
@@ -817,9 +842,12 @@ impl<S: Read + Write> HalfDuplexPeripheralDriver<S> {
     async fn serve(&mut self) -> Result<(), SplitDriverError> {
         let (ctrl, ack, credit, message) = self.serial.read_frame().await?;
         if ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0 {
-            // Fresh session: zero the sequence state and echo the flag so
-            // the central knows it may start sending data.
+            // Fresh session: start from empty queues and zeroed sequence
+            // state, and echo the flag so the central knows it may start
+            // sending data.
             self.link.reset();
+            self.link.clear_queues();
+            self.resets = self.resets.wrapping_add(1);
             if self.reply_gap.as_ticks() != 0 {
                 Timer::after(self.reply_gap).await;
             }
@@ -885,7 +913,11 @@ impl<S: Read + Write> SplitWriter for HalfDuplexPeripheralDriver<S> {
     /// `read`. Bounded: a central that stops polling is not waited for.
     async fn flush(&mut self) -> Result<(), SplitDriverError> {
         let deadline = Instant::now() + CONTROL_FLUSH_TIMEOUT;
+        let resets = self.resets;
         for _ in 0..CONTROL_ACK_EXCHANGES {
+            if self.resets != resets {
+                return Err(SplitDriverError::SerialError);
+            }
             if !self.link.control_outstanding() {
                 return Ok(());
             }
@@ -1511,5 +1543,51 @@ mod tests {
 
         assert!(!any_peripheral_connected(), "silent for the whole allowance");
         assert!(driver.session_fresh, "the next answer renegotiates the session");
+    }
+
+    /// A session boundary carries nothing over: queued and received frames
+    /// of the old session are dropped on both sides.
+    #[test]
+    fn session_start_drops_the_previous_sessions_queues() {
+        let key = SplitMessage::Key(crate::event::KeyboardEvent::key(0, 0, true));
+        let mut driver = central(FakeSerial::new([]));
+        driver.link.control.push_back(SplitMessage::LedState(true)).unwrap();
+        driver.link.bulk.push_back(SplitMessage::HalfDuplexIdle).unwrap();
+        driver.link.inbox.push_back(key).unwrap();
+        driver.link.unacked.push_back((0, key)).unwrap();
+
+        driver.begin_session();
+
+        assert!(driver.link.control.is_empty() && driver.link.bulk.is_empty());
+        assert!(driver.link.inbox.is_empty() && driver.link.unacked.is_empty());
+        assert!(driver.session_fresh);
+    }
+
+    #[test]
+    fn reset_poll_drops_the_peripherals_stale_queues() {
+        let key = SplitMessage::Key(crate::event::KeyboardEvent::key(0, 0, true));
+        let reset = encode_with(RESET_FLAG, 0, 8, &SplitMessage::HalfDuplexPoll);
+        let fake = FakeSerial::new([reset]);
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        block_on(driver.write(&key)).unwrap();
+        driver.link.inbox.push_back(SplitMessage::LedState(true)).unwrap();
+
+        block_on(driver.serve()).unwrap();
+
+        assert!(driver.link.input.is_empty(), "a stale key event is not replayed");
+        assert!(driver.link.inbox.is_empty(), "the old session's input is not delivered");
+        let writes = decoded_writes(&driver.serial.serial.writes);
+        assert_eq!(writes[0].0, RESET_FLAG, "the reset is still echoed");
+    }
+
+    /// A reset that drops the frame being flushed is not delivery.
+    #[test]
+    fn peripheral_flush_fails_when_a_reset_drops_its_frame() {
+        let reset = encode_with(RESET_FLAG, 0, 8, &SplitMessage::HalfDuplexPoll);
+        let fake = FakeSerial::new([reset]);
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+
+        block_on(driver.write(&SplitMessage::TransportOverrideAck(3))).unwrap();
+        block_on(driver.flush()).expect_err("the ack was dropped, not acknowledged");
     }
 }
