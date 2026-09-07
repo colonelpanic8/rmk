@@ -18,7 +18,8 @@ impl Handle<GetPointingConfig> for RynkService<'_> {
 
 impl Handle<SetPointingConfig> for RynkService<'_> {
     async fn handle(&self, r: SetPointingConfigRequest) -> Result<PointingConfig, RynkError> {
-        pointing_config::replace(r.config).await
+        let (_, _, layers) = self.ctx.keymap_dimensions();
+        pointing_config::replace(r.config, layers).await
     }
 }
 
