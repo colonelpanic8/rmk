@@ -900,6 +900,14 @@ const fn get_buffer_size() -> usize {
         } else {
             crate::MACRO_SPACE_SIZE + 8
         };
+        // The hold-trigger table scales with its own capacity: three bytes per
+        // position plus key, tag, and length prefix.
+        let hold_trigger_size = crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM * 3 + 16;
+        let buffer_size = if hold_trigger_size > buffer_size {
+            hold_trigger_size
+        } else {
+            buffer_size
+        };
 
         // Efficiently round up to the nearest multiple of 32 using bit manipulation.
         (buffer_size + 31) & !31
@@ -915,6 +923,33 @@ mod tests {
     use sequential_storage::map::{MapConfig, MapStorage};
 
     use super::*;
+
+    #[cfg(feature = "host")]
+    #[test]
+    fn full_hold_trigger_table_fits_flash_buffer() {
+        block_on(async {
+            type Flash = TestFlash<16_384, 4_096, 1>;
+            let mut storage = Storage::<Flash, 1, 1, 1, 0> {
+                flash: MapStorage::new(Flash::new(), MapConfig::new(8192..16_384), Cache::new_uncached()),
+                buffer: [0; get_buffer_size()],
+            };
+            let mut positions = HoldTriggerPositions::new();
+            for i in 0..crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM {
+                positions.push(((i / 40) as u8, 0, (i % 40) as u8)).unwrap();
+            }
+            storage
+                .store_data(
+                    StorageKey::MorseHoldTriggerPositions,
+                    &StorageData::MorseHoldTriggerPositions(positions.clone()),
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                storage.fetch_data(StorageKey::MorseHoldTriggerPositions).await,
+                Some(StorageData::MorseHoldTriggerPositions(stored)) if stored == positions
+            ));
+        });
+    }
     use crate::config::{BehaviorConfig as RuntimeBehaviorConfig, StorageConfig as RuntimeStorageConfig};
     use crate::test_support::test_block_on as block_on;
 
