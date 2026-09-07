@@ -37,6 +37,9 @@ pub(super) struct RuntimeConditionalSceneReplace<const CAP: usize> {
     pub(super) last_activity_ms: u64,
 }
 
+// The chunk-carrying variants are the payload of a bounded no_std channel;
+// there is no allocator to box them behind.
+#[allow(clippy::large_enum_variant)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StandardCommand<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
     SetOutputEnabled(bool),
