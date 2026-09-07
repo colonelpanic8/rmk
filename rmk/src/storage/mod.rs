@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 
 use embassy_embedded_hal::adapter::BlockingAsync;
+use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Duration;
 use embedded_storage::nor_flash::NorFlash;
@@ -52,8 +53,13 @@ static PEER_ADDRESS_RESPONSE: Signal<crate::RawMutex, Option<PeerAddress>> = Sig
 static CONNECTION_TYPE_RESPONSE: Signal<crate::RawMutex, Option<ConnectionType>> = Signal::new();
 #[cfg(feature = "_ble")]
 static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();
+// Reply carries the layer it answers so a waiter can skip a reply left behind
+// by a read cancelled between its request and its wait.
 #[cfg(all(feature = "host", feature = "rynk"))]
-static LAYER_METADATA_RESPONSE: Signal<crate::RawMutex, Option<LayerMetadata>> = Signal::new();
+static LAYER_METADATA_RESPONSE: Signal<crate::RawMutex, (u8, Option<LayerMetadata>)> = Signal::new();
+// One reply slot: readers take turns for the whole request/response exchange.
+#[cfg(all(feature = "host", feature = "rynk"))]
+static LAYER_METADATA_READ: Mutex<crate::RawMutex, ()> = Mutex::new(());
 
 #[cfg(feature = "_ble")]
 async fn request_read<T: Send>(msg: FlashOperationMessage, response: &Signal<crate::RawMutex, T>) -> T {
@@ -88,11 +94,17 @@ pub(crate) async fn read_active_ble_profile() -> Option<u8> {
 
 #[cfg(all(feature = "host", feature = "rynk"))]
 pub(crate) async fn read_layer_metadata(layer: u8) -> Option<LayerMetadata> {
+    let _turn = LAYER_METADATA_READ.lock().await;
     LAYER_METADATA_RESPONSE.reset();
     FLASH_CHANNEL
         .send(FlashOperationMessage::ReadLayerMetadata(layer))
         .await;
-    LAYER_METADATA_RESPONSE.wait().await
+    loop {
+        let (replied, metadata) = LAYER_METADATA_RESPONSE.wait().await;
+        if replied == layer {
+            return metadata;
+        }
+    }
 }
 
 /// Persist a peer address and wait for it to land.
@@ -746,7 +758,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         Some(StorageData::LayerMetadata(metadata)) => Some(metadata),
                         _ => None,
                     };
-                    LAYER_METADATA_RESPONSE.signal(resp);
+                    LAYER_METADATA_RESPONSE.signal((layer, resp));
                     continue;
                 }
 
@@ -1129,6 +1141,85 @@ mod tests {
                 Some(StorageData::LayerMetadata(stored_metadata)) if stored_metadata == metadata
             ));
         });
+    }
+
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    #[test]
+    fn concurrent_layer_reads_keep_their_own_response() {
+        use core::future::Future;
+        use core::pin::pin;
+        use core::task::{Context, Poll, Waker};
+
+        let mut cx = Context::from_waker(Waker::noop());
+        FLASH_CHANNEL.clear();
+        LAYER_METADATA_RESPONSE.reset();
+        let zero = LayerMetadata {
+            occupied: true,
+            name: heapless::String::try_from("layer zero").unwrap(),
+        };
+
+        let mut first = pin!(read_layer_metadata(0));
+        let mut second = pin!(read_layer_metadata(1));
+        assert!(matches!(first.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(second.as_mut().poll(&mut cx), Poll::Pending));
+
+        // Only the first request is in flight; the second waits its turn.
+        assert!(matches!(
+            FLASH_CHANNEL.try_receive(),
+            Ok(FlashOperationMessage::ReadLayerMetadata(0))
+        ));
+        assert!(FLASH_CHANNEL.try_receive().is_err());
+
+        LAYER_METADATA_RESPONSE.signal((0, Some(zero.clone())));
+        assert!(matches!(second.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(first.as_mut().poll(&mut cx), Poll::Ready(Some(actual)) if actual == zero));
+
+        assert!(matches!(second.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(
+            FLASH_CHANNEL.try_receive(),
+            Ok(FlashOperationMessage::ReadLayerMetadata(1))
+        ));
+        LAYER_METADATA_RESPONSE.signal((1, None));
+        assert!(matches!(second.as_mut().poll(&mut cx), Poll::Ready(None)));
+    }
+
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    #[test]
+    fn layer_read_skips_a_cancelled_reads_reply() {
+        use core::future::Future;
+        use core::pin::pin;
+        use core::task::{Context, Poll, Waker};
+
+        let mut cx = Context::from_waker(Waker::noop());
+        FLASH_CHANNEL.clear();
+        LAYER_METADATA_RESPONSE.reset();
+
+        {
+            let mut cancelled = pin!(read_layer_metadata(0));
+            assert!(matches!(cancelled.as_mut().poll(&mut cx), Poll::Pending));
+            assert!(matches!(
+                FLASH_CHANNEL.try_receive(),
+                Ok(FlashOperationMessage::ReadLayerMetadata(0))
+            ));
+        }
+
+        let mut read = pin!(read_layer_metadata(1));
+        assert!(matches!(read.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(
+            FLASH_CHANNEL.try_receive(),
+            Ok(FlashOperationMessage::ReadLayerMetadata(1))
+        ));
+
+        // The storage task answers the cancelled request first.
+        LAYER_METADATA_RESPONSE.signal((0, Some(LayerMetadata::vacant())));
+        assert!(matches!(read.as_mut().poll(&mut cx), Poll::Pending));
+
+        let expected = LayerMetadata {
+            occupied: true,
+            name: heapless::String::try_from("Navigation").unwrap(),
+        };
+        LAYER_METADATA_RESPONSE.signal((1, Some(expected.clone())));
+        assert!(matches!(read.as_mut().poll(&mut cx), Poll::Ready(Some(actual)) if actual == expected));
     }
 
     #[test]
