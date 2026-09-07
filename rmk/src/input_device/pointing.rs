@@ -1,5 +1,7 @@
 //! Common functionality across pointing devices
 
+use core::sync::atomic::{AtomicU8, Ordering};
+
 use embassy_time::{Duration, Instant, Timer};
 use embedded_hal::digital::InputPin;
 use embedded_hal_async::digital::Wait;
@@ -9,15 +11,15 @@ use rmk_types::keycode::HidKeyCode;
 pub use rmk_types::pointing::{
     CaretConfig, CursorConfig, DragConfig, KeypadConfig, PointingMode, PressConfig, ScrollConfig, SniperConfig,
 };
-use usbd_hid::descriptor::{MediaKeyboardReport, MouseReport, SystemControlReport};
+use usbd_hid::descriptor::MouseReport;
 
 #[cfg(feature = "rynk")]
 use super::pointing_config::PointingConfigChangeEvent;
-use crate::channel::send_hid_report;
+use crate::channel::{VIRTUAL_KEY_CHANNEL, VirtualKeyEvent, send_hid_report};
 #[cfg(feature = "rynk")]
 use crate::event::LayerChangeEvent;
 use crate::event::{Axis, AxisEvent, AxisValType, PointingEvent, PointingProcessorEvent, PointingSetCpiEvent};
-use crate::hid::{KeyboardReport, Report};
+use crate::hid::Report;
 use crate::keymap::KeyMap;
 
 pub const ALL_POINTING_DEVICES: u8 = 255;
@@ -263,6 +265,12 @@ impl<S: PointingDriver> PointingDevice<S> {
     }
 }
 
+/// `remainder + delta * multiplier`, saturated to `i16` without overflowing
+/// on the way (a 255 delta times a 255 multiplier exceeds `i16`).
+fn scaled_total(remainder: i16, delta: i16, multiplier: u8) -> i16 {
+    (remainder as i32 + delta as i32 * multiplier as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16
+}
+
 /// Accumulator for sub-unit motion deltas (used in Scroll and Sniper modes)
 ///
 /// When dividing motion by a divisor, small movements would be lost.
@@ -298,7 +306,7 @@ impl MotionAccumulator {
             self.remainder_x = 0;
             0
         } else {
-            let total_x = self.remainder_x.saturating_add(dx * ratio_x.0 as i16);
+            let total_x = scaled_total(self.remainder_x, dx, ratio_x.0);
             let out = total_x / ratio_x.1 as i16;
             self.remainder_x = total_x - out * ratio_x.1 as i16;
             out
@@ -308,7 +316,7 @@ impl MotionAccumulator {
             self.remainder_y = 0;
             0
         } else {
-            let total_y = self.remainder_y.saturating_add(dy * ratio_y.0 as i16);
+            let total_y = scaled_total(self.remainder_y, dy, ratio_y.0);
             let out = total_y / ratio_y.1 as i16;
             self.remainder_y = total_y - out * ratio_y.1 as i16;
             out
@@ -324,7 +332,7 @@ impl MotionAccumulator {
             self.remainder_x = 0;
             0
         } else {
-            let total_x = self.remainder_x.saturating_add(dx * ratio_x.0 as i16);
+            let total_x = scaled_total(self.remainder_x, dx, ratio_x.0);
             let out = total_x / ratio_x.1 as i16;
             self.remainder_x = total_x;
             out
@@ -334,7 +342,7 @@ impl MotionAccumulator {
             self.remainder_y = 0;
             0
         } else {
-            let total_y = self.remainder_y.saturating_add(dy * ratio_y.0 as i16);
+            let total_y = scaled_total(self.remainder_y, dy, ratio_y.0);
             let out = total_y / ratio_y.1 as i16;
             self.remainder_y = total_y;
             out
@@ -342,6 +350,24 @@ impl MotionAccumulator {
 
         (out_x, out_y)
     }
+}
+
+/// Mouse buttons each pointing device holds on its own (device buttons, a drag
+/// latch, a press hold), keyed by device id. Every full mouse report ORs this
+/// in, whichever producer sends it, so one producer's report never releases
+/// another's button. Device ids past the last slot share it.
+const DEVICE_BUTTON_SLOTS: usize = 8;
+static DEVICE_HELD_BUTTONS: [AtomicU8; DEVICE_BUTTON_SLOTS] = [const { AtomicU8::new(0) }; DEVICE_BUTTON_SLOTS];
+
+pub(crate) fn set_device_held_buttons(device_id: u8, buttons: u8) {
+    DEVICE_HELD_BUTTONS[(device_id as usize).min(DEVICE_BUTTON_SLOTS - 1)].store(buttons, Ordering::Relaxed);
+}
+
+/// Union of every device's held buttons.
+pub(crate) fn device_held_buttons() -> u8 {
+    DEVICE_HELD_BUTTONS
+        .iter()
+        .fold(0, |acc, slot| acc | slot.load(Ordering::Relaxed))
 }
 
 #[derive(Clone)]
@@ -379,7 +405,6 @@ pub struct PointingProcessor<'a> {
     accumulator: MotionAccumulator,
     /// current active mode
     current_mode: PointingMode,
-    #[cfg(feature = "rynk")]
     last_device: Option<u8>,
     #[cfg(feature = "rynk")]
     runtime_layer: u8,
@@ -401,7 +426,6 @@ impl<'a> PointingProcessor<'a> {
             config,
             accumulator: MotionAccumulator::default(),
             current_mode: PointingMode::default(),
-            #[cfg(feature = "rynk")]
             last_device: None,
             #[cfg(feature = "rynk")]
             runtime_layer: keymap.active_layer(),
@@ -443,12 +467,10 @@ impl<'a> PointingProcessor<'a> {
         }
 
         #[cfg(feature = "rynk")]
-        {
-            if !self.explicit_mode && self.last_device != Some(event.device_id) {
-                self.refresh_configured_mode(event.device_id).await;
-            }
-            self.last_device = Some(event.device_id);
+        if !self.explicit_mode && self.last_device != Some(event.device_id) {
+            self.refresh_configured_mode(event.device_id).await;
         }
+        self.last_device = Some(event.device_id);
 
         let mut x = 0i16;
         let mut y = 0i16;
@@ -489,17 +511,19 @@ impl<'a> PointingProcessor<'a> {
             );
         }
         self.touching = z != 0;
-        let buttons = match self.current_mode {
+        let owned = match self.current_mode {
             // Presence already delivers the press, and the pad's tap
             // gestures would only replay it as a stray click after liftoff.
-            PointingMode::Press(_) => self.keymap.mouse_buttons() | self.latched_buttons(),
+            PointingMode::Press(_) => self.latched_buttons(),
             PointingMode::CursorRemap(config) => {
-                self.keymap.mouse_buttons()
-                    | remap_primary_button(event.buttons, config.primary_button)
-                    | self.latched_buttons()
+                remap_primary_button(event.buttons, config.primary_button) | self.latched_buttons()
             }
-            _ => self.keymap.mouse_buttons() | event.buttons | self.latched_buttons(),
+            // Key-emitting modes spend the buttons on gestures instead.
+            PointingMode::Caret(_) | PointingMode::Keypad(_) => 0,
+            _ => event.buttons | self.latched_buttons(),
         };
+        set_device_held_buttons(event.device_id, owned);
+        let buttons = self.keymap.mouse_buttons() | device_held_buttons();
         match self.current_mode {
             PointingMode::Cursor(_)
             | PointingMode::CursorRemap(_)
@@ -630,8 +654,11 @@ impl<'a> PointingProcessor<'a> {
         self.set_pointing_mode(mode);
         self.accumulator = MotionAccumulator::default();
         if release_latch {
+            if let Some(device_id) = self.last_device {
+                set_device_held_buttons(device_id, self.device_buttons);
+            }
             send_hid_report(Report::MouseReport(MouseReport {
-                buttons: self.keymap.mouse_buttons() | self.device_buttons,
+                buttons: self.keymap.mouse_buttons() | device_held_buttons(),
                 x: 0,
                 y: 0,
                 wheel: 0,
@@ -693,33 +720,13 @@ fn keypad_tap_key(previous: u8, current: u8, cfg: &KeypadConfig) -> Option<HidKe
     (pressed_now && !pressed_before && cfg.keycode_tap != HidKeyCode::No).then_some(cfg.keycode_tap)
 }
 
-/// Tap a key (press and release with a short delay) - used for caret and keypad modes
-/// NOTE: This is a basic implementation because at the current state Keyboard (in keyboard.rs) does not support
-/// sending in KeyActions from the processor layer. If that changes in the future, this can be updated to use KeyActions and support more complex behavior (e.g. modifiers, macros).
-/// For the time being, this sends only simple key taps without modifiers.
+/// Tap a key through the keyboard, which composes it with whatever else is
+/// held and applies the usual modifier remapping.
 async fn tap_key(keycode: HidKeyCode) {
-    send_hid_report(report_for_keycode(keycode, true)).await;
-    Timer::after_millis(5).await;
-    send_hid_report(report_for_keycode(keycode, false)).await;
-    Timer::after_millis(5).await;
-}
-
-fn report_for_keycode(keycode: HidKeyCode, pressed: bool) -> Report {
-    if let Some(consumer) = keycode.process_as_consumer() {
-        Report::MediaKeyboardReport(MediaKeyboardReport {
-            usage_id: if pressed { consumer.into() } else { 0 },
-        })
-    } else if let Some(system) = keycode.process_as_system_control() {
-        Report::SystemControlReport(SystemControlReport {
-            usage_id: if pressed { system as u8 } else { 0 },
-        })
-    } else {
-        Report::KeyboardReport(KeyboardReport {
-            modifier: 0,
-            reserved: 0,
-            leds: 0,
-            keycodes: [if pressed { keycode as u8 } else { 0 }, 0, 0, 0, 0, 0],
-        })
+    for pressed in [true, false] {
+        VIRTUAL_KEY_CHANNEL
+            .send(VirtualKeyEvent { key: keycode, pressed })
+            .await;
     }
 }
 
@@ -737,9 +744,11 @@ fn compute_caret_taps(
 ) -> Option<(HidKeyCode, u8)> {
     let divisor_x = if cfg.disable_x { 0 } else { 1 };
     let divisor_y = if cfg.disable_y { 0 } else { 1 };
+    // A non-positive threshold would never make progress below.
+    let threshold = cfg.threshold.max(1);
     let (mut dx, mut dy) = accumulator.accumulate_persistent(x, y, (1, divisor_x), (1, divisor_y));
 
-    if (dx.abs() + dy.abs()) <= cfg.threshold {
+    if (dx.abs() + dy.abs()) <= threshold {
         return None;
     }
 
@@ -768,15 +777,15 @@ fn compute_caret_taps(
     // Each tap reduces the running total on the dominant axis by `threshold`.
     // The number of iterations is the tap count.
     let mut count: u8 = 0;
-    while (dx.abs() + dy.abs()) > cfg.threshold {
+    while (dx.abs() + dy.abs()) > threshold {
         let (reduce_x, reduce_y) = match axis {
             MovementAxis::X => {
-                let r = if dx > 0 { -cfg.threshold } else { cfg.threshold };
+                let r = if dx > 0 { -threshold } else { threshold };
                 accumulator.reset_y(); //  non-dominant axis
                 (r, 0)
             }
             MovementAxis::Y => {
-                let r = if dy > 0 { -cfg.threshold } else { cfg.threshold };
+                let r = if dy > 0 { -threshold } else { threshold };
                 accumulator.reset_x(); //  non-dominant axis
                 (0, r)
             }
@@ -1012,6 +1021,97 @@ mod tests {
         }
         assert!(!result);
         assert_eq!(device.init_state, InitState::Failed);
+    }
+
+    struct StuckLowPin {
+        waits: Cell<u32>,
+    }
+    impl ErrorType for StuckLowPin {
+        type Error = DummyError;
+    }
+    impl InputPin for StuckLowPin {
+        fn is_high(&mut self) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
+        fn is_low(&mut self) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+    impl Wait for StuckLowPin {
+        async fn wait_for_high(&mut self) -> Result<(), Self::Error> {
+            pending::<()>().await;
+            Ok(())
+        }
+        async fn wait_for_low(&mut self) -> Result<(), Self::Error> {
+            let waits = self.waits.get() + 1;
+            self.waits.set(waits);
+            assert!(waits < 64, "motion pin polled without the loop yielding");
+            Ok(())
+        }
+        async fn wait_for_rising_edge(&mut self) -> Result<(), Self::Error> {
+            todo!()
+        }
+        async fn wait_for_falling_edge(&mut self) -> Result<(), Self::Error> {
+            todo!()
+        }
+        async fn wait_for_any_edge(&mut self) -> Result<(), Self::Error> {
+            todo!()
+        }
+    }
+
+    struct FailingDriver {
+        pin: StuckLowPin,
+    }
+    impl PointingDriver for FailingDriver {
+        type MOTION = StuckLowPin;
+        async fn init(&mut self) -> Result<(), PointingDriverError> {
+            Err(PointingDriverError::InitFailed)
+        }
+        async fn read_motion(&mut self) -> Result<MotionData, PointingDriverError> {
+            Err(PointingDriverError::InitFailed)
+        }
+        fn motion_pending(&mut self) -> bool {
+            true
+        }
+        fn motion_gpio(&mut self) -> Option<&mut Self::MOTION> {
+            Some(&mut self.pin)
+        }
+    }
+
+    /// A sensor that never initialises, on a motion line stuck asserted, must
+    /// park rather than spin the executor.
+    #[test]
+    fn failed_sensor_with_asserted_motion_pin_parks() {
+        use core::future::Future;
+        use core::pin::pin;
+        use core::task::{Context, Poll, Waker};
+
+        let mut device = PointingDevice {
+            sensor: FailingDriver {
+                pin: StuckLowPin { waits: Cell::new(0) },
+            },
+            init_state: InitState::Pending,
+            poll_interval: Duration::from_millis(1),
+            id: 1,
+            report_interval: Duration::from_millis(1),
+            last_poll: Instant::MIN,
+            last_report: Instant::MIN,
+            accumulated_x: 0,
+            accumulated_y: 0,
+        };
+        for _ in 0..PointingDevice::<FailingDriver>::MAX_INIT_RETRIES {
+            block_on(device.try_init());
+        }
+        assert_eq!(device.init_state, InitState::Failed);
+
+        let mut cx = Context::from_waker(Waker::noop());
+        {
+            let mut read = pin!(device.read_pointing_event());
+            for _ in 0..8 {
+                assert!(matches!(read.as_mut().poll(&mut cx), Poll::Pending));
+            }
+        }
+        assert_eq!(device.sensor.pin.waits.get(), 0);
     }
 
     #[test]
@@ -1649,29 +1749,58 @@ mod tests {
     }
 
     #[test]
-    fn test_keypad_media_keycodes_use_consumer_reports() {
-        match report_for_keycode(HidKeyCode::MediaNextTrack, true) {
-            Report::MediaKeyboardReport(report) => {
-                let usage_id = report.usage_id;
-                assert_eq!(usage_id, u16::from(rmk_types::keycode::ConsumerKey::NextTrack));
-            }
-            _ => panic!("media key did not produce a consumer report"),
-        }
-        match report_for_keycode(HidKeyCode::MediaNextTrack, false) {
-            Report::MediaKeyboardReport(report) => {
-                let usage_id = report.usage_id;
-                assert_eq!(usage_id, 0);
-            }
-            _ => panic!("media release did not produce a consumer report"),
-        }
+    fn test_tap_key_goes_through_the_keyboard() {
+        block_on(async {
+            while VIRTUAL_KEY_CHANNEL.try_receive().is_ok() {}
+            tap_key(HidKeyCode::Right).await;
+            assert_eq!(
+                VIRTUAL_KEY_CHANNEL.try_receive(),
+                Ok(VirtualKeyEvent {
+                    key: HidKeyCode::Right,
+                    pressed: true
+                })
+            );
+            assert_eq!(
+                VIRTUAL_KEY_CHANNEL.try_receive(),
+                Ok(VirtualKeyEvent {
+                    key: HidKeyCode::Right,
+                    pressed: false
+                })
+            );
+            assert!(VIRTUAL_KEY_CHANNEL.try_receive().is_err());
+        });
     }
 
     #[test]
-    fn test_keypad_keyboard_page_volume_stays_a_keyboard_report() {
-        match report_for_keycode(HidKeyCode::KbVolumeUp, true) {
-            Report::KeyboardReport(report) => assert_eq!(report.keycodes[0], HidKeyCode::KbVolumeUp as u8),
-            _ => panic!("keyboard-page volume did not produce a keyboard report"),
-        }
+    fn test_scaled_total_saturates_instead_of_wrapping() {
+        assert_eq!(scaled_total(0, 255, 255), i16::MAX);
+        assert_eq!(scaled_total(0, -255, 255), i16::MIN);
+        assert_eq!(scaled_total(i16::MAX, 1, 1), i16::MAX);
+        assert_eq!(scaled_total(10, -3, 2), 4);
+    }
+
+    #[test]
+    fn test_compute_caret_taps_non_positive_threshold_is_bounded() {
+        let mut cfg = cfg();
+        cfg.threshold = 0;
+        let mut accumulator = acc();
+        let (_, count) = compute_caret_taps(3, 0, &mut accumulator, &cfg).unwrap();
+        assert_eq!(count, 2);
+        cfg.threshold = -5;
+        let mut accumulator = acc();
+        let (_, count) = compute_caret_taps(2, 0, &mut accumulator, &cfg).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_device_held_buttons_union_across_devices() {
+        set_device_held_buttons(0, 0b01);
+        set_device_held_buttons(1, 0b10);
+        assert_eq!(device_held_buttons(), 0b11);
+        set_device_held_buttons(1, 0);
+        assert_eq!(device_held_buttons(), 0b01);
+        set_device_held_buttons(0, 0);
+        assert_eq!(device_held_buttons(), 0);
     }
 
     // === PointingMode tests ===
@@ -2108,6 +2237,31 @@ mod runtime_mode_tests {
     use super::*;
     use crate::config::{BehaviorConfig, PositionalConfig};
     use crate::keymap::KeymapData;
+
+    #[test]
+    fn processor_publishes_its_held_buttons_for_other_report_owners() {
+        crate::test_support::test_block_on(async {
+            let mut data = KeymapData::<1, 1, 1>::new([[[crate::k!(A)]]]);
+            let mut behavior = BehaviorConfig::default();
+            let positional = PositionalConfig::<1, 1>::default();
+            let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
+            let mut processor = PointingProcessor::new(&keymap, PointingProcessorConfig::default());
+            let event = |buttons: u8| PointingEvent {
+                device_id: 2,
+                buttons,
+                axes: [AxisEvent {
+                    axis: Axis::X,
+                    typ: AxisValType::Rel,
+                    value: 1,
+                }; 3],
+            };
+            processor.on_pointing_event(event(0b1)).await;
+            assert_eq!(device_held_buttons(), 0b1);
+            set_device_held_buttons(5, 0b100);
+            processor.on_pointing_event(event(0)).await;
+            assert_eq!(device_held_buttons(), 0b100);
+        });
+    }
 
     #[test]
     fn restored_modes_follow_remote_layers_and_preserve_explicit_commands() {
