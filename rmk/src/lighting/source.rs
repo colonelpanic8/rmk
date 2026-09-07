@@ -333,6 +333,11 @@ pub struct LightingControls {
     /// mask rather than a list because the active layers are already one --
     /// the check is a single AND. Zero means no layer wakes lighting.
     pub wake_layers: u64,
+    /// After the last wake layer releases, lighting stays awake and the
+    /// released layers keep rendering as if still active for this long, so a
+    /// tap of a status layer shows it for a moment rather than a flicker.
+    /// Zero stops the wake with the release.
+    pub wake_linger_ms: u32,
     pub initial_output_mode: OutputMode,
     pub powered_only_scope: PoweredOnlyScope,
     pub output_mode_indicator: Option<OutputModeIndicator>,
@@ -1235,6 +1240,13 @@ mod tests {
         impl LightingContextProvider for Extended {
             fn lighting_context(&self) -> &LightingContext {
                 &self.lighting
+            }
+
+            fn with_layers(&self, layers: LayerState) -> Self {
+                Self {
+                    lighting: self.lighting.with_layers(layers),
+                    _battery_percent: self._battery_percent,
+                }
             }
         }
         let cells = [SceneCell {
