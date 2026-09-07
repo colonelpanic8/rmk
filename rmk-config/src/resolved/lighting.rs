@@ -207,6 +207,7 @@ impl crate::KeyboardTomlConfig {
             rows: layout.rows,
             cols: layout.cols,
             layers,
+            layer_names: Vec::new(),
             keymap: Vec::new(),
             encoder_map: Vec::new(),
             key_info: Vec::new(),
