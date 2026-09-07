@@ -192,6 +192,9 @@ pub struct Lighting {
     pub background: LightingBackground,
 }
 
+/// Layers the runtime's active-layer bitmask can represent.
+const LIGHTING_LAYER_CAPACITY: u8 = 64;
+
 impl crate::KeyboardTomlConfig {
     /// Resolve `[lighting]` without a resolved board keymap, for firmware
     /// that defines its keymap in Rust instead of `[[keymap.layer]]`.
@@ -227,6 +230,12 @@ impl crate::KeyboardTomlConfig {
         }
         if config.emitters.len() > u16::MAX as usize {
             return Err("[lighting] emitter count exceeds LedSlot u16 capacity".into());
+        }
+        if keymap.layers > LIGHTING_LAYER_CAPACITY {
+            return Err(format!(
+                "[lighting] supports at most {LIGHTING_LAYER_CAPACITY} keymap layers, got {}",
+                keymap.layers
+            ));
         }
 
         let zones = resolve_zones(&config.zones)?;
@@ -958,6 +967,16 @@ powered_only = {{ kind = "solid", color = [0, 0, 9] }}
         let invalid = parse(&source.replace("wake_layers = [1]", "wake_layers = [2]"));
         let error = invalid.lighting(&layout, &keymap).unwrap_err();
         assert!(error.contains("outside keymap layer count"), "{error}");
+
+        // Beyond the runtime's 64-layer mask a wake layer would shift out of
+        // range; the layer count is rejected before any layer is lowered.
+        let too_many = parse(
+            &source
+                .replace("layers = 2", "layers = 65")
+                .replace("wake_layers = [1]", "wake_layers = [64]"),
+        );
+        let error = too_many.lighting_standalone(&layout).unwrap_err();
+        assert!(error.contains("at most 64 keymap layers"), "{error}");
     }
 
     #[test]
