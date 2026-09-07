@@ -2288,6 +2288,51 @@ fn a_released_wake_layer_lingers_for_the_configured_time() {
     assert!(!engine.state().wake_active);
 }
 
+/// Provenance has to explain the frame: while a released wake layer lingers
+/// the pixels come from the linger-adjusted context, so that is what the
+/// presented frame must record.
+#[test]
+fn a_lingered_frame_records_the_context_it_was_rendered_from() {
+    type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4>;
+    let mut engine: SceneEngine = StandardLightingEngine::new(
+        BackgroundState::default(),
+        LayerScenes {
+            scenes: &[],
+            policy: LayerPolicy::EffectiveOnly,
+        },
+        EmptySource,
+        EmptySource,
+    )
+    .with_controls(LightingControls {
+        initial_output_mode: OutputMode::AlwaysOff,
+        wake_layers: 1 << 2,
+        wake_linger_ms: 1_000,
+        ..LightingControls::default()
+    });
+    let mut frame = LogicalFrame::new(Rgb8::BLACK);
+    let held = context(2);
+    let released = context(0);
+    for (now_ms, snapshot) in [(0, &held), (10, &released)] {
+        engine.render(RenderInput { now_ms, snapshot }, &mut frame).unwrap();
+    }
+    LightingEngine::<LightingContext>::on_presented(&mut engine, &frame);
+    let presented = engine.state().presented.unwrap().context;
+    assert!(presented.layers.is_active(2));
+    assert_eq!(presented.layers.effective, 2);
+
+    engine
+        .render(
+            RenderInput {
+                now_ms: 1_700,
+                snapshot: &released,
+            },
+            &mut frame,
+        )
+        .unwrap();
+    LightingEngine::<LightingContext>::on_presented(&mut engine, &frame);
+    assert_eq!(engine.state().presented.unwrap().context, released);
+}
+
 /// The point of the output-mode condition: the mode indicator stops being
 /// something the board compiles in and becomes an ordinary runtime rule a host
 /// can edit. A rule gated on one policy lights only under that policy, and
@@ -2390,8 +2435,8 @@ fn compiled_output_mode_conditions_observe_the_engine_policy() {
                 connection: None,
                 output_mode: Some(mode),
                 effects: None,
-            layers: None,
-            indicators: None,
+                layers: None,
+                indicators: None,
             },
             slot: LedSlot(0),
             effect: BuiltinEffect::Solid { color },
