@@ -23,7 +23,7 @@ pub const LIGHTING_SCENE_CHUNK_SIZE: usize = 8;
 pub const LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE: usize = 7;
 /// Number of extended conditional cells in one page/chunk. Lower than the
 /// legacy chunk because each cell carries the connection, bonded-slot,
-/// effects, layers, and indicator predicates (two of them 64-bit layer masks)
+/// effects, layers, and indicator predicates (two of them 32-bit layer masks)
 /// and the page still has to fit `LIGHTING_PAYLOAD_SIZE`.
 pub const LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE: usize = 3;
 /// Number of RGB cells in one presented-frame page.
@@ -729,10 +729,12 @@ wire_type! {
     /// Gate on several layers at once, as bitmasks (bit N = layer N): every
     /// layer in `active` must be active and every layer in `inactive` must
     /// not be. `LightingLayerCondition` watches one layer, which cannot say
-    /// "show which layers are held while this status layer is".
+    /// "show which layers are held while this status layer is". 32 bits,
+    /// not the layer state's 64: every stored rule carries both masks, and
+    /// no board has half that many layers.
     pub struct LightingLayersCondition {
-        pub active: u64,
-        pub inactive: u64,
+        pub active: u32,
+        pub inactive: u32,
     }
 }
 
