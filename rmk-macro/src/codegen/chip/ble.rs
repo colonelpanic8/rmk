@@ -10,7 +10,11 @@ pub(crate) fn expand_ble_config(hardware: &Hardware) -> (TokenStream2, TokenStre
     if !hardware.communication.ble_enabled() {
         return (quote! {}, quote! {});
     }
-    let ble_name = match hardware.communication.get_ble_config().and_then(|ble| ble.name) {
+    let ble_name = match hardware
+        .communication
+        .get_ble_config()
+        .and_then(|ble| ble.name)
+    {
         Some(name) => quote! { ::core::option::Option::Some(#name) },
         None => quote! { ::core::option::Option::None },
     };
