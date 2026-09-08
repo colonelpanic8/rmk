@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 
 use embassy_embedded_hal::adapter::BlockingAsync;
+use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embedded_storage::nor_flash::NorFlash;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
@@ -10,6 +11,8 @@ use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::ble::BleName;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::{MorseProfile, MorseProfileName};
+#[cfg(all(feature = "host", feature = "rynk"))]
+use rmk_types::protocol::rynk::LayerMetadata;
 #[cfg(feature = "rynk")]
 use rmk_types::protocol::rynk::{BehaviorOptions, PointingConfig};
 #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -67,6 +70,13 @@ static CONNECTION_TYPE_RESPONSE: Signal<crate::RawMutex, Option<ConnectionType>>
 static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();
 #[cfg(feature = "_ble")]
 static BLE_NAME_RESPONSE: Signal<crate::RawMutex, Option<BleName>> = Signal::new();
+// Reply carries the layer it answers so a waiter can skip a reply left behind
+// by a read cancelled between its request and its wait.
+#[cfg(all(feature = "host", feature = "rynk"))]
+static LAYER_METADATA_RESPONSE: Signal<crate::RawMutex, (u8, Option<LayerMetadata>)> = Signal::new();
+// One reply slot: readers take turns for the whole request/response exchange.
+#[cfg(all(feature = "host", feature = "rynk"))]
+static LAYER_METADATA_READ: Mutex<crate::RawMutex, ()> = Mutex::new(());
 
 #[cfg(feature = "_ble")]
 async fn request_read<T: Send>(msg: FlashOperationMessage, response: &Signal<crate::RawMutex, T>) -> T {
@@ -102,6 +112,21 @@ pub(crate) async fn read_active_ble_profile() -> Option<u8> {
 #[cfg(feature = "_ble")]
 pub(crate) async fn read_ble_name() -> Option<BleName> {
     request_read(FlashOperationMessage::ReadBleName, &BLE_NAME_RESPONSE).await
+}
+
+#[cfg(all(feature = "host", feature = "rynk"))]
+pub(crate) async fn read_layer_metadata(layer: u8) -> Option<LayerMetadata> {
+    let _turn = LAYER_METADATA_READ.lock().await;
+    LAYER_METADATA_RESPONSE.reset();
+    FLASH_CHANNEL
+        .send(FlashOperationMessage::ReadLayerMetadata(layer))
+        .await;
+    loop {
+        let (replied, metadata) = LAYER_METADATA_RESPONSE.wait().await;
+        if replied == layer {
+            return metadata;
+        }
+    }
 }
 
 /// Persist a peer address and wait for it to land.
@@ -261,6 +286,13 @@ pub(crate) enum FlashOperationMessage {
     BleName(BleName),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers(u64),
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    ReadLayerMetadata(u8),
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    LayerMetadata {
+        layer: u8,
+        metadata: LayerMetadata,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -333,6 +365,8 @@ pub(crate) enum StorageKey {
     BleName,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers,
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    LayerMetadata(u8),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingSceneCommit,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -474,6 +508,8 @@ pub(crate) enum StorageData {
     PositionCombo(PositionComboConfig),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers(u64),
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    LayerMetadata(LayerMetadata),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingSceneCommit(LightingSceneCommitRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -1550,6 +1586,15 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     BLE_NAME_RESPONSE.signal(resp);
                     continue;
                 }
+                #[cfg(all(feature = "host", feature = "rynk"))]
+                FlashOperationMessage::ReadLayerMetadata(layer) => {
+                    let resp = match self.fetch_data(StorageKey::LayerMetadata(layer)).await {
+                        Some(StorageData::LayerMetadata(metadata)) => Some(metadata),
+                        _ => None,
+                    };
+                    LAYER_METADATA_RESPONSE.signal((layer, resp));
+                    continue;
+                }
 
                 FlashOperationMessage::LayoutOptions(layout_option) => {
                     update_storage_field!(&mut self.flash, &mut self.buffer, LayoutConfig, layout_option)
@@ -1625,6 +1670,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         &StorageData::MorseProfileName(name),
                     )
                     .await
+                }
+                #[cfg(all(feature = "host", feature = "rynk"))]
+                FlashOperationMessage::LayerMetadata { layer, metadata } => {
+                    self.store_data(StorageKey::LayerMetadata(layer), &StorageData::LayerMetadata(metadata))
+                        .await
                 }
                 FlashOperationMessage::ConnectionType(ty) => {
                     self.store_data(StorageKey::ConnectionType, &StorageData::ConnectionType(ty))
@@ -2032,6 +2082,8 @@ mod tests {
             StorageKey::MorseProfile(9),
             #[cfg(feature = "_ble")]
             StorageKey::BleName,
+            #[cfg(all(feature = "host", feature = "rynk"))]
+            StorageKey::LayerMetadata(9),
         ];
 
         let mut buffer = [0u8; 64];
@@ -2507,6 +2559,121 @@ mod tests {
             assert_eq!(behavior.fork.forks[0], fork);
             assert_eq!(behavior.morse.morses[0], morse);
         });
+    }
+
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    #[test]
+    fn layer_metadata_survives_flash_map_reopen() {
+        block_on(async {
+            type Flash = TestFlash<16_384, 4_096, 1>;
+
+            let range = (16_384 - 2 * 4_096) as u32..16_384u32;
+            let metadata = LayerMetadata {
+                occupied: true,
+                name: heapless::String::try_from("Navigation").unwrap(),
+            };
+            let mut map =
+                MapStorage::<StorageKey, _, _>::new(Flash::new(), MapConfig::new(range.clone()), Cache::new_uncached());
+            let mut buffer = [0u8; 256];
+            map.store_item(
+                &mut buffer,
+                &StorageKey::LayerMetadata(2),
+                &StorageData::LayerMetadata(metadata.clone()),
+            )
+            .await
+            .unwrap();
+
+            let (flash, _) = map.destroy();
+            let mut reopened = MapStorage::<StorageKey, _, _>::new(flash, MapConfig::new(range), Cache::new_uncached());
+            let stored = reopened
+                .fetch_item(&mut buffer, &StorageKey::LayerMetadata(2))
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                stored,
+                Some(StorageData::LayerMetadata(stored_metadata)) if stored_metadata == metadata
+            ));
+        });
+    }
+
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    #[test]
+    fn concurrent_layer_reads_keep_their_own_response() {
+        use core::future::Future;
+        use core::pin::pin;
+        use core::task::{Context, Poll, Waker};
+
+        let mut cx = Context::from_waker(Waker::noop());
+        FLASH_CHANNEL.clear();
+        LAYER_METADATA_RESPONSE.reset();
+        let zero = LayerMetadata {
+            occupied: true,
+            name: heapless::String::try_from("layer zero").unwrap(),
+        };
+
+        let mut first = pin!(read_layer_metadata(0));
+        let mut second = pin!(read_layer_metadata(1));
+        assert!(matches!(first.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(second.as_mut().poll(&mut cx), Poll::Pending));
+
+        // Only the first request is in flight; the second waits its turn.
+        assert!(matches!(
+            FLASH_CHANNEL.try_receive(),
+            Ok(FlashOperationMessage::ReadLayerMetadata(0))
+        ));
+        assert!(FLASH_CHANNEL.try_receive().is_err());
+
+        LAYER_METADATA_RESPONSE.signal((0, Some(zero.clone())));
+        assert!(matches!(second.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(first.as_mut().poll(&mut cx), Poll::Ready(Some(actual)) if actual == zero));
+
+        assert!(matches!(second.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(
+            FLASH_CHANNEL.try_receive(),
+            Ok(FlashOperationMessage::ReadLayerMetadata(1))
+        ));
+        LAYER_METADATA_RESPONSE.signal((1, None));
+        assert!(matches!(second.as_mut().poll(&mut cx), Poll::Ready(None)));
+    }
+
+    #[cfg(all(feature = "host", feature = "rynk"))]
+    #[test]
+    fn layer_read_skips_a_cancelled_reads_reply() {
+        use core::future::Future;
+        use core::pin::pin;
+        use core::task::{Context, Poll, Waker};
+
+        let mut cx = Context::from_waker(Waker::noop());
+        FLASH_CHANNEL.clear();
+        LAYER_METADATA_RESPONSE.reset();
+
+        {
+            let mut cancelled = pin!(read_layer_metadata(0));
+            assert!(matches!(cancelled.as_mut().poll(&mut cx), Poll::Pending));
+            assert!(matches!(
+                FLASH_CHANNEL.try_receive(),
+                Ok(FlashOperationMessage::ReadLayerMetadata(0))
+            ));
+        }
+
+        let mut read = pin!(read_layer_metadata(1));
+        assert!(matches!(read.as_mut().poll(&mut cx), Poll::Pending));
+        assert!(matches!(
+            FLASH_CHANNEL.try_receive(),
+            Ok(FlashOperationMessage::ReadLayerMetadata(1))
+        ));
+
+        // The storage task answers the cancelled request first.
+        LAYER_METADATA_RESPONSE.signal((0, Some(LayerMetadata::vacant())));
+        assert!(matches!(read.as_mut().poll(&mut cx), Poll::Pending));
+
+        let expected = LayerMetadata {
+            occupied: true,
+            name: heapless::String::try_from("Navigation").unwrap(),
+        };
+        LAYER_METADATA_RESPONSE.signal((1, Some(expected.clone())));
+        assert!(matches!(read.as_mut().poll(&mut cx), Poll::Ready(Some(actual)) if actual == expected));
     }
 
     #[test]
