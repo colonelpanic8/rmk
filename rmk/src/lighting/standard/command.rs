@@ -37,6 +37,9 @@ pub(super) struct RuntimeConditionalSceneReplace<const CAP: usize> {
     pub(super) last_activity_ms: u64,
 }
 
+// The chunk-carrying variants are the payload of a bounded no_std channel;
+// there is no allocator to box them behind.
+#[allow(clippy::large_enum_variant)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StandardCommand<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
     SetOutputEnabled(bool),
@@ -207,7 +210,9 @@ pub struct StandardState {
 ///
 /// Recorded at render time and promoted when the output acknowledges the
 /// write, so it describes what the LEDs show rather than what the engine now
-/// holds. On a split renderer replica the context is the *replicated* one, so
+/// holds. While a released wake layer lingers this is the linger-adjusted
+/// context the sources rendered from, not the snapshot the engine was handed.
+/// On a split renderer replica the context is the *replicated* one, so
 /// comparing it against the authority's is how a stale replica becomes
 /// visible instead of merely suspected.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
