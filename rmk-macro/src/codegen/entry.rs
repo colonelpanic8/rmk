@@ -70,7 +70,7 @@ pub(crate) fn rmk_entry_select(
     registered_processors: Vec<TokenStream2>,
     watchdog_task: Option<TokenStream2>,
 ) -> TokenStream2 {
-    let auto_mouse_layer_enabled = !behavior.auto_mouse_layer.is_empty();
+    let auto_mouse_layer_enabled = behavior.auto_mouse_layer_max_num > 0;
     let auto_mouse_layer_prelude = auto_mouse_layer_enabled.then(|| {
         quote! {
             let mut auto_mouse_layer = ::rmk::AutoMouseLayerRunner::new(&keymap);
