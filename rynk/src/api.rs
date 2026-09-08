@@ -1,6 +1,7 @@
 //! Typed request methods for each protocol endpoint, built on top of the
 //! driver core in `driver.rs`.
 
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 #[cfg(feature = "alloc")]
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -47,7 +48,6 @@ use rmk_types::protocol::rynk::{
     SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState,
     StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
 };
-#[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{
     LightingExtendedRuntimeConditionalScenesPage, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
 };
@@ -835,6 +835,7 @@ impl Client {
         )
     }
 
+    #[cfg(feature = "alloc")]
     pub async fn read_all_lighting_extended_runtime_conditional_scenes(
         &self,
     ) -> Result<
