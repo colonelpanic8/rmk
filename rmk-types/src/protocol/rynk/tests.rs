@@ -2007,11 +2007,11 @@ fn lighting_wire_frames_locked() {
     let runtime_conditional_abort = AbortLightingRuntimeConditionalSceneReplaceRequest {
         transaction_id: runtime_conditional_transaction.id,
     };
-    let extended_runtime_conditional_status = LightingRuntimeConditionalSceneStatus {
-        chunk_capacity: LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE as u8,
+    let advanced_runtime_conditional_status = LightingRuntimeConditionalSceneStatus {
+        chunk_capacity: LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE as u8,
         ..runtime_conditional_status
     };
-    let extended_conditional_cell = LightingExtendedConditionalSceneCell {
+    let extended_conditional_cell = LightingAdvancedConditionalSceneCell {
         cell: conditional_cell,
         connection: Some(LightingConnectionCondition {
             transport: Some(LightingActiveTransport::Ble),
@@ -2021,13 +2021,22 @@ fn lighting_wire_frames_locked() {
             usb_connected: Some(true),
         }),
         effects: Some(LightingEffectsCondition { enabled: true }),
+        layers: Some(LightingLayersCondition {
+            active: 1 << 2 | 1 << 5,
+            inactive: 1 << 3,
+        }),
+        indicators: Some(LightingIndicatorCondition {
+            num_lock: Some(true),
+            caps_lock: None,
+            scroll_lock: Some(false),
+        }),
     };
-    let extended_runtime_conditional_page = LightingExtendedRuntimeConditionalScenesPage {
+    let advanced_runtime_conditional_page = LightingAdvancedRuntimeConditionalScenesPage {
         revision: state.revision,
         total_count: 1,
         items: one(extended_conditional_cell),
     };
-    let extended_runtime_conditional_put = PutLightingExtendedRuntimeConditionalSceneChunkRequest {
+    let advanced_runtime_conditional_put = PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
         transaction_id: runtime_conditional_transaction.id,
         offset: 0,
         cells: one(extended_conditional_cell),
@@ -2250,95 +2259,95 @@ fn lighting_wire_frames_locked() {
             )
         ),
         (
-            "GetLightingExtendedRuntimeConditionalSceneStatus request",
-            encode_frame(Cmd::GetLightingExtendedRuntimeConditionalSceneStatus, SEQ, &())
+            "GetLightingAdvancedRuntimeConditionalSceneStatus request",
+            encode_frame(Cmd::GetLightingAdvancedRuntimeConditionalSceneStatus, SEQ, &())
         ),
         (
-            "GetLightingExtendedRuntimeConditionalSceneStatus reply",
+            "GetLightingAdvancedRuntimeConditionalSceneStatus reply",
             encode_frame(
-                Cmd::GetLightingExtendedRuntimeConditionalSceneStatus,
+                Cmd::GetLightingAdvancedRuntimeConditionalSceneStatus,
                 SEQ,
-                &Ok::<LightingRuntimeConditionalSceneStatusResult, RynkError>(Ok(extended_runtime_conditional_status))
+                &Ok::<LightingRuntimeConditionalSceneStatusResult, RynkError>(Ok(advanced_runtime_conditional_status))
             )
         ),
         (
-            "GetLightingExtendedRuntimeConditionalScenes request",
+            "GetLightingAdvancedRuntimeConditionalScenes request",
             encode_frame(
-                Cmd::GetLightingExtendedRuntimeConditionalScenes,
+                Cmd::GetLightingAdvancedRuntimeConditionalScenes,
                 SEQ,
                 &runtime_conditional_page_request
             )
         ),
         (
-            "GetLightingExtendedRuntimeConditionalScenes reply",
+            "GetLightingAdvancedRuntimeConditionalScenes reply",
             encode_frame(
-                Cmd::GetLightingExtendedRuntimeConditionalScenes,
+                Cmd::GetLightingAdvancedRuntimeConditionalScenes,
                 SEQ,
-                &Ok::<LightingExtendedRuntimeConditionalScenesPageResult, RynkError>(Ok(
-                    extended_runtime_conditional_page
+                &Ok::<LightingAdvancedRuntimeConditionalScenesPageResult, RynkError>(Ok(
+                    advanced_runtime_conditional_page
                 ))
             )
         ),
         (
-            "BeginLightingExtendedRuntimeConditionalSceneReplace request",
+            "BeginLightingAdvancedRuntimeConditionalSceneReplace request",
             encode_frame(
-                Cmd::BeginLightingExtendedRuntimeConditionalSceneReplace,
+                Cmd::BeginLightingAdvancedRuntimeConditionalSceneReplace,
                 SEQ,
                 &runtime_conditional_begin
             )
         ),
         (
-            "BeginLightingExtendedRuntimeConditionalSceneReplace reply",
+            "BeginLightingAdvancedRuntimeConditionalSceneReplace reply",
             encode_frame(
-                Cmd::BeginLightingExtendedRuntimeConditionalSceneReplace,
+                Cmd::BeginLightingAdvancedRuntimeConditionalSceneReplace,
                 SEQ,
                 &Ok::<LightingRuntimeConditionalSceneTransactionResult, RynkError>(Ok(runtime_conditional_transaction))
             )
         ),
         (
-            "PutLightingExtendedRuntimeConditionalSceneChunk request",
+            "PutLightingAdvancedRuntimeConditionalSceneChunk request",
             encode_frame(
-                Cmd::PutLightingExtendedRuntimeConditionalSceneChunk,
+                Cmd::PutLightingAdvancedRuntimeConditionalSceneChunk,
                 SEQ,
-                &extended_runtime_conditional_put
+                &advanced_runtime_conditional_put
             )
         ),
         (
-            "PutLightingExtendedRuntimeConditionalSceneChunk reply",
+            "PutLightingAdvancedRuntimeConditionalSceneChunk reply",
             encode_frame(
-                Cmd::PutLightingExtendedRuntimeConditionalSceneChunk,
+                Cmd::PutLightingAdvancedRuntimeConditionalSceneChunk,
                 SEQ,
                 &Ok::<LightingUnitResult, RynkError>(Ok(()))
             )
         ),
         (
-            "CommitLightingExtendedRuntimeConditionalSceneReplace request",
+            "CommitLightingAdvancedRuntimeConditionalSceneReplace request",
             encode_frame(
-                Cmd::CommitLightingExtendedRuntimeConditionalSceneReplace,
+                Cmd::CommitLightingAdvancedRuntimeConditionalSceneReplace,
                 SEQ,
                 &runtime_conditional_commit
             )
         ),
         (
-            "CommitLightingExtendedRuntimeConditionalSceneReplace reply",
+            "CommitLightingAdvancedRuntimeConditionalSceneReplace reply",
             encode_frame(
-                Cmd::CommitLightingExtendedRuntimeConditionalSceneReplace,
+                Cmd::CommitLightingAdvancedRuntimeConditionalSceneReplace,
                 SEQ,
                 &Ok::<LightingStateResult, RynkError>(Ok(state))
             )
         ),
         (
-            "AbortLightingExtendedRuntimeConditionalSceneReplace request",
+            "AbortLightingAdvancedRuntimeConditionalSceneReplace request",
             encode_frame(
-                Cmd::AbortLightingExtendedRuntimeConditionalSceneReplace,
+                Cmd::AbortLightingAdvancedRuntimeConditionalSceneReplace,
                 SEQ,
                 &runtime_conditional_abort
             )
         ),
         (
-            "AbortLightingExtendedRuntimeConditionalSceneReplace reply",
+            "AbortLightingAdvancedRuntimeConditionalSceneReplace reply",
             encode_frame(
-                Cmd::AbortLightingExtendedRuntimeConditionalSceneReplace,
+                Cmd::AbortLightingAdvancedRuntimeConditionalSceneReplace,
                 SEQ,
                 &Ok::<LightingUnitResult, RynkError>(Ok(()))
             )
