@@ -243,7 +243,8 @@ where
         }
     }
 
-    async fn handle_mailbox_command(&mut self, request: MailboxRequest<E::Command>) {
+    #[inline(never)]
+    fn handle_mailbox_command(&mut self, request: MailboxRequest<E::Command>) {
         let response = self.service.handle_command(Instant::now().as_millis(), request.command);
         self.publish_pending_lighting_change();
         self.mailbox.reply(request.id, response);
@@ -305,7 +306,7 @@ where
                     {
                         Either4::First(_) => {}
                         Either4::Second(event) => self.process(event).await,
-                        Either4::Third(request) => self.handle_mailbox_command(request).await,
+                        Either4::Third(request) => self.handle_mailbox_command(request),
                         Either4::Fourth(Either3::First(())) => {
                             let _ = self.service.retry_output_now();
                         }
@@ -331,7 +332,7 @@ where
                     .await
                     {
                         Either3::First(event) => self.process(event).await,
-                        Either3::Second(request) => self.handle_mailbox_command(request).await,
+                        Either3::Second(request) => self.handle_mailbox_command(request),
                         Either3::Third(Either3::First(())) => {
                             let _ = self.service.retry_output_now();
                         }
