@@ -24,10 +24,10 @@ use rmk_types::keycode::{HidKeyCode, KeyCode};
 use rmk_types::modifier::ModifierCombination;
 
 use crate::AUTO_MOUSE_LAYER_MAX_NUM;
-use crate::config::AutoMouseLayerConfig;
 use crate::core_traits::Runnable;
 use crate::event::{
-    ActionEvent, Axis, AxisValType, EventSubscriber, LayerChangeEvent, PointingEvent, SubscribableEvent,
+    ActionEvent, AutoMouseLayerConfigChangeEvent, Axis, AxisValType, EventSubscriber, LayerChangeEvent, PointingEvent,
+    SubscribableEvent,
 };
 use crate::keymap::KeyMap;
 use crate::processor::Processor;
@@ -42,7 +42,7 @@ use crate::processor::Processor;
 /// Construct with [`AutoMouseLayerRunner::new`] and pass to `run_all!`. If the keymap has no
 /// auto mouse layer configured (or every entry's layer is out of range), [`Runnable::run`] parks
 /// forever on [`core::future::pending`] so it can sit alongside the other tasks without doing anything.
-#[processor(subscribe = [PointingEvent, LayerChangeEvent])]
+#[processor(subscribe = [PointingEvent, LayerChangeEvent, AutoMouseLayerConfigChangeEvent])]
 #[::rmk::macros::runnable_generated]
 pub struct AutoMouseLayerRunner<'a, 'k> {
     keymap: &'a KeyMap<'k>,
@@ -55,9 +55,18 @@ pub struct AutoMouseLayerRunner<'a, 'k> {
 impl<'a, 'k> AutoMouseLayerRunner<'a, 'k> {
     /// Build the runner from the keymap's `[behavior.auto_mouse_layer]` config.
     pub fn new(keymap: &'a KeyMap<'k>) -> Self {
+        let (entries, any_action_event_configured) = Self::load_entries(keymap);
+        Self {
+            keymap,
+            entries,
+            any_action_event_configured,
+        }
+    }
+
+    fn load_entries(keymap: &KeyMap<'_>) -> (Vec<EntryState, AUTO_MOUSE_LAYER_MAX_NUM>, bool) {
         let num_layer = keymap.num_layer();
         let configs = keymap.auto_mouse_layer_configs();
-        let mut entries: Vec<EntryState, AUTO_MOUSE_LAYER_MAX_NUM> = Vec::new();
+        let mut entries = Vec::new();
         let mut any_action_event_configured = false;
         for config in configs.iter().cloned() {
             if (config.target_layer as usize) >= num_layer {
@@ -70,7 +79,7 @@ impl<'a, 'k> AutoMouseLayerRunner<'a, 'k> {
             }
             // threshold == 0 would short-circuit motion detection — guard against
             // a misconfigured Rust-API caller bypassing AutoMouseLayerConfig::new.
-            let mut config = config;
+            let mut config = EntryConfig::from(config);
             config.threshold = config.threshold.max(1);
             any_action_event_configured |= config.deactivate_on_key || config.reset_timeout_on_key;
             let device_id = config.device_id;
@@ -89,11 +98,7 @@ impl<'a, 'k> AutoMouseLayerRunner<'a, 'k> {
                 );
             }
         }
-        Self {
-            keymap,
-            entries,
-            any_action_event_configured,
-        }
+        (entries, any_action_event_configured)
     }
 
     async fn on_pointing_event(&mut self, event: PointingEvent) {
@@ -141,12 +146,29 @@ impl<'a, 'k> AutoMouseLayerRunner<'a, 'k> {
             self.keymap.deactivate_layer_if_active(layer);
         }
     }
+
+    async fn on_auto_mouse_layer_config_change_event(&mut self, _: AutoMouseLayerConfigChangeEvent) {
+        let mut released: Vec<u8, AUTO_MOUSE_LAYER_MAX_NUM> = Vec::new();
+        for entry in &self.entries {
+            if entry.self_activated && !released.contains(&entry.config.target_layer) {
+                let _ = released.push(entry.config.target_layer);
+            }
+        }
+        for layer in released {
+            self.keymap.deactivate_layer_if_active(layer);
+        }
+        (self.entries, self.any_action_event_configured) = Self::load_entries(self.keymap);
+        assert!(
+            !self.any_action_event_configured || crate::ACTION_EVENT_SUB_SIZE != 0,
+            "auto_mouse_layer: deactivate_on_key / reset_timeout_on_key need `[event.action] subs = 1`"
+        );
+    }
 }
 
 /// Per-entry runtime state.
 #[derive(Clone)]
 struct EntryState {
-    config: AutoMouseLayerConfig,
+    config: EntryConfig,
     /// `true` while this entry is holding the layer active. Multiple entries
     /// may hold the same layer simultaneously when they share `target_layer`.
     self_activated: bool,
@@ -156,6 +178,32 @@ struct EntryState {
     /// Whether we have already warned about the entry's layer overlapping a
     /// manually-activated layer.
     overlap_warned: bool,
+}
+
+#[derive(Clone)]
+struct EntryConfig {
+    device_id: Option<u8>,
+    target_layer: u8,
+    timeout: Duration,
+    threshold: u16,
+    deactivate_on_key: bool,
+    extra_mouse_keys: heapless::Vec<KeyCode, { rmk_types::auto_mouse::AUTO_MOUSE_LAYER_EXTRA_KEY_MAX_NUM }>,
+    reset_timeout_on_key: bool,
+}
+
+impl From<rmk_types::auto_mouse::AutoMouseLayerConfig> for EntryConfig {
+    fn from(config: rmk_types::auto_mouse::AutoMouseLayerConfig) -> Self {
+        let extra_mouse_keys = config.extra_mouse_keys.into_iter().collect();
+        Self {
+            device_id: config.device_id,
+            target_layer: config.target_layer,
+            timeout: Duration::from_millis(config.timeout_ms as u64),
+            threshold: config.threshold,
+            deactivate_on_key: config.deactivate_on_key,
+            extra_mouse_keys,
+            reset_timeout_on_key: config.reset_timeout_on_key,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -179,15 +227,12 @@ impl AutoMouseLayerRunner<'_, '_> {
 
 impl Runnable for AutoMouseLayerRunner<'_, '_> {
     async fn run(&mut self) -> ! {
-        if self.entries.is_empty() {
-            core::future::pending().await
-        }
         let mut sub = <Self as Processor>::subscriber();
         assert!(
             !self.any_action_event_configured || crate::ACTION_EVENT_SUB_SIZE != 0,
             "auto_mouse_layer: deactivate_on_key / reset_timeout_on_key need `[event.action] subs = 1`"
         );
-        let mut action_sub = self.any_action_event_configured.then(ActionEvent::subscriber);
+        let mut action_sub = (crate::ACTION_EVENT_SUB_SIZE != 0).then(ActionEvent::subscriber);
         loop {
             let action_fut = async {
                 match action_sub.as_mut() {
@@ -401,19 +446,53 @@ mod tests {
 
     fn entry(device_id: Option<u8>) -> EntryState {
         EntryState {
-            config: AutoMouseLayerConfig {
+            config: EntryConfig {
                 device_id,
                 target_layer: 0,
                 timeout: embassy_time::Duration::from_millis(100),
                 threshold: 1,
                 deactivate_on_key: false,
-                extra_mouse_keys: &[],
+                extra_mouse_keys: heapless::Vec::new(),
                 reset_timeout_on_key: false,
             },
             self_activated: false,
             deadline: None,
             overlap_warned: false,
         }
+    }
+
+    #[test]
+    fn runtime_reload_releases_old_layer_and_replaces_entries() {
+        use rmk_types::action::KeyAction;
+
+        use crate::config::{AutoMouseLayerConfig, BehaviorConfig, PositionalConfig};
+        use crate::keymap::{KeyMap, KeymapData};
+        use crate::test_support::test_block_on;
+
+        test_block_on(async {
+            let mut data = KeymapData::<1, 1, 2>::new([[[KeyAction::No]], [[KeyAction::No]]]);
+            let mut behavior = BehaviorConfig::default();
+            behavior
+                .auto_mouse_layer
+                .push(AutoMouseLayerConfig::new(None, 1, Duration::from_millis(100), 1))
+                .unwrap();
+            let positional = PositionalConfig::<1, 1>::default();
+            let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
+            let mut runner = AutoMouseLayerRunner::new(&keymap);
+
+            assert_eq!(runner.entries.len(), 1);
+            assert!(keymap.activate_layer_if_inactive(1));
+            runner.entries[0].self_activated = true;
+            runner.entries[0].deadline = Some(Instant::now() + Duration::from_millis(100));
+
+            keymap.set_auto_mouse_layer_configs(heapless::Vec::new());
+            runner
+                .on_auto_mouse_layer_config_change_event(AutoMouseLayerConfigChangeEvent)
+                .await;
+
+            assert!(runner.entries.is_empty());
+            assert!(!keymap.is_layer_active(1));
+        });
     }
 
     #[test]
@@ -720,10 +799,10 @@ mod tests {
 
     // ── deactivate_on_key ────────────────────────────────────────
 
-    fn holding_entry_with_deactivate(target_layer: u8, exceptions: &'static [KeyCode]) -> EntryState {
+    fn holding_entry_with_deactivate(target_layer: u8, exceptions: &[KeyCode]) -> EntryState {
         let mut e = entry_with_layer(Some(1), target_layer);
         e.config.deactivate_on_key = true;
-        e.config.extra_mouse_keys = exceptions;
+        e.config.extra_mouse_keys.extend_from_slice(exceptions).unwrap();
         e.self_activated = true;
         e.deadline = Some(at(1000));
         e
@@ -1202,5 +1281,66 @@ mod tests {
 
         assert!(released.is_empty());
         assert!(entries[0].deadline.is_none());
+    }
+}
+
+#[cfg(test)]
+mod runtime_configuration_tests {
+    use super::*;
+    use crate::config::{BehaviorConfig, PositionalConfig};
+    use crate::event::{AxisEvent, publish_event};
+    use crate::keymap::KeymapData;
+
+    #[test]
+    fn empty_runner_accepts_first_runtime_configuration() {
+        crate::test_support::test_block_on(async {
+            let mut data = KeymapData::<1, 1, 2>::new([[[crate::k!(A)]], [[crate::k!(B)]]]);
+            let mut behavior = BehaviorConfig::default();
+            let positional = PositionalConfig::<1, 1>::default();
+            let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
+            let mut runner = AutoMouseLayerRunner::new(&keymap);
+            let mut task = core::pin::pin!(runner.run());
+            assert!(futures::poll!(task.as_mut()).is_pending());
+            let mut configs = heapless::Vec::new();
+            configs
+                .push(rmk_types::auto_mouse::AutoMouseLayerConfig {
+                    device_id: Some(0),
+                    target_layer: 1,
+                    timeout_ms: 500,
+                    threshold: 1,
+                    deactivate_on_key: false,
+                    extra_mouse_keys: heapless::Vec::new(),
+                    reset_timeout_on_key: false,
+                })
+                .unwrap();
+            keymap.set_auto_mouse_layer_configs(configs);
+            publish_event(AutoMouseLayerConfigChangeEvent);
+            assert!(futures::poll!(task.as_mut()).is_pending());
+            publish_event(PointingEvent {
+                device_id: 0,
+                axes: [
+                    AxisEvent {
+                        axis: Axis::X,
+                        typ: AxisValType::Rel,
+                        value: 20,
+                    },
+                    AxisEvent {
+                        axis: Axis::Y,
+                        typ: AxisValType::Rel,
+                        value: 0,
+                    },
+                    AxisEvent {
+                        axis: Axis::Z,
+                        typ: AxisValType::Rel,
+                        value: 0,
+                    },
+                ],
+            });
+            assert!(futures::poll!(task.as_mut()).is_pending());
+            assert!(
+                keymap.is_layer_active(1),
+                "runtime auto-mouse configuration should activate layer 1"
+            );
+        });
     }
 }
