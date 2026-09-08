@@ -32,22 +32,22 @@ use crate::{BUILD_HASH, config};
 /// True if the flash operation is finished correctly, false if the flash operation is finished with error.
 pub(crate) static FLASH_OPERATION_FINISHED: Signal<crate::RawMutex, bool> = Signal::new();
 
-// Request/response over `FLASH_CHANNEL`. One `Signal` per read variant; the
-// storage task fires the matching one once it has the result.
 #[cfg(feature = "_ble")]
-static BOND_INFO_RESPONSE: Signal<crate::RawMutex, Option<ProfileInfo>> = Signal::new();
+mod read_response;
+#[cfg(feature = "_ble")]
+use read_response::ReadResponse;
+#[cfg(feature = "_ble")]
+static BOND_INFO_RESPONSE: ReadResponse<Option<ProfileInfo>> = ReadResponse::new();
 #[cfg(all(feature = "_ble", feature = "split"))]
-static PEER_ADDRESS_RESPONSE: Signal<crate::RawMutex, Option<PeerAddress>> = Signal::new();
+static PEER_ADDRESS_RESPONSE: ReadResponse<Option<PeerAddress>> = ReadResponse::new();
 #[cfg(feature = "_ble")]
-static CONNECTION_TYPE_RESPONSE: Signal<crate::RawMutex, Option<ConnectionType>> = Signal::new();
+static CONNECTION_TYPE_RESPONSE: ReadResponse<Option<ConnectionType>> = ReadResponse::new();
 #[cfg(feature = "_ble")]
-static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();
+static ACTIVE_BLE_PROFILE_RESPONSE: ReadResponse<Option<u8>> = ReadResponse::new();
 
 #[cfg(feature = "_ble")]
-async fn request_read<T: Send>(msg: FlashOperationMessage, response: &Signal<crate::RawMutex, T>) -> T {
-    response.reset();
-    FLASH_CHANNEL.send(msg).await;
-    response.wait().await
+async fn request_read<T: Send>(msg: FlashOperationMessage, response: &ReadResponse<T>) -> T {
+    response.request(FLASH_CHANNEL.send(msg)).await
 }
 
 #[cfg(feature = "_ble")]
