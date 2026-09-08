@@ -7,6 +7,10 @@
 //! - `0x8000..=0xFFFF` (Bit 15 = 1): Topics (Server -> Host push).
 //!
 
+#[cfg(feature = "lighting")]
+use super::{
+    LightingExtendedRuntimeConditionalScenesPageResult, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+};
 #[cfg(not(feature = "host"))]
 use postcard::experimental::max_size::MaxSize;
 use serde::Serialize;
@@ -46,9 +50,9 @@ use crate::protocol::rynk::{
     AbortLightingSceneReplaceRequest, BeginLightingOverlayReplaceRequest,
     BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, ClearLightingOverlayRequest,
     CommitLightingOverlayReplaceRequest, CommitLightingRuntimeConditionalSceneReplaceRequest,
-    CommitLightingSceneReplaceRequest, LightingCapabilitiesResult, LightingChanged, LightingCompiledSceneStatusResult,
-    LightingCompiledScenesPageResult, LightingConditionalSceneStatusResult, LightingConditionalScenesPageResult,
-    LightingExtendedRuntimeConditionalScenesPageResult, LightingExtensionLayersResult,
+    CommitLightingSceneReplaceRequest, LightingAdvancedRuntimeConditionalScenesPageResult, LightingCapabilitiesResult,
+    LightingChanged, LightingCompiledSceneStatusResult, LightingCompiledScenesPageResult,
+    LightingConditionalSceneStatusResult, LightingConditionalScenesPageResult, LightingExtensionLayersResult,
     LightingExtensionNamesPageResult, LightingExtensionNamesRequest, LightingExtensionParamsPageResult,
     LightingExtensionParamsRequest, LightingExtensionResult, LightingFramePageResult, LightingFrameRequest,
     LightingKeysPageResult, LightingLedsPageResult, LightingOutputModeStateResult, LightingOutputsPageResult,
@@ -58,7 +62,7 @@ use crate::protocol::rynk::{
     LightingRuntimeConditionalSceneTransactionResult, LightingRuntimeConditionalScenesPageResult,
     LightingScenePageRequest, LightingSceneStatusResult, LightingSceneTransactionResult, LightingScenesPageResult,
     LightingStateResult, LightingUnitResult, LightingZoneMembershipsPageResult, LightingZonesPageResult,
-    PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
+    PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
     PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
@@ -566,24 +570,36 @@ endpoints! {
     /// Replace the optional second effect when the state revision matches.
     #[cfg(feature = "lighting")]
     SetLightingExtensionLayers = 0x092F: SetLightingExtensionLayersRequest => LightingStateResult;
+    /// Original connection/effects conditional endpoint.
+    GetLightingExtendedRuntimeConditionalSceneStatus = 0x0930: () => LightingRuntimeConditionalSceneStatusResult;
+    /// Original connection/effects conditional endpoint.
+    GetLightingExtendedRuntimeConditionalScenes = 0x0931: LightingRuntimeConditionalScenePageRequest => LightingExtendedRuntimeConditionalScenesPageResult;
+    /// Original connection/effects conditional endpoint.
+    BeginLightingExtendedRuntimeConditionalSceneReplace = 0x0932: BeginLightingRuntimeConditionalSceneReplaceRequest => LightingRuntimeConditionalSceneTransactionResult;
+    /// Original connection/effects conditional endpoint.
+    PutLightingExtendedRuntimeConditionalSceneChunk = 0x0933: PutLightingExtendedRuntimeConditionalSceneChunkRequest => LightingUnitResult;
+    /// Original connection/effects conditional endpoint.
+    CommitLightingExtendedRuntimeConditionalSceneReplace = 0x0934: CommitLightingRuntimeConditionalSceneReplaceRequest => LightingStateResult;
+    /// Original connection/effects conditional endpoint.
+    AbortLightingExtendedRuntimeConditionalSceneReplace = 0x0935: AbortLightingRuntimeConditionalSceneReplaceRequest => LightingUnitResult;
     /// Discover connection-aware runtime conditional limits and occupancy.
     #[cfg(feature = "lighting")]
-    GetLightingExtendedRuntimeConditionalSceneStatus = 0x0930: () => LightingRuntimeConditionalSceneStatusResult;
+    GetLightingAdvancedRuntimeConditionalSceneStatus = 0x0940: () => LightingRuntimeConditionalSceneStatusResult;
     /// Read connection-aware runtime conditional cells under a pinned state revision.
     #[cfg(feature = "lighting")]
-    GetLightingExtendedRuntimeConditionalScenes = 0x0931: LightingRuntimeConditionalScenePageRequest => LightingExtendedRuntimeConditionalScenesPageResult;
+    GetLightingAdvancedRuntimeConditionalScenes = 0x0941: LightingRuntimeConditionalScenePageRequest => LightingAdvancedRuntimeConditionalScenesPageResult;
     /// Begin an atomic replacement using extended conditional cells.
     #[cfg(feature = "lighting")]
-    BeginLightingExtendedRuntimeConditionalSceneReplace = 0x0932: BeginLightingRuntimeConditionalSceneReplaceRequest => LightingRuntimeConditionalSceneTransactionResult;
+    BeginLightingAdvancedRuntimeConditionalSceneReplace = 0x0942: BeginLightingRuntimeConditionalSceneReplaceRequest => LightingRuntimeConditionalSceneTransactionResult;
     /// Stage connection-aware cells for an extended replacement.
     #[cfg(feature = "lighting")]
-    PutLightingExtendedRuntimeConditionalSceneChunk = 0x0933: PutLightingExtendedRuntimeConditionalSceneChunkRequest => LightingUnitResult;
+    PutLightingAdvancedRuntimeConditionalSceneChunk = 0x0943: PutLightingAdvancedRuntimeConditionalSceneChunkRequest => LightingUnitResult;
     /// Publish a complete extended conditional-table replacement.
     #[cfg(feature = "lighting")]
-    CommitLightingExtendedRuntimeConditionalSceneReplace = 0x0934: CommitLightingRuntimeConditionalSceneReplaceRequest => LightingStateResult;
+    CommitLightingAdvancedRuntimeConditionalSceneReplace = 0x0944: CommitLightingRuntimeConditionalSceneReplaceRequest => LightingStateResult;
     /// Discard an extended conditional-table replacement.
     #[cfg(feature = "lighting")]
-    AbortLightingExtendedRuntimeConditionalSceneReplace = 0x0935: AbortLightingRuntimeConditionalSceneReplaceRequest => LightingUnitResult;
+    AbortLightingAdvancedRuntimeConditionalSceneReplace = 0x0945: AbortLightingRuntimeConditionalSceneReplaceRequest => LightingUnitResult;
     /// Read back what one lighting node last presented to its LEDs, paged.
     /// `LightingFeatureFlags` has no bits left, so support is discovered by
     /// probing: firmware without it answers `UnknownCmd`.
