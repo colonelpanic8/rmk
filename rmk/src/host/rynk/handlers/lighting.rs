@@ -2793,7 +2793,7 @@ mod tests {
                 .unwrap();
                 let connection = rmk_types::protocol::rynk::LightingConnectionCondition {
                     transport: Some(rmk_types::protocol::rynk::LightingActiveTransport::Ble),
-                    profile: Some(3),
+                    profile: Some(1),
                     ble_state: Some(rmk_types::ble::BleState::Connected),
                     bonded: None,
                     usb_connected: None,
