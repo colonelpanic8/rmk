@@ -27,7 +27,8 @@ use crate::processor::Processor;
 /// API. Concurrent callers are serialized; commands are never coalesced.
 pub struct LightingMailbox<Command, Reply, Error, const CAPACITY: usize> {
     requests: Channel<RawMutex, MailboxRequest<Command>, CAPACITY>,
-    response: Signal<RawMutex, MailboxResponse<Reply, Error>>,
+    // The initialized empty signal must not force a large reply payload into flash.
+    response: Signal<RawMutex, heapless::Vec<MailboxResponse<Reply, Error>, 1>>,
     retry_output: Signal<RawMutex, ()>,
     snapshot_changed: Signal<RawMutex, ()>,
     caller: Mutex<RawMutex, ()>,
@@ -66,7 +67,7 @@ impl<Command, Reply, Error, const CAPACITY: usize> LightingMailbox<Command, Repl
         });
         self.requests.send(MailboxRequest { id, command }).await;
         loop {
-            let response = self.response.wait().await;
+            let response = self.response.wait().await.pop().expect("mailbox reply is present");
             if response.id == id {
                 return response.result;
             }
@@ -97,7 +98,8 @@ impl<Command, Reply, Error, const CAPACITY: usize> LightingMailbox<Command, Repl
 
     /// Service side: publish the reply for a previously received command.
     pub fn publish_reply(&self, id: u32, result: Result<Reply, Error>) {
-        self.response.signal(MailboxResponse { id, result });
+        self.response
+            .signal(heapless::Vec::from_array([MailboxResponse { id, result }]));
     }
 
     async fn receive(&self) -> MailboxRequest<Command> {
@@ -105,7 +107,8 @@ impl<Command, Reply, Error, const CAPACITY: usize> LightingMailbox<Command, Repl
     }
 
     fn reply(&self, id: u32, result: Result<Reply, Error>) {
-        self.response.signal(MailboxResponse { id, result });
+        self.response
+            .signal(heapless::Vec::from_array([MailboxResponse { id, result }]));
     }
 }
 
@@ -376,6 +379,33 @@ mod tests {
             mailbox.reply(request.id, Err(9));
         }));
         assert_eq!(reply, Err(9));
+    }
+
+    #[test]
+    fn mailbox_replaces_and_delivers_owned_replies_without_leaking() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        struct Reply(Arc<AtomicUsize>);
+        impl Drop for Reply {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mailbox = LightingMailbox::<(), Reply, (), 1>::new();
+        mailbox.publish_reply(99, Ok(Reply(drops.clone())));
+        let (reply, ()) = block_on(join(mailbox.request(()), async {
+            let (id, ()) = mailbox.receive_request().await;
+            mailbox.publish_reply(id, Ok(Reply(drops.clone())));
+        }));
+        assert!(reply.is_ok());
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        drop(reply);
+        assert_eq!(drops.load(Ordering::SeqCst), 2);
     }
 
     #[test]

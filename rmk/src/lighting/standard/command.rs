@@ -480,31 +480,25 @@ pub enum ReplicaSlotError {
 /// [`StandardCommand`] prevents command-channel capacity from multiplying its
 /// RAM cost on small MCUs.
 pub struct StandardReplicaSlot<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
-    value: BlockingMutex<RawMutex, RefCell<Option<StandardReplicaState<OVERLAY_CAP, SCENE_CAP>>>>,
+    // An empty Vec has no payload niche tag, allowing static storage in BSS.
+    value: BlockingMutex<RawMutex, RefCell<heapless::Vec<StandardReplicaState<OVERLAY_CAP, SCENE_CAP>, 1>>>,
 }
 
 impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize> StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP> {
     pub const fn new() -> Self {
         Self {
-            value: BlockingMutex::new(RefCell::new(None)),
+            value: BlockingMutex::new(RefCell::new(heapless::Vec::new())),
         }
     }
 
     pub fn put(&self, state: StandardReplicaState<OVERLAY_CAP, SCENE_CAP>) -> Result<(), ReplicaSlotError> {
-        self.value.lock(|value| {
-            let mut value = value.borrow_mut();
-            if value.is_some() {
-                Err(ReplicaSlotError::Busy)
-            } else {
-                *value = Some(state);
-                Ok(())
-            }
-        })
+        self.value
+            .lock(|value| value.borrow_mut().push(state).map_err(|_| ReplicaSlotError::Busy))
     }
 
     pub fn take(&self) -> Result<StandardReplicaState<OVERLAY_CAP, SCENE_CAP>, ReplicaSlotError> {
         self.value
-            .lock(|value| value.borrow_mut().take().ok_or(ReplicaSlotError::Empty))
+            .lock(|value| value.borrow_mut().pop().ok_or(ReplicaSlotError::Empty))
     }
 }
 

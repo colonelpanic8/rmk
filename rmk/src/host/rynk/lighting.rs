@@ -535,7 +535,7 @@ fn expect_state(result: LightingResult<RynkLightingReadback>) -> LightingResult<
 /// standard engine mailbox; it never owns renderer or compositor state.
 pub struct RynkLightingMailbox {
     requests: Channel<RawMutex, MailboxRequest, RYNK_LIGHTING_COMMAND_CAPACITY>,
-    response: Signal<RawMutex, MailboxResponse>,
+    response: Signal<RawMutex, Vec<MailboxResponse, 1>>,
     caller: Mutex<RawMutex, ()>,
     next_id: BlockingMutex<RawMutex, Cell<u32>>,
     replacement: BlockingMutex<RawMutex, RefCell<Option<StagedReplacement>>>,
@@ -623,7 +623,7 @@ impl RynkLightingMailbox {
 
     async fn wait_for_reply(&self, id: u32) -> LightingResult<RynkLightingReadback> {
         loop {
-            let response = self.response.wait().await;
+            let response = self.response.wait().await.pop().expect("mailbox reply is present");
             if response.id == id {
                 return response.result;
             }
@@ -635,7 +635,7 @@ impl RynkLightingMailbox {
     }
 
     pub(in crate::host::rynk) fn reply(&self, id: u32, result: LightingResult<RynkLightingReadback>) {
-        self.response.signal(MailboxResponse { id, result });
+        self.response.signal(Vec::from_array([MailboxResponse { id, result }]));
     }
 
     pub(in crate::host::rynk) async fn take_replacement(
