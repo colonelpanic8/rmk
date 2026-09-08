@@ -210,6 +210,13 @@ impl<S: PointingDriver> PointingDevice<S> {
         }
 
         loop {
+            // A sensor that used up its init retries never reports again, and an
+            // unpopulated motion pin can sit low, so `wait_for_low` would return
+            // at once and spin this loop; park instead.
+            if self.init_state == InitState::Failed {
+                pending::<()>().await;
+            }
+
             let poll_wait = async {
                 if let Some(gpio) = self.sensor.motion_gpio() {
                     let _ = gpio.wait_for_low().await;
@@ -899,6 +906,95 @@ mod tests {
         }
         assert!(!result);
         assert_eq!(device.init_state, InitState::Failed);
+    }
+
+    struct StuckLowMotionPin {
+        waits: Cell<u32>,
+    }
+    impl ErrorType for StuckLowMotionPin {
+        type Error = DummyError;
+    }
+    impl InputPin for StuckLowMotionPin {
+        fn is_high(&mut self) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
+        fn is_low(&mut self) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+    impl Wait for StuckLowMotionPin {
+        async fn wait_for_high(&mut self) -> Result<(), Self::Error> {
+            pending::<()>().await;
+            Ok(())
+        }
+        async fn wait_for_low(&mut self) -> Result<(), Self::Error> {
+            let waits = self.waits.get() + 1;
+            self.waits.set(waits);
+            assert!(waits < 64, "motion pin polled without the loop yielding");
+            Ok(())
+        }
+        async fn wait_for_rising_edge(&mut self) -> Result<(), Self::Error> {
+            todo!()
+        }
+        async fn wait_for_falling_edge(&mut self) -> Result<(), Self::Error> {
+            todo!()
+        }
+        async fn wait_for_any_edge(&mut self) -> Result<(), Self::Error> {
+            todo!()
+        }
+    }
+
+    struct NeverInitDriver {
+        pin: StuckLowMotionPin,
+    }
+    impl PointingDriver for NeverInitDriver {
+        type MOTION = StuckLowMotionPin;
+        async fn init(&mut self) -> Result<(), PointingDriverError> {
+            Err(PointingDriverError::InitFailed)
+        }
+        async fn read_motion(&mut self) -> Result<MotionData, PointingDriverError> {
+            Err(PointingDriverError::InitFailed)
+        }
+        fn motion_pending(&mut self) -> bool {
+            true
+        }
+        fn motion_gpio(&mut self) -> Option<&mut Self::MOTION> {
+            Some(&mut self.pin)
+        }
+    }
+
+    #[test]
+    fn failed_sensor_parks_instead_of_spinning() {
+        use core::future::Future;
+        use core::pin::pin;
+        use core::task::{Context, Poll, Waker};
+
+        let mut device = PointingDevice {
+            sensor: NeverInitDriver {
+                pin: StuckLowMotionPin { waits: Cell::new(0) },
+            },
+            init_state: InitState::Pending,
+            poll_interval: Duration::from_millis(1),
+            id: 1,
+            report_interval: Duration::from_millis(1),
+            last_poll: Instant::MIN,
+            last_report: Instant::MIN,
+            accumulated_x: 0,
+            accumulated_y: 0,
+        };
+        for _ in 0..PointingDevice::<NeverInitDriver>::MAX_INIT_RETRIES {
+            block_on(device.try_init());
+        }
+        assert_eq!(device.init_state, InitState::Failed);
+
+        let mut cx = Context::from_waker(Waker::noop());
+        {
+            let mut read = pin!(device.read_pointing_event());
+            for _ in 0..8 {
+                assert!(matches!(read.as_mut().poll(&mut cx), Poll::Pending));
+            }
+        }
+        assert_eq!(device.sensor.pin.waits.get(), 0);
     }
 
     #[test]
