@@ -10,6 +10,14 @@ pub(crate) fn expand_ble_config(hardware: &Hardware) -> (TokenStream2, TokenStre
     if !hardware.communication.ble_enabled() {
         return (quote! {}, quote! {});
     }
+    let ble_name = match hardware
+        .communication
+        .get_ble_config()
+        .and_then(|ble| ble.name)
+    {
+        Some(name) => quote! { ::core::option::Option::Some(#name) },
+        None => quote! { ::core::option::Option::None },
+    };
     // Advanced parameters are only supported for nrf52(for now)
     if hardware.chip.series != ChipSeries::Nrf52 {
         return (
@@ -18,6 +26,7 @@ pub(crate) fn expand_ble_config(hardware: &Hardware) -> (TokenStream2, TokenStre
             },
             quote! {
                 ble_battery_config,
+                ble_name: #ble_name,
             },
         );
     }
@@ -76,6 +85,7 @@ pub(crate) fn expand_ble_config(hardware: &Hardware) -> (TokenStream2, TokenStre
                     ble_config_tokens,
                     quote! {
                         ble_battery_config,
+                        ble_name: #ble_name,
                     },
                 )
             } else {
@@ -85,6 +95,7 @@ pub(crate) fn expand_ble_config(hardware: &Hardware) -> (TokenStream2, TokenStre
                     },
                     quote! {
                         ble_battery_config,
+                        ble_name: #ble_name,
                     },
                 )
             }
