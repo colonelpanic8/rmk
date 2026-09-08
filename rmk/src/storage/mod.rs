@@ -9,6 +9,8 @@ use postcard::experimental::max_size::MaxSize;
 use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::{MorseProfile, MorseProfileName};
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::{BehaviorOptions, PointingConfig};
 #[cfg(all(feature = "lighting", feature = "rynk"))]
 use rmk_types::protocol::rynk::{
     LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE,
@@ -16,8 +18,6 @@ use rmk_types::protocol::rynk::{
     LightingExtendedConditionalSceneCell, LightingLayerPolicy, LightingSceneCell,
 };
 use rmk_types::unicode::UnicodeMode;
-#[cfg(feature = "rynk")]
-use rmk_types::protocol::rynk::{BehaviorOptions, PointingConfig};
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
