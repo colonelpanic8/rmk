@@ -3,11 +3,12 @@ use proc_macro2::TokenStream as TokenStream2;
 use syn::{ItemFn, ItemMod};
 
 /// List of functions that can be overwritten
-#[derive(Debug, Clone, Copy, FromMeta)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, FromMeta)]
 pub enum Overwritten {
     Usb,
     ChipConfig,
     ChipInit,
+    HostService,
     Entry,
     /// `#[Override(bind_interrupt)]` — the form the stm32h7 example documents. Selected by
     /// `bind_interrupt.rs` through this shared matcher; the legacy bare `#[bind_interrupt]`
