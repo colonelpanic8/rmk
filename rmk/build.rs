@@ -11,6 +11,7 @@ fn main() {
     common::set_target_cfgs(&mut cfgs);
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=RMK_BUILD_HASH_SEED");
 
     // Compute build hash and write to constants.rs
     let build_hash = compute_build_hash();
@@ -23,6 +24,16 @@ fn main() {
     fs::write(&dest_path, constants).expect("Failed to write constants.rs file");
 }
 fn compute_build_hash() -> u32 {
+    let combined = env::var("RMK_BUILD_HASH_SEED")
+        .ok()
+        .filter(|seed| !seed.is_empty())
+        .unwrap_or_else(default_build_hash_seed);
+    let mut hasher = crc32fast::Hasher::new();
+    hasher.update(combined.as_bytes());
+    hasher.finalize()
+}
+
+fn default_build_hash_seed() -> String {
     // Get the short hash of the latest Git commit. Use "unknown" if it fails
     let commit_id = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
@@ -44,8 +55,5 @@ fn compute_build_hash() -> u32 {
         .as_nanos();
 
     // Combine data and compute CRC32
-    let combined = format!("{commit_id}_{now}");
-    let mut hasher = crc32fast::Hasher::new();
-    hasher.update(combined.as_bytes());
-    hasher.finalize()
+    format!("{commit_id}_{now}")
 }
