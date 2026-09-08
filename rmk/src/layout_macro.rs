@@ -614,6 +614,8 @@ macro_rules! user {
 /// - ComboOff: Disable combos
 /// - ComboToggle: Toggle combos
 /// - CapsWordToggle: Toggle caps word mode
+/// - OutputUsb: Prefer USB output
+/// - OutputBluetooth: Prefer Bluetooth output
 ///
 /// # Example (internal use only)
 /// ```ignore

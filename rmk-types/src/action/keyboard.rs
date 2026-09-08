@@ -25,4 +25,8 @@ pub enum KeyboardAction {
     ComboToggle,
     /// Toggle Caps Word
     CapsWordToggle,
+    /// Prefer USB as the host transport on key release
+    OutputUsb,
+    /// Prefer BLE as the host transport on key release
+    OutputBluetooth,
 }
