@@ -14,6 +14,7 @@ pub struct Behavior {
     pub auto_mouse_layer: Vec<AutoMouseLayer>,
     pub mouse_layer_scale: Vec<MouseLayerScale>,
     pub unicode: Option<Unicode>,
+    pub auto_mouse_layer_max_num: usize,
 }
 
 /// Resolved unicode input configuration. `codepoints` is addressed by
@@ -56,6 +57,9 @@ pub const DEFAULT_AUTO_MOUSE_LAYER_TIMEOUT_MS: u64 = 500;
 
 /// Default motion threshold for [`AutoMouseLayer`] when not specified.
 pub const DEFAULT_AUTO_MOUSE_LAYER_THRESHOLD: u16 = 1;
+
+/// Protocol/storage capacity for `extra_mouse_keys` in one auto mouse layer entry.
+pub const AUTO_MOUSE_LAYER_EXTRA_KEY_MAX_NUM: usize = 16;
 
 /// Fallback for `auto_mouse_layer_max_num` when no `keyboard.toml` is loaded.
 pub const DEFAULT_AUTO_MOUSE_LAYER_MAX_NUM: usize = 2;
@@ -280,6 +284,15 @@ impl crate::KeyboardTomlConfig {
                 self.rmk.morse_profile_max_num
             ));
         }
+        if let Some((name, _)) = morse
+            .as_ref()
+            .and_then(|m| m.profiles.iter().find(|(name, _)| name.len() > 32))
+        {
+            return Err(format!(
+                "behavior.morse profile name `{name}` is {} bytes, but runtime names are limited to 32 bytes",
+                name.len()
+            ));
+        }
 
         let auto_mouse_layer = toml_behavior
             .auto_mouse_layer
@@ -334,6 +347,10 @@ impl crate::KeyboardTomlConfig {
             auto_mouse_layer,
             mouse_layer_scale,
             unicode,
+            auto_mouse_layer_max_num: self
+                .rmk
+                .auto_mouse_layer_max_num
+                .unwrap_or(DEFAULT_AUTO_MOUSE_LAYER_MAX_NUM),
         })
     }
 }
