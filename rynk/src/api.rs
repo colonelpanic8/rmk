@@ -31,36 +31,31 @@ use rmk_types::protocol::rynk::{
     BehaviorOptions, BleName, BuildInfo, ClearLightingOverlayRequest, Cmd, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
     DeviceDataDescriptor, DeviceDataRecord, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse,
-    GetComboDefinitionBulkResponse, GetEncoderRequest,
-    GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse,
-    GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerMetadata,
-    LayerState,
+    GetComboDefinitionBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMacroRequest,
+    GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest, GetMorseProfileBulkResponse,
+    GetMorseProfileStateRequest, KeyPosition, LayerMetadata, LayerState, LightingAdvancedRuntimeConditionalScenesPage,
     LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
-    LightingConditionalScenesPage, LightingAdvancedRuntimeConditionalScenesPage, LightingExtension,
-    LightingExtensionLayers, LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionNamesRequest,
-    LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest,
-    LightingKeysPage, LightingLed, LightingLedsPage, LightingMatrixPosition, LightingOutputModeState,
-    LightingOutputsPage, LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction,
-    LightingPageRequest, LightingPhysicalKeysPage, LightingReplicaStatus, LightingResult, LightingRoutesPage,
-    LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
-    LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
-    LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZone, LightingZoneId,
-    LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MaintenanceMode, MatrixState,
-    MorseHoldTriggerPositionState, MorseProfileEntry, MorseProfileState, PeripheralStatus, PointingCapabilities,
-    PointingConfig, ProtocolVersion, PutLightingAdvancedRuntimeConditionalSceneChunkRequest,
-    PutLightingOverlayChunkRequest,
+    LightingConditionalScenesPage, LightingExtension, LightingExtensionLayers, LightingExtensionNameKind,
+    LightingExtensionNamesPage, LightingExtensionNamesRequest, LightingExtensionParamsPage,
+    LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest, LightingKeysPage, LightingLed,
+    LightingLedsPage, LightingMatrixPosition, LightingOutputModeState, LightingOutputsPage, LightingOverlayPage,
+    LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage,
+    LightingReplicaStatus, LightingResult, LightingRoutesPage, LightingRuntimeConditionalScenePageRequest,
+    LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneTransaction,
+    LightingRuntimeConditionalScenesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
+    LightingScenesPage, LightingState, LightingZone, LightingZoneId, LightingZoneMembershipsPage, LightingZonesPage,
+    LockStatus, MacroData, MaintenanceMode, MatrixState, MorseHoldTriggerPositionState, MorseProfileEntry,
+    MorseProfileState, PeripheralStatus, PointingCapabilities, PointingConfig, ProtocolVersion,
+    PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
     PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetAutoMouseLayerConfigsRequest,
     SetComboBulkRequest, SetComboDefinitionBulkRequest, SetComboDefinitionRequest, SetComboRequest, SetEncoderRequest,
-    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
+    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLayerMetadataRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
     SetLightingWakeLayersRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest,
-    SetMorseProfileBulkRequest,
-    SetLayerMetadataRequest, SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest,
-    SetPointingConfigRequest,
-    SplitCentralLatencyPolicy, SplitCentralLatencyState, SplitTransportForce, SplitTransportState, StorageResetMode,
-    UnsetLightingOverlayRequest,
-    UnsetLightingSceneCellRequest, command,
+    SetMorseProfileBulkRequest, SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest,
+    SetPointingConfigRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, SplitTransportForce,
+    SplitTransportState, StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -234,10 +229,7 @@ impl Client {
     /// Persist one fixed layer slot's logical occupancy and name.
     pub async fn set_layer_metadata(&self, layer: u8, metadata: LayerMetadata) -> Result<(), RynkHostError> {
         if !self.capabilities.storage_enabled {
-            return Err(RynkHostError::Unsupported(
-                Cmd::SetLayerMetadata,
-                "storage not enabled",
-            ));
+            return Err(RynkHostError::Unsupported(Cmd::SetLayerMetadata, "storage not enabled"));
         }
         self.request::<command::SetLayerMetadata>(&SetLayerMetadataRequest { layer, metadata })
             .await
