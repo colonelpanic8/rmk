@@ -1,6 +1,7 @@
 #[cfg(feature = "subrating")]
 use bt_hci::{cmd::le::LeSetHostFeature, controller::ControllerCmdSync};
 use embassy_futures::join::join;
+use embassy_futures::select::{select, select4};
 use embassy_time::{Duration, Timer};
 use rmk_types::connection::ConnectionStatus;
 use trouble_host::prelude::*;
@@ -9,7 +10,9 @@ use trouble_host::prelude::*;
 use super::PeerAddress;
 use super::{GattSplitMessage, SplitMessage};
 use crate::ble::adv::{Adv, advertise};
-use crate::event::{CentralConnectedEvent, KeyboardEvent, SleepStateEvent, SubscribableEvent, publish_event};
+use crate::event::{
+    CentralConnectedEvent, KeyboardEvent, PointingEvent, SleepStateEvent, SubscribableEvent, publish_event,
+};
 use crate::split::driver::{SplitDriverError, SplitReader, SplitWriter};
 use crate::split::peripheral::SplitPeripheral;
 use crate::state::update_status;
@@ -131,6 +134,14 @@ impl<'stack, 'server, 'c, P: PacketPool> SplitWriter for BleSplitPeripheralDrive
             })?;
         Ok(gatt_msg.len)
     }
+
+    /// A notification is only queued towards the controller. Give it a
+    /// sleeping link's subrated interval to go on air before the caller acts
+    /// on its delivery, e.g. by tearing the link down.
+    async fn flush(&mut self) -> Result<(), SplitDriverError> {
+        Timer::after_millis(500).await;
+        Ok(())
+    }
 }
 
 /// Let the controller accept the central's subrate requests on the split link.
@@ -176,6 +187,21 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
         .filter(|a| a.is_valid)
         .map(|a| a.address);
 
+    /// Revert a BLE force the central never joins. The forced link is this
+    /// half's only way to hear the override that would free it, so a force
+    /// whose transport stays dead while a cable is detected strands the
+    /// peripheral; the cable-detect input is ground truth.
+    async fn forced_ble_liveness_fallback() {
+        if crate::split::selector::forced_mode() != crate::split::selector::FORCE_BLE
+            || !crate::split::selector::detected_wired()
+        {
+            core::future::pending::<()>().await;
+        }
+        embassy_time::Timer::after_secs(8).await;
+        info!("BLE force reverted: central never connected");
+        crate::split::selector::set_forced(crate::split::selector::FORCE_AUTO);
+    }
+
     let peri_task = async {
         // Set subrating host support before any advertising/connecting
         #[cfg(feature = "subrating")]
@@ -183,10 +209,21 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
 
         let server = BleSplitPeripheralServer::new_default("rmk").unwrap();
         loop {
+            crate::split::selector::wait_wireless_selected().await;
             update_status(|c| *c = ConnectionStatus::new());
             publish_event(CentralConnectedEvent { connected: false });
             publish_event(SleepStateEvent::new(false));
-            match split_peripheral_advertise(id, central_addr, &mut peripheral, &server).await {
+            let connection = embassy_futures::select::select3(
+                split_peripheral_advertise(id, central_addr, &mut peripheral, &server),
+                crate::split::selector::wait_wired_selected(),
+                forced_ble_liveness_fallback(),
+            )
+            .await;
+            let connection = match connection {
+                embassy_futures::select::Either3::First(connection) => connection,
+                embassy_futures::select::Either3::Second(_) | embassy_futures::select::Either3::Third(_) => continue,
+            };
+            match connection {
                 Ok(conn) => {
                     info!("Connected to the central");
                     publish_event(CentralConnectedEvent { connected: true });
@@ -204,16 +241,26 @@ pub async fn initialize_nrf_ble_split_peripheral_and_run<
                             central_addr = Some(new_addr);
                         }
                     }
-                    peripheral.run().await;
+                    let _ = select(peripheral.run(), crate::split::selector::wait_wired_selected()).await;
                     info!("Disconnected from the central");
                 }
                 Err(BleHostError::BleHost(Error::Timeout)) => {
-                    // Timeout, wait new keys to continue
+                    // Park until there is a reason to advertise again: local
+                    // input, the selection moving (the cable going away, a
+                    // force), or a forced-BLE link proving dead.
                     error!("Connect to central timeout");
                     publish_event(SleepStateEvent::new(true));
-                    let mut sub = KeyboardEvent::subscriber();
-                    sub.clear();
-                    let _ = sub.next_message_pure().await;
+                    let mut keys = KeyboardEvent::subscriber();
+                    keys.clear();
+                    let mut pointing = PointingEvent::subscriber();
+                    pointing.clear();
+                    let _ = select4(
+                        keys.next_message_pure(),
+                        pointing.next_message_pure(),
+                        crate::split::selector::wait_selection_changed(),
+                        forced_ble_liveness_fallback(),
+                    )
+                    .await;
                     continue;
                 }
                 Err(e) => {

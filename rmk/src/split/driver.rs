@@ -2,8 +2,11 @@
 //!
 use core::cell::Cell;
 
+#[cfg(feature = "dfu_split")]
 use embassy_futures::select::{Either, select};
+use embassy_futures::select::{Either3, select3};
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
+use embassy_time::{Duration, Instant, Timer};
 use futures::FutureExt;
 use rmk_types::battery::BatteryStatus;
 #[cfg(feature = "rynk")]
@@ -35,7 +38,18 @@ pub(crate) trait SplitReader {
 /// Split message writer to other split devices
 pub(crate) trait SplitWriter {
     async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError>;
+
+    /// Wait until the last written control message has reached the peer, as
+    /// far as the transport can tell. Transports whose `write` already
+    /// delivers keep the default.
+    async fn flush(&mut self) -> Result<(), SplitDriverError> {
+        Ok(())
+    }
 }
+
+/// How long the central waits for a peripheral to acknowledge a transport
+/// force. Long enough for a sleeping BLE link's peripheral latency.
+const FORCE_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Live per-peripheral status. Latched here in the transport-agnostic split
 /// layer so host services can read a current snapshot at any time, even when
@@ -148,6 +162,11 @@ mod connection_state_tests {
     }
 }
 
+/// Any peripheral session currently up.
+pub(crate) fn any_peripheral_connected() -> bool {
+    PERIPHERAL_SLOTS.lock(|slots| slots.get().iter().any(|s| s.connected))
+}
+
 /// Latest snapshot for peripheral `id`, or `None` when `id` is out of range.
 #[cfg(feature = "rynk")]
 pub(crate) fn current_peripheral_status(id: usize) -> Option<PeripheralStatus> {
@@ -157,6 +176,157 @@ pub(crate) fn current_peripheral_status(id: usize) -> Option<PeripheralStatus> {
             battery: s.battery,
         })
     })
+}
+
+#[cfg(test)]
+mod force_tests {
+    use std::collections::VecDeque;
+
+    use embassy_futures::select::select;
+    use embassy_time::Timer;
+
+    use super::*;
+    use crate::split::selector::{self, FORCE_AUTO, FORCE_BLE, FORCE_WIRED};
+    use crate::test_support::test_block_on;
+
+    /// A transport whose scripted replies arrive only once the manager has
+    /// written a given number of messages, so an acknowledgement can be made
+    /// to follow the request it answers.
+    struct FakeLink {
+        reads: VecDeque<(usize, SplitMessage)>,
+        writes: Vec<SplitMessage>,
+    }
+
+    impl FakeLink {
+        fn new<I: IntoIterator<Item = (usize, SplitMessage)>>(reads: I) -> Self {
+            Self {
+                reads: reads.into_iter().collect(),
+                writes: Vec::new(),
+            }
+        }
+    }
+
+    impl SplitReader for FakeLink {
+        async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
+            core::future::poll_fn(|_| match self.reads.front() {
+                Some((after_writes, _)) if self.writes.len() >= *after_writes => {
+                    core::task::Poll::Ready(Ok(self.reads.pop_front().unwrap().1))
+                }
+                _ => core::task::Poll::Pending,
+            })
+            .await
+        }
+    }
+
+    impl SplitWriter for FakeLink {
+        async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
+            self.writes.push(*message);
+            Ok(0)
+        }
+    }
+
+    fn new_manager(link: FakeLink) -> PeripheralManager<FakeLink> {
+        PeripheralManager::new(
+            link,
+            0,
+            PeripheralMatrixConfig {
+                rows: 1,
+                cols: 1,
+                row_offset: 0,
+                col_offset: 0,
+            },
+        )
+    }
+
+    fn run_for(manager: &mut PeripheralManager<FakeLink>, secs: u64) {
+        test_block_on(async {
+            let _ = select(manager.run(), Timer::after_secs(secs)).await;
+        });
+    }
+
+    fn overrides(link: &FakeLink) -> Vec<(u8, u8)> {
+        link.writes
+            .iter()
+            .filter_map(|m| match m {
+                SplitMessage::TransportOverride { generation, mode } => Some((*generation, *mode)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    // Each test owns the process (nextest), so the selector statics start fresh.
+
+    #[test]
+    fn force_is_applied_only_after_the_peripheral_acknowledges_it() {
+        selector::initialize(true);
+        set_peripheral_connected(0, true);
+
+        crate::split::request_transport_force(FORCE_BLE);
+        let generation = selector::desired_force().unwrap().generation;
+        assert_eq!(
+            selector::forced_mode(),
+            FORCE_AUTO,
+            "a connected peripheral must ack first"
+        );
+
+        // The ack follows the ConnectionStatus sync and the override.
+        let mut manager = new_manager(FakeLink::new([(2, SplitMessage::TransportOverrideAck(generation))]));
+        run_for(&mut manager, 1);
+
+        assert_eq!(overrides(&manager.transceiver), vec![(generation, FORCE_BLE)]);
+        assert_eq!(selector::forced_mode(), FORCE_BLE);
+    }
+
+    #[test]
+    fn force_is_not_applied_when_the_acknowledgement_never_comes() {
+        selector::initialize(true);
+        set_peripheral_connected(0, true);
+
+        crate::split::request_transport_force(FORCE_BLE);
+        let generation = selector::desired_force().unwrap().generation;
+
+        let mut manager = new_manager(FakeLink::new([]));
+        run_for(&mut manager, FORCE_ACK_TIMEOUT.as_secs() + 2);
+
+        assert_eq!(overrides(&manager.transceiver), vec![(generation, FORCE_BLE)]);
+        assert_eq!(
+            selector::forced_mode(),
+            FORCE_AUTO,
+            "timeout leaves the transport alone"
+        );
+    }
+
+    #[test]
+    fn acknowledgement_of_a_superseded_generation_is_ignored() {
+        selector::initialize(true);
+        set_peripheral_connected(0, true);
+
+        crate::split::request_transport_force(FORCE_BLE);
+        let stale = selector::desired_force().unwrap().generation;
+        crate::split::request_transport_force(FORCE_WIRED);
+        let current = selector::desired_force().unwrap().generation;
+        assert_ne!(stale, current);
+
+        let mut manager = new_manager(FakeLink::new([(2, SplitMessage::TransportOverrideAck(stale))]));
+        run_for(&mut manager, 1);
+        assert_eq!(overrides(&manager.transceiver), vec![(current, FORCE_WIRED)]);
+        assert_eq!(selector::forced_mode(), FORCE_AUTO, "a stale ack proves nothing");
+
+        // A reconnecting manager re-sends the current generation.
+        let mut manager = new_manager(FakeLink::new([(2, SplitMessage::TransportOverrideAck(current))]));
+        run_for(&mut manager, 1);
+        assert_eq!(overrides(&manager.transceiver), vec![(current, FORCE_WIRED)]);
+        assert_eq!(selector::forced_mode(), FORCE_WIRED);
+    }
+
+    #[test]
+    fn force_applies_locally_at_once_without_a_peripheral() {
+        selector::initialize(true);
+
+        crate::split::request_transport_force(FORCE_BLE);
+
+        assert_eq!(selector::forced_mode(), FORCE_BLE);
+    }
 }
 
 #[cfg(all(test, feature = "_ble"))]
@@ -226,6 +396,12 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
         }
     }
 
+    /// The transport, for transport-specific upkeep while the manager is
+    /// parked (e.g. draining a deselected serial port).
+    pub(crate) fn transceiver_mut(&mut self) -> &mut T {
+        &mut self.transceiver
+    }
+
     /// Send a message to the peripheral, returning Err on disconnect.
     async fn send(&mut self, msg: &SplitMessage) -> Result<(), ()> {
         debug!("Sending message to peripheral {}: {:?}", self.id, msg);
@@ -239,12 +415,51 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
         }
     }
 
+    /// Replicate a force request. Its write failing is not smoothed over
+    /// like [`Self::send`]: the force stays pending on the peripheral's
+    /// acknowledgement either way, and the log says why it may never come.
+    /// Returns the acknowledgement deadline, or `Err` on disconnect.
+    async fn send_force(&mut self, request: crate::split::selector::ForceRequest) -> Result<Instant, ()> {
+        let message = SplitMessage::TransportOverride {
+            generation: request.generation,
+            mode: request.mode,
+        };
+        match self.transceiver.write(&message).await {
+            Ok(_) => {}
+            Err(SplitDriverError::Disconnected) => return Err(()),
+            Err(e) => error!(
+                "Transport force {} not delivered to peripheral {}: {:?}",
+                request.generation, self.id, e
+            ),
+        }
+        Ok(Instant::now() + FORCE_ACK_TIMEOUT)
+    }
+
+    /// The peripheral applied force `generation`; apply it here too if it
+    /// is still the desired one. Returns whether it was.
+    fn on_force_acknowledged(&self, generation: u8) -> bool {
+        match crate::split::selector::desired_force() {
+            Some(request) if request.generation == generation => {
+                info!("Peripheral {} acknowledged transport force {}", self.id, generation);
+                crate::split::selector::set_forced(request.mode);
+                true
+            }
+            _ => {
+                warn!(
+                    "Peripheral {} acknowledged stale transport force {}",
+                    self.id, generation
+                );
+                false
+            }
+        }
+    }
+
     /// Run the manager.
     ///
     /// The manager receives from the peripheral and publishes input events.
     /// It also syncs the central's `ConnectionStatus` to the peripheral on every
     /// change as an informational signal
-    pub(crate) async fn run(mut self) {
+    pub(crate) async fn run(&mut self) {
         use crate::event::EventSubscriber;
 
         let mut indicator_sub = crate::event::LedIndicatorEvent::subscriber();
@@ -284,6 +499,18 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
         {
             return;
         }
+
+        // The desired force is part of the initial sync: a reconnecting
+        // peripheral may have rebooted since it was applied.
+        let mut force_requests = crate::split::selector::force_requests();
+        let mut force_ack_deadline = None;
+        if let Some(request) = force_requests.try_get() {
+            match self.send_force(request).await {
+                Ok(deadline) => force_ack_deadline = Some(deadline),
+                Err(()) => return,
+            }
+        }
+
         #[cfg(feature = "dfu_split")]
         self.check_firmware_update().await;
 
@@ -315,6 +542,7 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
                     with_feature("display"): e = modifier_sub.next_event().fuse() => SplitMessage::Modifier(e.modifier.into_bits()),
                     // Deliberately the last (lowest-priority) outgoing arm.
                     m = crate::split_app::SPLIT_APP_TX.receive().fuse() => SplitMessage::Application(m),
+                    r = force_requests.changed().fuse() => SplitMessage::TransportOverride { generation: r.generation, mode: r.mode },
                 }
             };
 
@@ -323,32 +551,62 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
             #[cfg(not(feature = "dfu_split"))]
             let event_or_signal = next_event_to_peri;
 
-            match select(self.transceiver.read(), event_or_signal).await {
-                Either::First(read_result) => match read_result {
+            let force_ack_timeout = async {
+                match force_ack_deadline {
+                    Some(deadline) => Timer::at(deadline).await,
+                    None => core::future::pending().await,
+                }
+            };
+
+            match select3(self.transceiver.read(), event_or_signal, force_ack_timeout).await {
+                Either3::First(read_result) => match read_result {
                     #[cfg(feature = "dfu_split")]
                     Ok(SplitMessage::FirmwareHashResponse(hash)) => {
                         self.handle_proactive_hash(hash).await;
+                    }
+                    Ok(SplitMessage::TransportOverrideAck(generation)) => {
+                        if self.on_force_acknowledged(generation) {
+                            force_ack_deadline = None;
+                        }
                     }
                     Ok(split_message) => self.process_peripheral_message(split_message).await,
                     Err(e) => error!("Peripheral message read error: {:?}", e),
                 },
                 #[cfg(feature = "dfu_split")]
-                Either::Second(result) => match result {
+                Either3::Second(result) => match result {
                     Either::First(msg) => {
-                        if self.send(&msg).await.is_err() {
+                        if self.send_event(msg, &mut force_ack_deadline).await.is_err() {
                             return;
                         }
                     }
                     Either::Second(_) => {}
                 },
                 #[cfg(not(feature = "dfu_split"))]
-                Either::Second(msg) => {
-                    if self.send(&msg).await.is_err() {
+                Either3::Second(msg) => {
+                    if self.send_event(msg, &mut force_ack_deadline).await.is_err() {
                         return; // guard sends the link-down edge
                     }
                 }
+                Either3::Third(()) => {
+                    force_ack_deadline = None;
+                    warn!(
+                        "Peripheral {} did not acknowledge the transport force; keeping the current transport",
+                        self.id
+                    );
+                }
             }
         }
+    }
+
+    /// Forward one central-side event; a force request also arms the wait
+    /// for its acknowledgement. `Err` on disconnect.
+    async fn send_event(&mut self, msg: SplitMessage, force_ack_deadline: &mut Option<Instant>) -> Result<(), ()> {
+        if let SplitMessage::TransportOverride { generation, mode } = msg {
+            let request = crate::split::selector::ForceRequest { generation, mode };
+            *force_ack_deadline = Some(self.send_force(request).await?);
+            return Ok(());
+        }
+        self.send(&msg).await
     }
 
     /// Process a single message from the peripheral.

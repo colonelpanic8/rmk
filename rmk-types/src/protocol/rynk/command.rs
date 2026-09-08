@@ -66,6 +66,8 @@ use crate::protocol::rynk::{
 };
 #[cfg(all(feature = "_ble", feature = "split"))]
 use crate::protocol::rynk::{SplitCentralLatencyPolicy, SplitCentralLatencyState};
+#[cfg(feature = "split")]
+use crate::protocol::rynk::{SplitTransportForce, SplitTransportState};
 
 /// CMD high bit marking a topic (server → host push).
 const RYNK_TOPIC_BIT: u16 = 0x8000;
@@ -414,6 +416,12 @@ endpoints! {
     #[cfg(feature = "_ble")]
     /// Replace the persistent BLE advertising-name template.
     SetBleName = 0x0709: BleName => ();
+    #[cfg(feature = "split")]
+    /// Read the split-transport selector: policy, force, cable detect.
+    GetSplitTransport = 0x070A: () => SplitTransportState;
+    #[cfg(feature = "split")]
+    /// Force the split transport (volatile); echoes the resulting state.
+    SetSplitTransportForce = 0x070B: SplitTransportForce => SplitTransportState;
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
