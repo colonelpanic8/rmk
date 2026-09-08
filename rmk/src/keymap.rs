@@ -800,6 +800,9 @@ impl<'a> KeyMap<'a> {
         if let Some(name) = morse.profile_names.get_mut(idx) {
             name.clear();
         }
+        morse
+            .hold_trigger_positions
+            .retain(|(profile, _, _)| *profile != idx as u8);
         true
     }
 
