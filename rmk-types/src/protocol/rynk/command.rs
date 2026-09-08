@@ -159,6 +159,7 @@ macro_rules! endpoints {
         };
         impl Cmd {
             /// Every request command compiled in, in table order.
+            #[allow(unused_doc_comments)] // row docs also land on the array elements
             pub const ENDPOINTS: &'static [Cmd] = &[
                 $( $(#[$meta])* Cmd::$name, )*
             ];
