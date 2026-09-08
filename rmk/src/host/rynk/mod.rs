@@ -169,6 +169,8 @@ impl<'a> RynkService<'a> {
             Cmd::ClearBleProfile => Some(true),
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::SetSplitCentralLatency => Some(true),
+            #[cfg(feature = "split")]
+            Cmd::SetSplitTransportForce => Some(true),
             #[cfg(feature = "_ble")]
             Cmd::SetBleName => Some(true),
             Cmd::SetKeyAction
@@ -263,7 +265,7 @@ impl<'a> RynkService<'a> {
             #[cfg(feature = "_ble")]
             Cmd::GetBleStatus | Cmd::SwitchBleProfile | Cmd::GetBatteryStatus | Cmd::GetBleName => Some(false),
             #[cfg(feature = "split")]
-            Cmd::GetPeripheralStatus => Some(false),
+            Cmd::GetPeripheralStatus | Cmd::GetSplitTransport => Some(false),
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::GetSplitCentralLatency => Some(false),
             #[cfg(feature = "lighting")]
