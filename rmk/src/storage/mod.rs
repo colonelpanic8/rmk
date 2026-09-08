@@ -1853,8 +1853,11 @@ mod tests {
             type Flash = TestFlash<16_384, 4_096, 1>;
 
             let storage_range = (16_384 - 2 * 4_096) as u32..16_384u32;
-            let mut map =
-                MapStorage::<StorageKey, _, _>::new(Flash::new(), MapConfig::new(storage_range), Cache::new_uncached());
+            let mut map = MapStorage::<StorageKey, _, _>::new(
+                CooperativeFlash::new(Flash::new()),
+                MapConfig::new(storage_range),
+                Cache::new_uncached(),
+            );
             let mut buffer = [0u8; get_buffer_size()];
             let legacy = LightingConditionalSceneCell {
                 conditions: rmk_types::protocol::rynk::LightingConditionSet {
@@ -1901,8 +1904,11 @@ mod tests {
             type Flash = TestFlash<16_384, 4_096, 1>;
 
             let storage_range = (16_384 - 2 * 4_096) as u32..16_384u32;
-            let mut map =
-                MapStorage::<StorageKey, _, _>::new(Flash::new(), MapConfig::new(storage_range), Cache::new_uncached());
+            let mut map = MapStorage::<StorageKey, _, _>::new(
+                CooperativeFlash::new(Flash::new()),
+                MapConfig::new(storage_range),
+                Cache::new_uncached(),
+            );
             let mut buffer = [0u8; get_buffer_size()];
             map.store_item(
                 &mut buffer,
@@ -1953,8 +1959,11 @@ mod tests {
             type Flash = TestFlash<16_384, 4_096, 1>;
 
             let storage_range = (16_384 - 2 * 4_096) as u32..16_384u32;
-            let mut map =
-                MapStorage::<StorageKey, _, _>::new(Flash::new(), MapConfig::new(storage_range), Cache::new_uncached());
+            let mut map = MapStorage::<StorageKey, _, _>::new(
+                CooperativeFlash::new(Flash::new()),
+                MapConfig::new(storage_range),
+                Cache::new_uncached(),
+            );
             let mut buffer = [0u8; get_buffer_size()];
             let cell = LightingAdvancedConditionalSceneCell {
                 cell: LightingConditionalSceneCell {
@@ -2014,8 +2023,11 @@ mod tests {
             type Flash = TestFlash<16_384, 4_096, 1>;
 
             let storage_range = (16_384 - 2 * 4_096) as u32..16_384u32;
-            let mut map =
-                MapStorage::<StorageKey, _, _>::new(Flash::new(), MapConfig::new(storage_range), Cache::new_uncached());
+            let mut map = MapStorage::<StorageKey, _, _>::new(
+                CooperativeFlash::new(Flash::new()),
+                MapConfig::new(storage_range),
+                Cache::new_uncached(),
+            );
             let mut buffer = [0u8; get_buffer_size()];
             let cell = LightingExtendedConditionalSceneCell {
                 cell: LightingConditionalSceneCell {
@@ -2075,8 +2087,11 @@ mod tests {
             type Flash = TestFlash<16_384, 4_096, 1>;
 
             let storage_range = (16_384 - 2 * 4_096) as u32..16_384u32;
-            let mut map =
-                MapStorage::<StorageKey, _, _>::new(Flash::new(), MapConfig::new(storage_range), Cache::new_uncached());
+            let mut map = MapStorage::<StorageKey, _, _>::new(
+                CooperativeFlash::new(Flash::new()),
+                MapConfig::new(storage_range),
+                Cache::new_uncached(),
+            );
             let mut buffer = [0u8; get_buffer_size()];
 
             let key_a = KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A)));
