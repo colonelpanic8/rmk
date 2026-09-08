@@ -13,6 +13,7 @@ use rmk_types::protocol::rynk::{
     LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_SCENE_CHUNK_SIZE, LightingConditionalSceneCell,
     LightingExtendedConditionalSceneCell, LightingLayerPolicy, LightingSceneCell,
 };
+use rmk_types::unicode::UnicodeMode;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
@@ -196,6 +197,8 @@ pub(crate) enum FlashOperationMessage {
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     // Animated extension-band selection and the selected effect's parameters
     LightingExtensionState(LightingExtensionRecord),
+    // Input method `Action::Unicode` types codepoints through
+    UnicodeMode(UnicodeMode),
     #[cfg(feature = "_ble")]
     // Read bond info for the given slot; storage task replies via `BOND_INFO_RESPONSE`.
     ReadBleBondInfo(u8),
@@ -266,6 +269,7 @@ pub(crate) enum StorageKey {
     // persistent keys before existing variants would orphan old records.
     #[cfg(feature = "host")]
     MorseHoldTriggerPositions,
+    UnicodeMode,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingSceneCommit,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -379,6 +383,7 @@ pub(crate) enum StorageData {
     // StorageKey::MorseHoldTriggerPositions.
     #[cfg(feature = "host")]
     MorseHoldTriggerPositions(HoldTriggerPositions),
+    UnicodeMode(UnicodeMode),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingSceneCommit(LightingSceneCommitRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -1520,6 +1525,10 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     self.store_lighting_runtime_conditional_shard(&mut runtime_conditional_write, index, cells)
                         .await
                 }
+                FlashOperationMessage::UnicodeMode(mode) => {
+                    self.store_data(StorageKey::UnicodeMode, &StorageData::UnicodeMode(mode))
+                        .await
+                }
             };
 
             if let Err(e) = write_result {
@@ -1765,6 +1774,7 @@ mod tests {
             StorageKey::LightingRuntimeConditionalSceneCommit,
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageKey::LightingRuntimeConditionalSceneShardB(0),
+            StorageKey::UnicodeMode,
         ];
 
         let mut buffer = [0u8; 64];
