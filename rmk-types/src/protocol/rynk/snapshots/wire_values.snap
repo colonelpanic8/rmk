@@ -70,6 +70,7 @@ KeyCode::Consumer(VolumeIncrement)                        01 15
 KeyCode::Hid(A)                                           00 04
 KeyCode::SystemControl(Sleep)                             02 02
 KeyPosition{layer:0,row:5,col:13}                         00 05 0d
+LayerMetadata{true,Navigation}                            01 0a 4e 61 76 69 67 61 74 69 6f 6e
 LayerState{default:2,active:[0x05,..,0x80]}               02 05 00 00 00 00 00 00 80
 LayoutChunk{300,[0x0a,0x0b,0x0c]}                         ac 02 03 0a 0b 0c
 LedIndicator(Num|Scroll)                                  05
@@ -113,6 +114,7 @@ SetEncoderRequest{1,2,{Morse(3),No}}                      01 02 05 03 00
 SetForkRequest{2,fork}                                    02 02 01 00 04 00 05 02 01 02 01 00 00 00 02 01
 SetHoldTriggers{[d:1,2;3:4,5]}                            02 ff 01 02 03 04 05
 SetKeyRequest{{0,5,13},Morse(7)}                          00 05 0d 05 07
+SetLayerMetadataRequest{2,{true,Navigation}}              02 01 0a 4e 61 76 69 67 61 74 69 6f 6e
 SetMacroRequest{2,[0x01,0x02,0x03]}                       02 03 01 02 03
 SetMorseProfileEntryRequest{entry}                        03 0c 68 6f 6d 65 2d 72 6f 77 2d 6d 6f 64 c8 81 b0 89 0c
 SetMorseProfileRequest{3,profile}                         03 c8 81 b0 89 0c
