@@ -240,7 +240,14 @@ async fn split_peripheral_advertise<'a, 'b, C: Controller>(
 ) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<C::Error>> {
     if let Some(addr) = central_addr {
         let directed = Adv::Directed(Address::random(addr));
-        match advertise(peripheral, &server.server, directed, Duration::from_secs(10)).await {
+        match advertise(
+            peripheral,
+            &server.server,
+            directed,
+            Duration::from_millis(super::DIRECTED_ADVERTISING_GRACE_MS),
+        )
+        .await
+        {
             Err(BleHostError::BleHost(Error::Timeout)) => warn!("[adv] Try update central_addr"),
             result => return result,
         }
