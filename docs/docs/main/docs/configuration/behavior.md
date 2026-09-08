@@ -255,6 +255,7 @@ hold_trigger_regions = ["right_alpha", "thumbs"]
 ```
 
 - `unilateral_tap`: (Experimental) Enables unilateral tap mode. When enabled, tap action will be triggered when a key from "same" hand is pressed. In current experimental version, the "same" hand is calculated using the `<hand>`, which can be given in `layout.map`. This option is recommended to set to true when `enable_flow_tap` is set to true. In `normal_mode` the tap resolves when the same-hand key is pressed; in `permissive_hold` mode, when it is released. `hold_on_other_press` mode ignores this option, because the hold fires on the other key's press first.
+- `opposite_hand_hold`: Keeps a tap-hold undecided after `hold_timeout` and activates its hold action only when a key tagged as the opposite hand, or as bilateral, is pressed after that timeout. An ordinary key pressed before the timeout, or a same-hand ordinary key pressed even after it, resolves the tap-hold as a tap. A second same-hand tap-hold whose hold action is a modifier remains pending, allowing a later opposite-hand key to activate both modifiers as a chord; tapping that second key resolves the pending keys as taps. This and `unilateral_tap = true` are mutually exclusive.
 
 - The morse mode, which can be set by enabling one of these:
   - `permissive_hold`: Enables permissive hold mode. When enabled, hold action will be triggered when a key is pressed and released during tap-hold decision. This option is recommended to set to true when `enable_flow_tap` is set to true.
