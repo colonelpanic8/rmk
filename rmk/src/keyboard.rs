@@ -522,12 +522,12 @@ impl<'a> Keyboard<'a> {
             // Some decisions of held keys have been made, fire those keys
             // debug!("✅ Decision for held key: {:?}: {:?}", pos, decision)
             match decision {
-                HeldKeyDecision::UnilateralTap | HeldKeyDecision::FlowTap => {
+                HeldKeyDecision::UnilateralTap | HeldKeyDecision::FlowTap | HeldKeyDecision::TapOnOtherKeyPress => {
                     if let Some(mut held_key) = self.held_buffer.remove_if(|k| k.event.pos == pos)
                         && held_key.action.is_morse()
                     {
                         // Unilateral tap of the held key is triggered
-                        debug!("Cleaning buffered morse key due to unilateral tap or flow tap");
+                        debug!("Cleaning buffered morse key due to unilateral tap, flow tap or tap unless interrupted");
                         match held_key.state {
                             KeyState::Pressed(_) | KeyState::Holding(_) => {
                                 // In this state pattern is not surely finished,
@@ -782,6 +782,19 @@ impl<'a> Keyboard<'a> {
                                 );
                                 let _ = decisions.push((held_key.event.pos, HeldKeyDecision::HoldOnOtherKeyPress));
                                 decision_for_current_key = KeyBehaviorDecision::CleanBuffer;
+                            }
+                            MorseMode::TapUnlessInterrupted => {
+                                // The mirror of hold-on-other-press: any other key press while
+                                // the decision is pending settles this key as a tap.
+                                if matches!(held_key.state, KeyState::Pressed(_)) {
+                                    debug!(
+                                        "Trigger morse key as tap due to tap unless interrupted: {:?}",
+                                        held_key.action
+                                    );
+                                    let _ = decisions.push((held_key.event.pos, HeldKeyDecision::TapOnOtherKeyPress));
+                                    decision_for_current_key = KeyBehaviorDecision::CleanBuffer;
+                                    continue;
+                                }
                             }
                             MorseMode::Normal => {
                                 // Normal mode: resolve a same-hand HRM as tap on press when
@@ -2105,6 +2118,8 @@ pub enum HeldKeyDecision {
     PermissiveHold,
     // Hold on other key press triggered
     HoldOnOtherKeyPress,
+    // Tap on other key press triggered (tap unless interrupted)
+    TapOnOtherKeyPress,
     // Used for the buffered key which is releasing now
     Release,
     // Releasing a key that is pressed before any keys in the buffer
