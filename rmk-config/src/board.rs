@@ -145,12 +145,29 @@ fn validate_split_config(split: &SplitConfig, layout: Option<&LayoutTomlConfig>)
     };
 
     match split.connection {
-        SplitConnection::Serial => {
-            for (board, ctx) in boards() {
-                if board.ble_addr.is_some() {
-                    return Err(format!(
-                        "keyboard.toml: {ctx} sets `ble_addr`, but split.connection = \"serial\""
-                    ));
+        SplitConnection::Serial | SplitConnection::Auto => {
+            if split.connection == SplitConnection::Serial {
+                for (board, ctx) in boards() {
+                    if board.ble_addr.is_some() {
+                        return Err(format!(
+                            "keyboard.toml: {ctx} sets `ble_addr`, but split.connection = \"serial\""
+                        ));
+                    }
+                }
+            }
+            if split.connection == SplitConnection::Auto {
+                if split.peripheral.len() != 1 {
+                    return Err(
+                        "keyboard.toml: split.connection = \"auto\" currently requires exactly one peripheral"
+                            .to_string(),
+                    );
+                }
+                for (board, ctx) in boards() {
+                    if board.detect_pin.is_none() {
+                        return Err(format!(
+                            "keyboard.toml: {ctx} must set `detect_pin` when split.connection = \"auto\""
+                        ));
+                    }
                 }
             }
             let central_ports = split.central.serial.as_ref().map_or(0, |s| s.len());
@@ -168,12 +185,36 @@ fn validate_split_config(split: &SplitConfig, layout: Option<&LayoutTomlConfig>)
                     ));
                 }
             }
+            for (board, ctx) in boards() {
+                for (port, serial) in board.serial.as_deref().unwrap_or_default().iter().enumerate() {
+                    if split.connection == SplitConnection::Auto && !serial.half_duplex {
+                        return Err(format!(
+                            "keyboard.toml: {ctx}.serial[{port}] must enable `half_duplex` when split.connection = \"auto\""
+                        ));
+                    }
+                    if serial.half_duplex && serial.direction_pin.is_none() && serial.tx_pin != serial.rx_pin {
+                        return Err(format!(
+                            "keyboard.toml: {ctx}.serial[{port}] enables half-duplex with separate TX/RX pins but has no `direction_pin`"
+                        ));
+                    }
+                    if serial.ppi_channels.is_some() != serial.timer.is_some() {
+                        return Err(format!(
+                            "keyboard.toml: {ctx}.serial[{port}] must set `timer` and `ppi_channels` together"
+                        ));
+                    }
+                }
+            }
         }
         SplitConnection::Ble => {
             for (board, ctx) in boards() {
                 if board.serial.is_some() {
                     return Err(format!(
                         "keyboard.toml: {ctx} sets `serial`, but split.connection = \"ble\""
+                    ));
+                }
+                if board.detect_pin.is_some() {
+                    return Err(format!(
+                        "keyboard.toml: {ctx} sets `detect_pin`, but split.connection = \"ble\""
                     ));
                 }
             }
@@ -374,6 +415,58 @@ mod tests {
         split.central.serial = Some(vec![SerialConfig::default()]);
         let err = validate_split_config(&split, None).unwrap_err();
         assert!(err.contains("exactly 1 serial port, got 0"), "{err}");
+    }
+
+    #[test]
+    fn half_duplex_direction_and_idle_resources_are_coherent() {
+        let mut split = ble_split();
+        split.connection = SplitConnection::Serial;
+        let half_duplex = SerialConfig {
+            instance: "UARTE0".into(),
+            tx_pin: "P1_08".into(),
+            rx_pin: "P1_09".into(),
+            half_duplex: true,
+            ..Default::default()
+        };
+        split.central.serial = Some(vec![half_duplex.clone()]);
+        split.peripheral[0].serial = Some(vec![half_duplex]);
+
+        let err = validate_split_config(&split, None).unwrap_err();
+        assert!(err.contains("direction_pin"), "{err}");
+
+        split.central.serial.as_mut().unwrap()[0].direction_pin = Some("P0_11".into());
+        split.peripheral[0].serial.as_mut().unwrap()[0].direction_pin = Some("P0_11".into());
+        split.central.serial.as_mut().unwrap()[0].timer = Some("TIMER2".into());
+        let err = validate_split_config(&split, None).unwrap_err();
+        assert!(err.contains("timer") && err.contains("ppi_channels"), "{err}");
+
+        split.central.serial.as_mut().unwrap()[0].ppi_channels = Some(["PPI_CH0".into(), "PPI_CH1".into()]);
+        assert!(validate_split_config(&split, None).is_ok());
+    }
+
+    #[test]
+    fn auto_split_requires_detect_pins_and_half_duplex_serial() {
+        let mut split = ble_split();
+        split.connection = SplitConnection::Auto;
+        split.central.serial = Some(vec![SerialConfig::default()]);
+        split.peripheral[0].serial = Some(vec![SerialConfig::default()]);
+
+        let err = validate_split_config(&split, None).unwrap_err();
+        assert!(err.contains("detect_pin"), "{err}");
+
+        split.central.detect_pin = Some("P1_10".into());
+        split.peripheral[0].detect_pin = Some("P1_10".into());
+        let err = validate_split_config(&split, None).unwrap_err();
+        assert!(err.contains("half_duplex"), "{err}");
+
+        for board in [&mut split.central, &mut split.peripheral[0]] {
+            let serial = &mut board.serial.as_mut().unwrap()[0];
+            serial.half_duplex = true;
+            serial.tx_pin = "P1_08".into();
+            serial.rx_pin = "P1_09".into();
+            serial.direction_pin = Some("P0_11".into());
+        }
+        assert!(validate_split_config(&split, None).is_ok());
     }
 
     #[test]
