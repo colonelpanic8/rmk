@@ -201,9 +201,7 @@ fn bulk_apply_and_garbage_collection_yield_and_preserve_actions() {
                 async {
                     service.run_session(&mut input, &mut output).await;
                     // This response is an ordering barrier after the queued writes.
-                    CONNECTION_TYPE_RESPONSE.reset();
-                    FLASH_CHANNEL.send(FlashOperationMessage::ReadConnectionType).await;
-                    CONNECTION_TYPE_RESPONSE.wait().await;
+                    read_connection_type().await;
                 },
                 storage.run(),
             ),
@@ -254,5 +252,57 @@ fn bulk_apply_and_garbage_collection_yield_and_preserve_actions() {
     assert!(
         metrics.max_reads.get() <= 32,
         "flash scans must leave time for watchdog and transport tasks"
+    );
+}
+
+#[test]
+fn simultaneous_metadata_reads_keep_their_own_replies() {
+    let mut context = Context::from_waker(Waker::noop());
+    let mut first = Box::pin(read_layer_metadata(0));
+    let mut second = Box::pin(read_layer_metadata(1));
+    assert!(first.as_mut().poll(&mut context).is_pending());
+    assert!(second.as_mut().poll(&mut context).is_pending());
+    assert!(matches!(
+        FLASH_CHANNEL.try_receive().unwrap(),
+        FlashOperationMessage::ReadLayerMetadata(0)
+    ));
+    assert!(FLASH_CHANNEL.try_receive().is_err());
+    LAYER_METADATA_RESPONSE.signal(None);
+    assert_eq!(first.as_mut().poll(&mut context), Poll::Ready(None));
+    assert!(second.as_mut().poll(&mut context).is_pending());
+    assert!(matches!(
+        FLASH_CHANNEL.try_receive().unwrap(),
+        FlashOperationMessage::ReadLayerMetadata(1)
+    ));
+    LAYER_METADATA_RESPONSE.signal(Some(LayerMetadata::vacant()));
+    assert_eq!(
+        second.as_mut().poll(&mut context),
+        Poll::Ready(Some(LayerMetadata::vacant()))
+    );
+}
+
+#[test]
+fn cancelled_metadata_read_cannot_supply_the_next_reply() {
+    let mut context = Context::from_waker(Waker::noop());
+    let mut first = Box::pin(read_layer_metadata(0));
+    assert!(first.as_mut().poll(&mut context).is_pending());
+    assert!(matches!(
+        FLASH_CHANNEL.try_receive().unwrap(),
+        FlashOperationMessage::ReadLayerMetadata(0)
+    ));
+    drop(first);
+    let mut second = Box::pin(read_layer_metadata(1));
+    assert!(second.as_mut().poll(&mut context).is_pending());
+    assert!(FLASH_CHANNEL.try_receive().is_err());
+    LAYER_METADATA_RESPONSE.signal(None);
+    assert!(second.as_mut().poll(&mut context).is_pending());
+    assert!(matches!(
+        FLASH_CHANNEL.try_receive().unwrap(),
+        FlashOperationMessage::ReadLayerMetadata(1)
+    ));
+    LAYER_METADATA_RESPONSE.signal(Some(LayerMetadata::vacant()));
+    assert_eq!(
+        second.as_mut().poll(&mut context),
+        Poll::Ready(Some(LayerMetadata::vacant()))
     );
 }

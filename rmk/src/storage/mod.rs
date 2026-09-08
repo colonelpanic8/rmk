@@ -58,9 +58,9 @@ mod runtime_tests;
 /// True if the flash operation is finished correctly, false if the flash operation is finished with error.
 pub(crate) static FLASH_OPERATION_FINISHED: Signal<crate::RawMutex, bool> = Signal::new();
 
-#[cfg(feature = "_ble")]
+#[cfg(any(feature = "_ble", all(feature = "host", feature = "rynk")))]
 mod read_response;
-#[cfg(feature = "_ble")]
+#[cfg(any(feature = "_ble", all(feature = "host", feature = "rynk")))]
 use read_response::ReadResponse;
 #[cfg(feature = "_ble")]
 static BOND_INFO_RESPONSE: ReadResponse<Option<ProfileInfo>> = ReadResponse::new();
@@ -111,11 +111,9 @@ pub(crate) async fn read_ble_name() -> Option<BleName> {
 
 #[cfg(all(feature = "host", feature = "rynk"))]
 pub(crate) async fn read_layer_metadata(layer: u8) -> Option<LayerMetadata> {
-    LAYER_METADATA_RESPONSE.reset();
-    FLASH_CHANNEL
-        .send(FlashOperationMessage::ReadLayerMetadata(layer))
-        .await;
-    LAYER_METADATA_RESPONSE.wait().await
+    LAYER_METADATA_RESPONSE
+        .request(FLASH_CHANNEL.send(FlashOperationMessage::ReadLayerMetadata(layer)))
+        .await
 }
 /// Send a peer address to be persisted; wait for the storage task to finish.
 /// Returns `true` if the write completed successfully.
