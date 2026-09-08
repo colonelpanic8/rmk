@@ -102,6 +102,8 @@ impl RynkSession {
 impl<'a> RynkService<'a> {
     pub fn new(keymap: &'a KeyMap<'a>, config: &RmkConfig<'static>) -> Self {
         crate::state::initialize_maintenance_mode(config.lock_config.maintenance_mode_default);
+        #[cfg(feature = "_ble")]
+        crate::ble::name::initialize(config.ble_name.unwrap_or(config.device_config.product_name));
         let mut ctx = KeyboardContext::new(keymap);
         // Layout is fixed at macro expansion time, like Vial's keyboard-def.
         ctx.layout_blob = config.layout_blob;
@@ -167,6 +169,8 @@ impl<'a> RynkService<'a> {
             Cmd::ClearBleProfile => Some(true),
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::SetSplitCentralLatency => Some(true),
+            #[cfg(feature = "_ble")]
+            Cmd::SetBleName => Some(true),
             Cmd::SetKeyAction
             | Cmd::SetDefaultLayer
             | Cmd::SetEncoderAction
@@ -253,7 +257,7 @@ impl<'a> RynkService<'a> {
             | Cmd::GetPointingConfig
             | Cmd::GetPointingCapabilities => Some(false),
             #[cfg(feature = "_ble")]
-            Cmd::GetBleStatus | Cmd::SwitchBleProfile | Cmd::GetBatteryStatus => Some(false),
+            Cmd::GetBleStatus | Cmd::SwitchBleProfile | Cmd::GetBatteryStatus | Cmd::GetBleName => Some(false),
             #[cfg(feature = "split")]
             Cmd::GetPeripheralStatus => Some(false),
             #[cfg(all(feature = "_ble", feature = "split"))]
@@ -373,6 +377,10 @@ impl<'a> RynkService<'a> {
             Cmd::GetSplitCentralLatency => serve::<command::GetSplitCentralLatency, _>(self, msg).await,
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::SetSplitCentralLatency => serve::<command::SetSplitCentralLatency, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::GetBleName => serve::<command::GetBleName, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::SetBleName => serve::<command::SetBleName, _>(self, msg).await,
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,
