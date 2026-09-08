@@ -2474,7 +2474,10 @@ mod tests {
 
             storage.read_boot_data(&mut keymap, &mut behavior).await.unwrap();
 
-            assert_eq!(behavior.combo.combos[0].as_ref().unwrap().config, combo);
+            assert_eq!(
+                behavior.combo.combos[0].as_ref().unwrap().definition,
+                rmk_types::combo::ComboDefinition::Actions(combo)
+            );
             assert_eq!(behavior.fork.forks[0], fork);
             assert_eq!(behavior.morse.morses[0], morse);
         });
@@ -2570,10 +2573,11 @@ mod tests {
                 .await
                 .unwrap();
 
-            let mut combos = core::array::from_fn(|_| None);
-            storage.read_combos(&mut combos).await.unwrap();
-            assert!(combos[0].is_none());
-            assert!(combos[1].is_none());
+            let mut data = KeymapData::new([[[KeyAction::No]]]);
+            let mut behavior = RuntimeBehaviorConfig::default();
+            storage.read_boot_data(&mut data, &mut behavior).await.unwrap();
+            assert!(behavior.combo.combos[0].is_none());
+            assert!(behavior.combo.combos[1].is_none());
         });
     }
 
