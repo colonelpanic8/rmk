@@ -1015,6 +1015,7 @@ mod tests {
                 Timer::after_millis(1).await;
                 publish_event(PointingEvent {
                     device_id: 0,
+                    buttons: 0,
                     axes: [
                         AxisEvent {
                             typ: AxisValType::Rel,
