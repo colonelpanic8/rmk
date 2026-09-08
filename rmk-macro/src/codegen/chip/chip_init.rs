@@ -264,7 +264,9 @@ fn get_ble_addr(hardware: &Hardware, peripheral_id: Option<usize>) -> TokenStrea
                 let high = u64::from(ficr.deviceid(1).read());
                 let addr = high << 32 | u64::from(ficr.deviceid(0).read());
                 let addr = addr | 0x0000_c000_0000_0000;
-                let ble_addr = addr.to_le_bytes()[..6].try_into().expect("Failed to read BLE address from FICR");
+                let ble_addr: [u8; 6] = addr.to_le_bytes()[..6]
+                    .try_into()
+                    .expect("Failed to read BLE address from FICR");
                 ble_addr
             }
         }
