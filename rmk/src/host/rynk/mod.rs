@@ -26,6 +26,9 @@ use crate::keymap::KeyMap;
 /// Unlock attempts live long enough for BLE WebHID round trips.
 const RYNK_UNLOCK_WINDOW: embassy_time::Duration = embassy_time::Duration::from_millis(500);
 
+/// A board's device-data namespace and the record reader behind it.
+type DeviceDataSource = (DeviceDataDescriptor, fn(u8) -> Option<DeviceDataRecord>);
+
 /// Transport-agnostic Rynk service.
 pub struct RynkService<'a> {
     ctx: KeyboardContext<'a>,
@@ -34,7 +37,7 @@ pub struct RynkService<'a> {
     /// Policy copied into each session's authorization gate.
     lock_config: LockConfig,
     /// Optional board-defined, machine-readable data source.
-    device_data: Option<(DeviceDataDescriptor, fn(u8) -> Option<DeviceDataRecord>)>,
+    device_data: Option<DeviceDataSource>,
 }
 
 impl<'a> RynkService<'a> {
