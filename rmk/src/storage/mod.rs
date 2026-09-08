@@ -48,6 +48,12 @@ use crate::config::StorageConfig;
 use crate::split::ble::PeerAddress;
 use crate::{BUILD_HASH, config};
 
+mod cooperative_flash;
+use cooperative_flash::CooperativeFlash;
+
+#[cfg(all(test, feature = "rynk", feature = "_ble"))]
+mod runtime_tests;
+
 /// Signal to synchronize the flash operation status, usually used outside of the flash task.
 /// True if the flash operation is finished correctly, false if the flash operation is finished with error.
 pub(crate) static FLASH_OPERATION_FINISHED: Signal<crate::RawMutex, bool> = Signal::new();
@@ -711,7 +717,7 @@ pub struct Storage<
     const NUM_LAYER: usize,
     const NUM_ENCODER: usize = 0,
 > {
-    pub(crate) flash: MapStorage<StorageKey, F, StorageCache>,
+    pub(crate) flash: MapStorage<StorageKey, CooperativeFlash<F>, StorageCache>,
     pub(crate) buffer: [u8; get_buffer_size()],
 }
 
@@ -794,7 +800,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         };
 
         let mut storage = Self {
-            flash: MapStorage::new(flash, MapConfig::new(storage_range), Cache::new_uncached()),
+            flash: MapStorage::new(
+                CooperativeFlash::new(flash),
+                MapConfig::new(storage_range),
+                Cache::new_uncached(),
+            ),
             buffer: [0; get_buffer_size()],
         };
 
