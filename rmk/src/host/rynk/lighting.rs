@@ -403,10 +403,10 @@ impl<'a> RynkLightingController<'a> {
         self
     }
 
-    pub(super) const fn controls_to_wire(&self) -> WireLightingControls {
+    pub(super) const fn controls_to_wire(&self, wake_layers: u64) -> WireLightingControls {
         WireLightingControls {
             output_toggle_user_action: self.controls.output_toggle_user_action,
-            wake_layers: self.controls.wake_layers,
+            wake_layers,
         }
     }
 
@@ -427,7 +427,7 @@ impl<'a> RynkLightingController<'a> {
                 crate::lighting::PoweredOnlyScope::Local => rmk_types::protocol::rynk::LightingPoweredOnlyScope::Local,
             },
             cycle_user_action: self.controls.output_mode_cycle_user_action,
-            wake_layers: self.controls.wake_layers,
+            wake_layers: state.wake_layers,
             indicator: self.controls.output_mode_indicator.and_then(|indicator| {
                 self.descriptor
                     .topology
@@ -1095,6 +1095,15 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                         layers,
                     })
                     .await?;
+                #[cfg(feature = "storage")]
+                {
+                    use crate::channel::FLASH_CHANNEL;
+                    use crate::storage::FlashOperationMessage;
+
+                    FLASH_CHANNEL
+                        .send(FlashOperationMessage::LightingWakeLayers(layers))
+                        .await;
+                }
                 return Ok(RynkLightingReadback::OutputMode(state));
             }
             RynkLightingCommand::ReadOverlay {

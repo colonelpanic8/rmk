@@ -249,6 +249,8 @@ pub(crate) enum FlashOperationMessage {
     #[cfg(feature = "_ble")]
     // Persist the BLE advertising-name template.
     BleName(BleName),
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingWakeLayers(u64),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -321,6 +323,9 @@ pub(crate) enum StorageKey {
     // Postcard tags variants by declaration order, so new keys go last.
     #[cfg(feature = "_ble")]
     BleName,
+    // Append-only: postcard encodes enum variants by ordinal.
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingWakeLayers,
 }
 
 impl StorageKey {
@@ -454,6 +459,8 @@ pub(crate) enum StorageData {
     /// Appended to preserve every existing postcard enum discriminant.
     #[cfg(feature = "host")]
     PositionCombo(PositionComboConfig),
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingWakeLayers(u64),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -874,6 +881,16 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
     pub async fn read_lighting_extension_overlay(&mut self) -> Option<LightingExtensionOverlayRecord> {
         match self.fetch_data(StorageKey::LightingExtensionOverlay).await {
             Some(StorageData::LightingExtensionOverlay(record)) => Some(record),
+            _ => None,
+        }
+    }
+
+    /// Read the user-selected wake-layer mask. `None` preserves the board's
+    /// compiled fallback on keyboards that have never configured it.
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    pub async fn read_lighting_wake_layers(&mut self) -> Option<u64> {
+        match self.fetch_data(StorageKey::LightingWakeLayers).await {
+            Some(StorageData::LightingWakeLayers(layers)) => Some(layers),
             _ => None,
         }
     }
@@ -1421,6 +1438,16 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                                 &StorageData::LightingExtensionOverlay(record),
                             )
                             .await
+                        }
+                    }
+                }
+                #[cfg(all(feature = "lighting", feature = "rynk"))]
+                FlashOperationMessage::LightingWakeLayers(layers) => {
+                    match self.fetch_data(StorageKey::LightingWakeLayers).await {
+                        Some(StorageData::LightingWakeLayers(saved)) if saved == layers => Ok(()),
+                        _ => {
+                            self.store_data(StorageKey::LightingWakeLayers, &StorageData::LightingWakeLayers(layers))
+                                .await
                         }
                     }
                 }
