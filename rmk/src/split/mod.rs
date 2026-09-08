@@ -76,14 +76,32 @@ pub mod ble;
 pub mod central;
 /// Common abstraction layer of split driver
 pub(crate) mod driver;
+#[cfg(feature = "_nrf_ble")]
+pub mod nrf;
 pub mod peripheral;
 #[cfg(feature = "rp2040")]
 pub mod rp;
-#[cfg(not(feature = "_ble"))]
+pub mod selector;
 pub mod serial;
 
-/// Maximum size of a split message
-pub const SPLIT_MESSAGE_MAX_SIZE: usize = SplitMessage::POSTCARD_MAX_SIZE + 4;
+/// Maximum size of a split message frame on the wire: link header, postcard
+/// payload, 4-byte CRC-32, COBS overhead, and the sentinel byte.
+pub const SPLIT_MESSAGE_MAX_SIZE: usize = SplitMessage::POSTCARD_MAX_SIZE + 16;
+
+/// Volatile split-transport force from the application (one of
+/// `selector::FORCE_*`). While a peripheral is connected the force travels
+/// to it over the split link first and the central applies it only after
+/// that send, so both halves rendezvous on the forced transport; with no
+/// peripheral connected it applies locally at once. Returns `false` when a
+/// previous request is still queued.
+pub fn request_transport_force(mode: u8) -> bool {
+    if driver::any_peripheral_connected() {
+        crate::channel::SPLIT_TRANSPORT_FORCE_CHANNEL.try_send(mode).is_ok()
+    } else {
+        selector::set_forced(mode);
+        true
+    }
+}
 
 /// The rectangular region of the central's keymap covered by one split
 /// peripheral: its matrix size, and where it sits.
@@ -172,6 +190,16 @@ pub(crate) enum SplitMessage {
     /// Complete central layer state, including lower active layers hidden by
     /// a higher effective layer.
     LayerState(SplitLayerState),
+    /// Half-duplex central request for one queued peripheral message.
+    HalfDuplexPoll,
+    /// Half-duplex response when the peripheral has nothing queued.
+    HalfDuplexIdle,
+
+    /// Central → Peripheral: volatile split-transport force
+    /// (`selector::FORCE_*`), applied to the peripheral's selector. Sent to
+    /// the peripheral before the central applies the same force to itself so
+    /// both halves rendezvous on the forced transport.
+    TransportOverride(u8),
 }
 
 // -----------------------------------------------------------------------
