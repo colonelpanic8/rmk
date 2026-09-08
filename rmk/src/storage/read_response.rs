@@ -17,6 +17,8 @@ impl<T: Send> ReadResponse<T> {
         }
     }
 
+    /// `enqueue` must return Ready in the poll that sends the request;
+    /// cancellation while Pending must leave no request queued.
     pub(super) async fn request(&self, enqueue: impl Future<Output = ()>) -> T {
         let mut pending = self.pending.lock().await;
         if *pending {
