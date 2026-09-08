@@ -723,6 +723,7 @@ where
         }
     }
 
+    #[inline(never)]
     fn handle_command(
         &mut self,
         now_ms: u64,
