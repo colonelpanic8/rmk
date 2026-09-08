@@ -70,6 +70,7 @@ KeyCode::Consumer(VolumeIncrement)                        01 15
 KeyCode::Hid(A)                                           00 04
 KeyCode::SystemControl(Sleep)                             02 02
 KeyPosition{layer:0,row:5,col:13}                         00 05 0d
+KeyboardAction::CtrlGuiSwapToggle                         0d
 LayerMetadata{true,Navigation}                            01 0a 4e 61 76 69 67 61 74 69 6f 6e
 LayerState{default:2,active:[0x05,..,0x80]}               02 05 00 00 00 00 00 00 80
 LayoutChunk{300,[0x0a,0x0b,0x0c]}                         ac 02 03 0a 0b 0c
