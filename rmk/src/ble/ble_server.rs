@@ -2,7 +2,7 @@ use trouble_host::prelude::*;
 use usbd_hid::descriptor::{AsInputReport, SerializedDescriptor};
 
 use super::battery_service::BatteryService;
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 use super::battery_service::PeripheralBatteryServices;
 use super::device_info::DeviceConfigurationService;
 #[cfg(feature = "rynk")]
@@ -20,7 +20,11 @@ use rmk_types::protocol::rynk::{
     RYNK_BLE_CHUNK_SIZE, RYNK_HID_REPORT_SIZE, RYNK_INPUT_CHAR_UUID, RYNK_OUTPUT_CHAR_UUID, RYNK_SERVICE_UUID,
 };
 
-#[cfg(all(feature = "vial", feature = "split"))]
+#[cfg(all(
+    feature = "vial",
+    feature = "split",
+    not(feature = "_no_split_peripheral_battery_service")
+))]
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
@@ -30,7 +34,10 @@ pub(crate) struct Server {
     pub(crate) device_config_service: DeviceConfigurationService,
 }
 
-#[cfg(all(feature = "vial", not(feature = "split")))]
+#[cfg(all(
+    feature = "vial",
+    any(not(feature = "split"), feature = "_no_split_peripheral_battery_service")
+))]
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
@@ -39,7 +46,11 @@ pub(crate) struct Server {
     pub(crate) device_config_service: DeviceConfigurationService,
 }
 
-#[cfg(all(feature = "rynk", feature = "split"))]
+#[cfg(all(
+    feature = "rynk",
+    feature = "split",
+    not(feature = "_no_split_peripheral_battery_service")
+))]
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
@@ -50,7 +61,10 @@ pub(crate) struct Server {
     pub(crate) device_config_service: DeviceConfigurationService,
 }
 
-#[cfg(all(feature = "rynk", not(feature = "split")))]
+#[cfg(all(
+    feature = "rynk",
+    any(not(feature = "split"), feature = "_no_split_peripheral_battery_service")
+))]
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
@@ -60,7 +74,11 @@ pub(crate) struct Server {
     pub(crate) device_config_service: DeviceConfigurationService,
 }
 
-#[cfg(all(not(feature = "host"), feature = "split"))]
+#[cfg(all(
+    not(feature = "host"),
+    feature = "split",
+    not(feature = "_no_split_peripheral_battery_service")
+))]
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
@@ -69,7 +87,10 @@ pub(crate) struct Server {
     pub(crate) device_config_service: DeviceConfigurationService,
 }
 
-#[cfg(all(not(feature = "host"), not(feature = "split")))]
+#[cfg(all(
+    not(feature = "host"),
+    any(not(feature = "split"), feature = "_no_split_peripheral_battery_service")
+))]
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
