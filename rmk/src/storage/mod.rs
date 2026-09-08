@@ -213,6 +213,10 @@ pub(crate) enum FlashOperationMessage {
     LightingExtensionOverlay(LightingExtensionOverlayRecord),
     // Barrier: storage task replies via `FLUSHED` once every earlier message is processed.
     Flush,
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingOutputMode(rmk_types::protocol::rynk::LightingOutputMode),
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingExtensionParams(LightingExtensionParamsRecord),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -275,6 +279,13 @@ pub(crate) enum StorageKey {
     LightingRuntimeConditionalSceneTableV3,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuntimeConditionalSceneShardV3(u8),
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingOutputMode,
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingExtensionParams {
+        effect: u8,
+        offset: u8,
+    },
 }
 
 impl StorageKey {
@@ -386,6 +397,10 @@ pub(crate) enum StorageData {
     LightingRuntimeConditionalSceneShardV3(
         heapless::Vec<LightingAdvancedConditionalSceneCell, LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE>,
     ),
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingOutputMode(rmk_types::protocol::rynk::LightingOutputMode),
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingExtensionParams(LightingExtensionParamsRecord),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -420,6 +435,17 @@ impl LightingExtensionRecord {
     pub fn params(&self) -> &[u8] {
         &self.params[..(self.param_len as usize).min(LIGHTING_EXTENSION_PARAM_CHUNK)]
     }
+}
+
+/// One parameter page, including effects that are not currently selected.
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct LightingExtensionParamsRecord {
+    pub effect: u8,
+    pub offset: u8,
+    pub len: u8,
+    pub values: [u8; LIGHTING_EXTENSION_PARAM_CHUNK],
 }
 
 /// Persisted optional second effect and the parameter row it uses. This is a
@@ -840,6 +866,35 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
     pub async fn read_lighting_extension_overlay(&mut self) -> Option<LightingExtensionOverlayRecord> {
         match self.fetch_data(StorageKey::LightingExtensionOverlay).await {
             Some(StorageData::LightingExtensionOverlay(record)) => Some(record),
+            _ => None,
+        }
+    }
+
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    pub async fn read_lighting_output_mode(&mut self) -> Option<rmk_types::protocol::rynk::LightingOutputMode> {
+        match self.fetch_data(StorageKey::LightingOutputMode).await {
+            Some(StorageData::LightingOutputMode(mode)) => Some(mode),
+            _ => None,
+        }
+    }
+
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    pub async fn read_lighting_extension_params(
+        &mut self,
+        effect: u8,
+        offset: u8,
+    ) -> Option<LightingExtensionParamsRecord> {
+        match self
+            .fetch_data(StorageKey::LightingExtensionParams { effect, offset })
+            .await
+        {
+            Some(StorageData::LightingExtensionParams(record))
+                if record.effect == effect
+                    && record.offset == offset
+                    && usize::from(record.len) <= LIGHTING_EXTENSION_PARAM_CHUNK =>
+            {
+                Some(record)
+            }
             _ => None,
         }
     }
@@ -1548,6 +1603,30 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     }
                 }
                 #[cfg(all(feature = "lighting", feature = "rynk"))]
+                FlashOperationMessage::LightingOutputMode(mode) => {
+                    match self.fetch_data(StorageKey::LightingOutputMode).await {
+                        Some(StorageData::LightingOutputMode(saved)) if saved == mode => Ok(()),
+                        _ => {
+                            self.store_data(StorageKey::LightingOutputMode, &StorageData::LightingOutputMode(mode))
+                                .await
+                        }
+                    }
+                }
+                #[cfg(all(feature = "lighting", feature = "rynk"))]
+                FlashOperationMessage::LightingExtensionParams(record) => {
+                    let key = StorageKey::LightingExtensionParams {
+                        effect: record.effect,
+                        offset: record.offset,
+                    };
+                    match self.fetch_data(key).await {
+                        Some(StorageData::LightingExtensionParams(saved)) if saved == record => Ok(()),
+                        _ => {
+                            self.store_data(key, &StorageData::LightingExtensionParams(record))
+                                .await
+                        }
+                    }
+                }
+                #[cfg(all(feature = "lighting", feature = "rynk"))]
                 FlashOperationMessage::LightingExtensionOverlay(record) => {
                     match self.fetch_data(StorageKey::LightingExtensionOverlay).await {
                         Some(StorageData::LightingExtensionOverlay(saved)) if saved == record => Ok(()),
@@ -2080,6 +2159,41 @@ mod tests {
             ),
             buffer: [0u8; get_buffer_size()],
         }
+    }
+
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    #[test]
+    fn lighting_preferences_survive_storage_reopen_without_selection() {
+        block_on(async {
+            let mut storage = lighting_storage();
+            let mode = rmk_types::protocol::rynk::LightingOutputMode::PoweredOnly;
+            let record = LightingExtensionParamsRecord {
+                effect: 7,
+                offset: 0,
+                len: 2,
+                values: [77; LIGHTING_EXTENSION_PARAM_CHUNK],
+            };
+            storage
+                .store_data(StorageKey::LightingOutputMode, &StorageData::LightingOutputMode(mode))
+                .await
+                .unwrap();
+            storage
+                .store_data(
+                    StorageKey::LightingExtensionParams { effect: 7, offset: 0 },
+                    &StorageData::LightingExtensionParams(record),
+                )
+                .await
+                .unwrap();
+            let (flash, _) = storage.flash.destroy();
+            let mut reopened = Storage::<_, 0, 0, 0, 0> {
+                flash: MapStorage::new(flash, MapConfig::new(8192..16384), Cache::new_uncached()),
+                buffer: [0; get_buffer_size()],
+            };
+            assert_eq!(reopened.read_lighting_output_mode().await, Some(mode));
+            assert_eq!(reopened.read_lighting_extension_params(7, 0).await, Some(record));
+            assert_eq!(reopened.read_lighting_extension_params(6, 0).await, None);
+            assert_eq!(reopened.read_lighting_extension_params(7, 8).await, None);
+        });
     }
 
     #[cfg(all(feature = "lighting", feature = "rynk"))]

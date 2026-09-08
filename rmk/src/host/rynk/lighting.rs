@@ -968,6 +968,32 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
     #[cfg(not(feature = "storage"))]
     async fn persist_extension(&self) {}
 
+    #[cfg(feature = "storage")]
+    async fn persist_extension_params(&self, effect: u8, index: u8) {
+        let offset = index / LIGHTING_EXTENSION_PARAM_CHUNK as u8 * LIGHTING_EXTENSION_PARAM_CHUNK as u8;
+        if let Ok(StandardReply::ExtensionParams(page)) = self
+            .request_core(StandardCommand::ReadExtensionParams { effect, offset })
+            .await
+        {
+            let mut record = crate::storage::LightingExtensionParamsRecord {
+                effect,
+                offset,
+                len: 0,
+                values: [0; LIGHTING_EXTENSION_PARAM_CHUNK],
+            };
+            for (value, entry) in record.values.iter_mut().zip(page.items()) {
+                *value = entry.value;
+                record.len += 1;
+            }
+            crate::channel::FLASH_CHANNEL
+                .send(crate::storage::FlashOperationMessage::LightingExtensionParams(record))
+                .await;
+        }
+    }
+
+    #[cfg(not(feature = "storage"))]
+    async fn persist_extension_params(&self, _effect: u8, _index: u8) {}
+
     async fn runtime_conditional_scene_mutation(
         &self,
         command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP>,
@@ -1084,6 +1110,12 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                         mode: output_mode_from_wire(mode),
                     })
                     .await?;
+                #[cfg(feature = "storage")]
+                crate::channel::FLASH_CHANNEL
+                    .send(crate::storage::FlashOperationMessage::LightingOutputMode(
+                        mode,
+                    ))
+                    .await;
                 return Ok(RynkLightingReadback::OutputMode(state));
             }
             RynkLightingCommand::SetWakeLayers {
@@ -1319,13 +1351,14 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 value,
             } => {
                 let state = self
-                    .extension_mutation(StandardCommand::SetExtensionParamIfRevision {
+                    .request_core_state(StandardCommand::SetExtensionParamIfRevision {
                         expected_revision,
                         effect,
                         index,
                         value,
                     })
                     .await?;
+                self.persist_extension_params(effect, index).await;
                 return Ok(RynkLightingReadback::State(state_to_wire(state)));
             }
             RynkLightingCommand::ReadRuntimeConditionalSceneStatus => {
@@ -2840,12 +2873,13 @@ mod tests {
             },
         );
 
-        // Persisting by readback means the last record is the settled state,
-        // parameters included, no matter which command produced it.
         let mut last = None;
+        let mut last_params = None;
         while let Ok(message) = crate::channel::FLASH_CHANNEL.try_receive() {
-            if let FlashOperationMessage::LightingExtensionState(record) = message {
-                last = Some(record);
+            match message {
+                FlashOperationMessage::LightingExtensionState(record) => last = Some(record),
+                FlashOperationMessage::LightingExtensionParams(record) => last_params = Some(record),
+                _ => {},
             }
         }
         let record = last.expect("extension mutations persist a record");
@@ -2853,7 +2887,64 @@ mod tests {
             (record.effect, record.palette, record.value, record.speed),
             (0, 2, 200, 40)
         );
-        assert_eq!(record.params(), &[3, 77]);
+        assert_eq!(record.params(), &[3, 128]);
+        let params = last_params.expect("parameter mutation persists its own page");
+        assert_eq!((params.effect, params.offset, params.len), (0, 0, 2));
+        assert_eq!(&params.values[..2], &[3, 77]);
+    }
+
+    #[cfg(feature = "storage")]
+    #[test]
+    fn lighting_preferences_persist_inactive_effect_and_output_policy() {
+        use crate::storage::FlashOperationMessage;
+        while crate::channel::FLASH_CHANNEL.try_receive().is_ok() {}
+        run_extension_flow(
+            TestExtensionSource {
+                state: crate::lighting::compositor::ExtensionState {
+                    effect: 1,
+                    palette: 0,
+                    value: 128,
+                    speed: 20,
+                },
+                params: [3, 128],
+            },
+            async |protocol| {
+                let reply = protocol
+                    .request(RynkLightingCommand::SetExtensionParam {
+                        expected_revision: 0,
+                        effect: 0,
+                        index: 1,
+                        value: 77,
+                    })
+                    .await;
+                let revision = match reply {
+                    Ok(RynkLightingReadback::State(state)) => state.revision,
+                    other => panic!("parameter write failed: {other:?}"),
+                };
+                assert!(matches!(
+                    protocol
+                        .request(RynkLightingCommand::SetOutputMode {
+                            expected_revision: revision,
+                            mode: WireLightingOutputMode::PoweredOnly,
+                        })
+                        .await,
+                    Ok(RynkLightingReadback::OutputMode(_))
+                ));
+            },
+        );
+        let mut params = None;
+        let mut mode = None;
+        while let Ok(message) = crate::channel::FLASH_CHANNEL.try_receive() {
+            match message {
+                FlashOperationMessage::LightingExtensionParams(record) => params = Some(record),
+                FlashOperationMessage::LightingOutputMode(value) => mode = Some(value),
+                _ => {}
+            }
+        }
+        let record = params.expect("inactive effect parameters must reach storage");
+        assert_eq!((record.effect, record.offset, record.len), (0, 0, 2));
+        assert_eq!(&record.values[..2], &[3, 77]);
+        assert_eq!(mode, Some(WireLightingOutputMode::PoweredOnly));
     }
 
     #[test]
