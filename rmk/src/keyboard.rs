@@ -248,6 +248,9 @@ pub struct Keyboard<'a> {
     /// Caps Word state machine
     caps_word: CapsWordState,
 
+    ctrl_gui_swap: bool,
+    ctrl_gui_swap_requested: bool,
+
     /// The modifiers coming from (last) Action::KeyWithModifier
     with_modifiers: ModifierCombination,
 
@@ -299,6 +302,8 @@ impl<'a> Keyboard<'a> {
             osl_state: OneShotState::default(),
             osm_state: OneShotState::default(),
             caps_word: CapsWordState::default(),
+            ctrl_gui_swap: false,
+            ctrl_gui_swap_requested: false,
             with_modifiers: ModifierCombination::default(),
             macro_texting: false,
             macro_caps: false,
@@ -391,6 +396,7 @@ impl<'a> Keyboard<'a> {
 
     /// Process key changes at (row, col)
     pub async fn process_inner(&mut self, event: KeyboardEvent) {
+        self.apply_pending_ctrl_gui_swap();
         // Check for mode transitions (e.g., entering/exiting passkey entry)
         #[cfg(feature = "passkey_entry")]
         self.passkey_entry_state.check_mode_transition();
@@ -1718,6 +1724,12 @@ impl<'a> Keyboard<'a> {
 
     async fn process_action_keyboard_control(&mut self, keyboard_control: KeyboardAction, event: KeyboardEvent) {
         match keyboard_control {
+            KeyboardAction::CtrlGuiSwapToggle => {
+                if !event.pressed {
+                    self.ctrl_gui_swap_requested = !self.ctrl_gui_swap_requested;
+                    self.apply_pending_ctrl_gui_swap();
+                }
+            }
             KeyboardAction::CapsWordToggle => {
                 // Handle Caps Word
                 if event.pressed {
@@ -2171,6 +2183,21 @@ impl<'a> Keyboard<'a> {
         }
     }
 
+    fn apply_pending_ctrl_gui_swap(&mut self) {
+        if self.ctrl_gui_swap == self.ctrl_gui_swap_requested {
+            return;
+        }
+        // Preserve the mapping throughout a chord, including queued one-shot modifiers.
+        if self.held_modifiers.into_bits() == 0
+            && self.with_modifiers.into_bits() == 0
+            && self.osm_state.value().is_none()
+            && self.held_keycodes.iter().all(|key| *key == HidKeyCode::No)
+            && !self.macro_texting
+        {
+            self.ctrl_gui_swap = self.ctrl_gui_swap_requested;
+        }
+    }
+
     /// Build the keyboard report for the current held keycodes with modifiers
     /// resolved.
     ///
@@ -2179,7 +2206,17 @@ impl<'a> Keyboard<'a> {
     /// that holds them. This keeps the shared usage down until the last holder
     /// releases it.
     pub(crate) fn build_keyboard_report(&mut self, pressed: bool) -> KeyboardReport {
+        self.apply_pending_ctrl_gui_swap();
         let modifiers = self.resolve_modifiers(pressed);
+        let modifiers = if self.ctrl_gui_swap {
+            modifiers
+                .with_left_ctrl(modifiers.left_gui())
+                .with_left_gui(modifiers.left_ctrl())
+                .with_right_ctrl(modifiers.right_gui())
+                .with_right_gui(modifiers.right_ctrl())
+        } else {
+            modifiers
+        };
         crate::state::set_modifier_state(modifiers);
         info!(
             "Sending keyboard report, modifiers: {:?}, keycodes: {:?}",
@@ -2434,6 +2471,78 @@ mod test {
             crate::state::current_modifier_state(),
             ModifierCombination::LSHIFT | ModifierCombination::RALT,
         );
+    }
+
+    fn toggle_ctrl_gui(keyboard: &mut Keyboard<'static>) {
+        block_on(
+            keyboard
+                .process_action_keyboard_control(KeyboardAction::CtrlGuiSwapToggle, KeyboardEvent::key(0, 0, false)),
+        );
+    }
+
+    #[test]
+    fn ctrl_gui_swap_preserves_other_modifiers_and_logical_state() {
+        let mut keyboard = create_test_keyboard();
+        toggle_ctrl_gui(&mut keyboard);
+        for bits in 0..=u8::MAX {
+            keyboard.held_modifiers = ModifierCombination::from_bits(bits);
+            let expected = (bits & 0x66) | ((bits & 0x11) << 3) | ((bits & 0x88) >> 3);
+            assert_eq!(keyboard.build_keyboard_report(true).modifier, expected);
+            assert_eq!(keyboard.held_modifiers.into_bits(), bits);
+        }
+    }
+
+    #[test]
+    fn ctrl_gui_swap_waits_for_chord_release_and_toggles_once() {
+        let mut keyboard = create_test_keyboard();
+        keyboard.register_modifier_key(HidKeyCode::LCtrl);
+        keyboard.register_key(HidKeyCode::A, KeyboardEvent::key(2, 1, true));
+        toggle_ctrl_gui(&mut keyboard);
+        assert_eq!(keyboard.build_keyboard_report(true).modifier, 0x01);
+        keyboard.unregister_modifier_key(HidKeyCode::LCtrl);
+        assert!(!keyboard.ctrl_gui_swap);
+        keyboard.unregister_key(HidKeyCode::A, KeyboardEvent::key(2, 1, false));
+        assert_eq!(keyboard.build_keyboard_report(false).modifier, 0);
+        keyboard.register_modifier_key(HidKeyCode::LCtrl);
+        assert_eq!(keyboard.build_keyboard_report(true).modifier, 0x08);
+        keyboard.unregister_modifier_key(HidKeyCode::LCtrl);
+        keyboard.build_keyboard_report(false);
+        block_on(
+            keyboard.process_action_keyboard_control(KeyboardAction::CtrlGuiSwapToggle, KeyboardEvent::key(0, 0, true)),
+        );
+        assert!(keyboard.ctrl_gui_swap);
+        toggle_ctrl_gui(&mut keyboard);
+        keyboard.register_modifier_key(HidKeyCode::LCtrl);
+        assert_eq!(keyboard.build_keyboard_report(true).modifier, 0x01);
+    }
+
+    #[test]
+    fn ctrl_gui_swap_repeated_pending_toggles_cancel() {
+        let mut keyboard = create_test_keyboard();
+        keyboard.register_modifier_key(HidKeyCode::RGui);
+        toggle_ctrl_gui(&mut keyboard);
+        toggle_ctrl_gui(&mut keyboard);
+        keyboard.unregister_modifier_key(HidKeyCode::RGui);
+        keyboard.build_keyboard_report(false);
+        keyboard.register_modifier_key(HidKeyCode::RGui);
+        assert_eq!(keyboard.build_keyboard_report(true).modifier, 0x80);
+    }
+
+    #[test]
+    fn ctrl_gui_swap_covers_modified_keys_and_one_shots() {
+        let mut keyboard = create_test_keyboard();
+        toggle_ctrl_gui(&mut keyboard);
+        keyboard.with_modifiers = ModifierCombination::LCTRL | ModifierCombination::RALT;
+        keyboard.osm_state = OneShotState::Held(ModifierCombination::RGUI);
+        assert_eq!(keyboard.build_keyboard_report(true).modifier, 0x58);
+        toggle_ctrl_gui(&mut keyboard);
+        keyboard.with_modifiers = ModifierCombination::new();
+        keyboard.osm_state = OneShotState::Single(ModifierCombination::RGUI);
+        keyboard.build_keyboard_report(false);
+        assert!(keyboard.ctrl_gui_swap);
+        keyboard.osm_state = OneShotState::None;
+        keyboard.build_keyboard_report(false);
+        assert!(!keyboard.ctrl_gui_swap);
     }
 
     async fn force_timeout_first_hold(keyboard: &mut Keyboard<'static>) {
