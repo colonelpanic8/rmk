@@ -27,6 +27,9 @@ use crate::keymap::KeyMap;
 const RYNK_UNLOCK_WINDOW: embassy_time::Duration = embassy_time::Duration::from_millis(500);
 
 /// Transport-agnostic Rynk service.
+/// A board's device-data namespace and the record reader behind it.
+type DeviceDataSource = (DeviceDataDescriptor, fn(u8) -> Option<DeviceDataRecord>);
+
 pub struct RynkService<'a> {
     ctx: KeyboardContext<'a>,
     /// Device identity served by `GetDeviceInfo`.
@@ -34,7 +37,7 @@ pub struct RynkService<'a> {
     /// Policy copied into each session's authorization gate.
     lock_config: LockConfig,
     /// Optional board-defined, machine-readable data source.
-    device_data: Option<(DeviceDataDescriptor, fn(u8) -> Option<DeviceDataRecord>)>,
+    device_data: Option<DeviceDataSource>,
 }
 
 impl<'a> RynkService<'a> {
