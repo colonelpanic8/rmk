@@ -1115,6 +1115,8 @@ pub(crate) struct MorseProfile {
     /// if true, a hold resolved by timeout alone sends the tap action instead when the key is
     /// released without any other key having been pressed
     pub retro_tap: Option<bool>,
+    /// overrides the global `[behavior.morse] prior_idle_time` for keys using this profile
+    pub prior_idle_time: Option<DurationMillis>,
 }
 
 /// Configurations for tri layer
