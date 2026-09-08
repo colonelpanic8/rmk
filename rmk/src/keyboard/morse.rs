@@ -23,8 +23,18 @@ impl<'a> Keyboard<'a> {
                 if let Some(action) = final_action {
                     debug!("hold prediction {:?} -> {:?}", pattern, action);
                     self.process_key_action_normal(action, key.event).await;
+                    // Only a bare hold can retro-tap: deeper morse patterns have no single tap
+                    // action to fall back to.
+                    let retro_tap = pattern == HOLD
+                        && !key.retro_tap_interrupted
+                        && Self::is_retro_tap_enabled(self.keymap, &key.action)
+                        && Self::action_from_pattern(self.keymap, &key.action, TAP) != Action::No;
                     if let Some(k) = self.held_buffer.find_pos_mut(key.event.pos) {
-                        k.state = KeyState::ProcessedButReleaseNotReportedYet(action);
+                        k.state = if retro_tap {
+                            KeyState::RetroTapCandidate(action)
+                        } else {
+                            KeyState::ProcessedButReleaseNotReportedYet(action)
+                        };
                     }
                 } else {
                     // Expect a possible longer morse pattern (or idle timeout after release), so can not finish yet...
@@ -231,6 +241,17 @@ impl<'a> Keyboard<'a> {
                         debug!("[morse] Releasing morse key: {:?}", event);
                         self.process_key_action_normal(action, event).await;
                     }
+                    KeyState::RetroTapCandidate(hold_action) => {
+                        // Nothing was pressed while the hold was active, so retract the hold and
+                        // send the tap in its place.
+                        let tap_action = Self::action_from_pattern(self.keymap, &k.action, TAP);
+                        debug!("[morse] Retro tap: {:?} -> {:?}", hold_action, tap_action);
+                        let _ = self.held_buffer.remove(event.pos);
+                        self.process_key_action_normal(hold_action, event).await;
+                        let mut press_event = event;
+                        press_event.pressed = true;
+                        self.process_key_action_tap(tap_action, press_event).await;
+                    }
                     KeyState::FlowTapped(action) => {
                         // Flow-tap fired the tap action and is holding it down; release it now.
                         debug!("[morse] Releasing flow-tapped morse key: {:?}", event);
@@ -400,6 +421,29 @@ impl<'a> Keyboard<'a> {
 
         // Use the global default
         keymap.morse_default_profile().unilateral_tap().unwrap_or(false)
+    }
+
+    /// Whether a timeout-resolved hold should fall back to the tap action when the key is
+    /// released without any other key having been pressed. Same as QMK retro tapping and
+    /// ZMK's `retro-tap`.
+    pub fn is_retro_tap_enabled(keymap: &KeyMap, key_action: &KeyAction) -> bool {
+        match key_action {
+            KeyAction::TapHold(_, _, idx) => {
+                if let Some(enabled) = keymap.morse_profile(*idx).retro_tap() {
+                    return enabled;
+                }
+            }
+            KeyAction::Morse(index) => {
+                if let Some(morse) = keymap.get_morse(*index as usize)
+                    && let Some(enabled) = morse.profile.retro_tap()
+                {
+                    return enabled;
+                }
+            }
+            _ => {}
+        }
+
+        keymap.morse_default_profile().retro_tap().unwrap_or(false)
     }
 
     pub fn is_flow_tap_enabled(keymap: &KeyMap, key_action: &KeyAction) -> bool {
