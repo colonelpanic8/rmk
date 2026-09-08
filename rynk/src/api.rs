@@ -1,6 +1,7 @@
 //! Typed request methods for each protocol endpoint, built on top of the
 //! driver core in `driver.rs`.
 
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 #[cfg(feature = "alloc")]
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -30,27 +31,24 @@ use rmk_types::protocol::rynk::{
     DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest,
     GetKeymapBulkResponse, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LayerState,
     LightingAdvancedRuntimeConditionalScenesPage, LightingCapabilities, LightingCompiledSceneStatus,
-    LightingCompiledScenesPage, LightingConditionalSceneStatus, LightingConditionalScenesPage, LightingExtension,
-    LightingExtensionLayers, LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionNamesRequest,
-    LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest,
-    LightingKeysPage, LightingLed, LightingLedsPage, LightingMatrixPosition, LightingOutputModeState,
-    LightingOutputsPage, LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction,
-    LightingPageRequest, LightingPhysicalKeysPage, LightingReplicaStatus, LightingResult, LightingRoutesPage,
-    LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
-    LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
-    LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZone, LightingZoneId,
-    LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MatrixState, PeripheralStatus, ProtocolVersion,
-    PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
+    LightingCompiledScenesPage, LightingConditionalSceneStatus, LightingConditionalScenesPage,
+    LightingExtendedRuntimeConditionalScenesPage, LightingExtension, LightingExtensionLayers,
+    LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionNamesRequest, LightingExtensionParamsPage,
+    LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest, LightingKeysPage, LightingLed,
+    LightingLedsPage, LightingMatrixPosition, LightingOutputModeState, LightingOutputsPage, LightingOverlayPage,
+    LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage,
+    LightingReplicaStatus, LightingResult, LightingRoutesPage, LightingRuntimeConditionalScenePageRequest,
+    LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneTransaction,
+    LightingRuntimeConditionalScenesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
+    LightingScenesPage, LightingState, LightingZone, LightingZoneId, LightingZoneMembershipsPage, LightingZonesPage,
+    LockStatus, MatrixState, PeripheralStatus, ProtocolVersion, PutLightingAdvancedRuntimeConditionalSceneChunkRequest,
+    PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
     PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest, SetComboRequest,
     SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
     SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState,
     StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
-};
-#[cfg(feature = "alloc")]
-use rmk_types::protocol::rynk::{
-    LightingExtendedRuntimeConditionalScenesPage, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
 };
 #[cfg(feature = "alloc")]
 use rmk_types::protocol::rynk::{RYNK_HEADER_SIZE, RynkError, max_wire_size};
@@ -839,6 +837,7 @@ impl Client {
         )
     }
 
+    #[cfg(feature = "alloc")]
     pub async fn read_all_lighting_extended_runtime_conditional_scenes(
         &self,
     ) -> Result<
