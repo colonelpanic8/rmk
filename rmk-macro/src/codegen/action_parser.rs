@@ -649,6 +649,7 @@ mod tests {
             quick_tap_timeout_ms: None,
             retro_tap: None,
             prior_idle_time_ms: None,
+            hold_trigger_key_positions: Vec::new(),
         }
     }
 
