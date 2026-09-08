@@ -1894,6 +1894,7 @@ mod tests {
         publish_event(PointingEvent {
             device_id: 0,
             axes: [axis(Axis::X), axis(Axis::Y), axis(Axis::Z)],
+            buttons: 0,
         });
         publish_event(PointingProcessorEvent {
             device_id: 0,
