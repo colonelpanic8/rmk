@@ -28,25 +28,27 @@ use rmk_types::protocol::rynk::{
     ClearLightingOverlayRequest, Cmd, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
     DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest,
-    GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LayerState,
-    LightingAdvancedRuntimeConditionalScenesPage, LightingCapabilities, LightingCompiledSceneStatus,
-    LightingCompiledScenesPage, LightingConditionalSceneStatus, LightingConditionalScenesPage, LightingExtension,
-    LightingExtensionLayers, LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionNamesRequest,
-    LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest,
-    LightingKeysPage, LightingLed, LightingLedsPage, LightingMatrixPosition, LightingOutputModeState,
-    LightingOutputsPage, LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction,
-    LightingPageRequest, LightingPhysicalKeysPage, LightingReplicaStatus, LightingResult, LightingRoutesPage,
+    GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition,
+    LIGHTING_RULE_PAGE_BYTES, LayerState, LightingAdvancedRuntimeConditionalScenesPage, LightingCapabilities,
+    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
+    LightingConditionalScenesPage, LightingExtension, LightingExtensionLayers, LightingExtensionNameKind,
+    LightingExtensionNamesPage, LightingExtensionNamesRequest, LightingExtensionParamsPage,
+    LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest, LightingKeysPage, LightingLed,
+    LightingLedsPage, LightingMatrixPosition, LightingOutputModeState, LightingOutputsPage, LightingOverlayPage,
+    LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage,
+    LightingReplicaStatus, LightingResult, LightingRoutesPage, LightingRule, LightingRuleStatus, LightingRulesPage,
     LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
     LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
     LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZone, LightingZoneId,
     LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState, PeripheralStatus,
     ProtocolVersion, PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
-    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest, SetComboRequest,
-    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
-    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
-    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMacroRequest, SetMorseBulkRequest, SetMorseRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState,
-    StorageResetMode, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest, command,
+    PutLightingRuleChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
+    SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
+    SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
+    SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
+    SetLightingSceneCellRequest, SetLightingStateRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseRequest,
+    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
+    UnsetLightingSceneCellRequest, command,
 };
 use rmk_types::protocol::rynk::{
     LightingExtendedRuntimeConditionalScenesPage, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
@@ -997,6 +999,48 @@ impl Client {
         )
     }
 
+    pub async fn get_lighting_rule_status(&self) -> Result<LightingRuleStatus, RynkHostError> {
+        self.require_lighting(Cmd::GetLightingRuleStatus)?;
+        Self::flatten_lighting(self.request::<command::GetLightingRuleStatus>(&()).await?)
+    }
+
+    pub async fn get_lighting_rules(
+        &self,
+        request: LightingRuntimeConditionalScenePageRequest,
+    ) -> Result<LightingRulesPage, RynkHostError> {
+        self.require_lighting(Cmd::GetLightingRules)?;
+        Self::flatten_lighting(self.request::<command::GetLightingRules>(&request).await?)
+    }
+
+    pub async fn begin_lighting_rule_replace(
+        &self,
+        request: BeginLightingRuntimeConditionalSceneReplaceRequest,
+    ) -> Result<LightingRuntimeConditionalSceneTransaction, RynkHostError> {
+        self.require_lighting(Cmd::BeginLightingRuleReplace)?;
+        Self::flatten_lighting(self.request::<command::BeginLightingRuleReplace>(&request).await?)
+    }
+
+    pub async fn put_lighting_rule_chunk(&self, request: PutLightingRuleChunkRequest) -> Result<(), RynkHostError> {
+        self.require_lighting(Cmd::PutLightingRuleChunk)?;
+        Self::flatten_lighting(self.request::<command::PutLightingRuleChunk>(&request).await?)
+    }
+
+    pub async fn commit_lighting_rule_replace(
+        &self,
+        request: CommitLightingRuntimeConditionalSceneReplaceRequest,
+    ) -> Result<LightingState, RynkHostError> {
+        self.require_lighting(Cmd::CommitLightingRuleReplace)?;
+        Self::flatten_lighting(self.request::<command::CommitLightingRuleReplace>(&request).await?)
+    }
+
+    pub async fn abort_lighting_rule_replace(
+        &self,
+        request: AbortLightingRuntimeConditionalSceneReplaceRequest,
+    ) -> Result<(), RynkHostError> {
+        self.require_lighting(Cmd::AbortLightingRuleReplace)?;
+        Self::flatten_lighting(self.request::<command::AbortLightingRuleReplace>(&request).await?)
+    }
+
     /// Insert or update one durable scene cell when the revision matches.
     pub async fn set_lighting_scene_cell(
         &self,
@@ -1686,6 +1730,80 @@ impl Client {
         Err(last_error.expect("a retried read only exits with a recorded conflict"))
     }
 
+    /// Read the self-describing rule table under one pinned revision.
+    pub async fn read_all_lighting_rules(&self) -> Result<(u32, Vec<LightingRule>), RynkHostError> {
+        const ATTEMPTS: usize = 4;
+        let mut last_error = None;
+        for _ in 0..ATTEMPTS {
+            let status = self.get_lighting_rule_status().await?;
+            let mut rules = Vec::with_capacity(status.rule_len as usize);
+            let mut offset: u16 = 0;
+            let mut conflicted = false;
+            while offset < status.rule_len {
+                match self
+                    .get_lighting_rules(LightingRuntimeConditionalScenePageRequest {
+                        revision: status.revision,
+                        offset,
+                    })
+                    .await
+                {
+                    Ok(page) => {
+                        if page.revision != status.revision
+                            || page.offset != offset
+                            || page.total_count != status.rule_len
+                            || page.count == 0
+                            || usize::from(page.count) > page.rules.len()
+                        {
+                            return Err(RynkHostError::InconsistentResponse {
+                                cmd: Cmd::GetLightingRules,
+                                reason: "rule page metadata is inconsistent",
+                            });
+                        }
+                        let mut bytes = page.rules.as_slice();
+                        for _ in 0..page.count {
+                            let (rule, rest) = postcard::take_from_bytes::<LightingRule>(bytes).map_err(|source| {
+                                RynkHostError::Deserialize {
+                                    cmd: Cmd::GetLightingRules,
+                                    source,
+                                }
+                            })?;
+                            rule.validate().map_err(RynkHostError::LightingRejected)?;
+                            rules.push(rule);
+                            bytes = rest;
+                        }
+                        if !bytes.is_empty() {
+                            return Err(RynkHostError::InconsistentResponse {
+                                cmd: Cmd::GetLightingRules,
+                                reason: "rule page has trailing bytes",
+                            });
+                        }
+                        offset = offset
+                            .checked_add(u16::from(page.count))
+                            .filter(|next| *next <= status.rule_len)
+                            .ok_or(RynkHostError::InconsistentResponse {
+                                cmd: Cmd::GetLightingRules,
+                                reason: "rule page extends beyond the advertised total",
+                            })?;
+                    }
+                    Err(
+                        error @ RynkHostError::LightingRejected(
+                            rmk_types::protocol::rynk::LightingError::StateRevisionConflict { .. },
+                        ),
+                    ) => {
+                        last_error = Some(error);
+                        conflicted = true;
+                        break;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            if !conflicted {
+                return Ok((status.revision, rules));
+            }
+        }
+        Err(last_error.expect("a retried read only exits with a recorded conflict"))
+    }
+
     /// Atomically replace the connection-aware runtime conditional table.
     pub async fn replace_all_lighting_advanced_runtime_conditional_scenes(
         &self,
@@ -1731,6 +1849,72 @@ impl Client {
             },
         )
         .await
+    }
+
+    /// Atomically replace the self-describing rule table, packing as many
+    /// complete rules into each byte-bounded chunk as will fit.
+    pub async fn replace_all_lighting_rules(
+        &self,
+        expected_revision: u32,
+        rules: &[LightingRule],
+    ) -> Result<LightingState, RynkHostError> {
+        let rule_count = u16::try_from(rules.len()).map_err(|_| RynkHostError::Encode(Cmd::PutLightingRuleChunk))?;
+        let mut pages: Vec<(u16, u8, heapless::Vec<u8, LIGHTING_RULE_PAGE_BYTES>)> = Vec::new();
+        let mut offset = 0u16;
+        let mut count = 0u8;
+        let mut bytes = heapless::Vec::new();
+        for rule in rules {
+            rule.validate().map_err(RynkHostError::LightingRejected)?;
+            let encoded = postcard::to_allocvec(rule).map_err(|_| RynkHostError::Encode(Cmd::PutLightingRuleChunk))?;
+            if encoded.len() > LIGHTING_RULE_PAGE_BYTES {
+                return Err(RynkHostError::Encode(Cmd::PutLightingRuleChunk));
+            }
+            if bytes.len() + encoded.len() > LIGHTING_RULE_PAGE_BYTES {
+                pages.push((offset, count, core::mem::take(&mut bytes)));
+                offset += u16::from(count);
+                count = 0;
+            }
+            bytes
+                .extend_from_slice(&encoded)
+                .map_err(|_| RynkHostError::Encode(Cmd::PutLightingRuleChunk))?;
+            count = count
+                .checked_add(1)
+                .ok_or(RynkHostError::Encode(Cmd::PutLightingRuleChunk))?;
+        }
+        if count != 0 {
+            pages.push((offset, count, bytes));
+        }
+
+        let transaction = self
+            .begin_lighting_rule_replace(BeginLightingRuntimeConditionalSceneReplaceRequest {
+                expected_revision,
+                cell_count: rule_count,
+            })
+            .await?;
+        let staged = async {
+            for (offset, count, rules) in pages {
+                self.put_lighting_rule_chunk(PutLightingRuleChunkRequest {
+                    transaction_id: transaction.id,
+                    offset,
+                    count,
+                    rules,
+                })
+                .await?;
+            }
+            self.commit_lighting_rule_replace(CommitLightingRuntimeConditionalSceneReplaceRequest {
+                transaction_id: transaction.id,
+            })
+            .await
+        }
+        .await;
+        if staged.is_err() {
+            let _ = self
+                .abort_lighting_rule_replace(AbortLightingRuntimeConditionalSceneReplaceRequest {
+                    transaction_id: transaction.id,
+                })
+                .await;
+        }
+        staged
     }
 
     /// Atomically replace the whole stored scene table: begin, stage in

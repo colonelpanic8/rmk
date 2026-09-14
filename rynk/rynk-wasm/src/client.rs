@@ -35,18 +35,18 @@ use rynk::rmk_types::protocol::rynk::{
     LightingExtensionNamesPage, LightingExtensionNamesRequest, LightingExtensionParamsPage,
     LightingExtensionParamsRequest, LightingKeysPage, LightingLedsPage, LightingOutputModeState, LightingOutputsPage,
     LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest,
-    LightingPhysicalKeysPage, LightingRoutesPage, LightingRuntimeConditionalScenePageRequest,
-    LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneTransaction,
-    LightingRuntimeConditionalScenesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
-    LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData,
-    MatrixState, PeripheralStatus, ProtocolVersion, PutLightingAdvancedRuntimeConditionalSceneChunkRequest,
-    PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
-    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest,
-    SetKeymapBulkRequest, SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest,
-    SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest, SetLightingOutputModeRequest,
-    SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest, SetMorseBulkRequest,
-    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
-    UnsetLightingSceneCellRequest,
+    LightingPhysicalKeysPage, LightingPredicate, LightingRoutesPage, LightingRulePredicate, LightingRuleStatus,
+    LightingRulesPage, LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
+    LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
+    LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZoneMembershipsPage,
+    LightingZonesPage, LockStatus, MacroData, MatrixState, PeripheralStatus, ProtocolVersion,
+    PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    PutLightingOverlayChunkRequest, PutLightingRuleChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest,
+    PutLightingSceneChunkRequest, SetComboBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
+    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
+    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
+    SetMorseBulkRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
+    UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -77,6 +77,29 @@ pub async fn connect(link: JsByteLink) -> Result<RynkClient, JsValue> {
         client,
         driver: Mutex::new(driver),
     })
+}
+
+/// Decode one tagged predicate body with the same postcard codec as firmware.
+#[wasm_bindgen]
+pub fn decode_lighting_predicate(tag: u8, body: Vec<u8>) -> Result<LightingRulePredicate, JsValue> {
+    let mut predicate = LightingPredicate {
+        tag,
+        body: Default::default(),
+    };
+    predicate
+        .body
+        .extend_from_slice(&body)
+        .map_err(|_| js_sys::Error::new("lighting predicate body exceeds the wire limit"))?;
+    LightingRulePredicate::decode(predicate)
+        .map_err(|error| js_sys::Error::new(&format!("invalid lighting predicate: {error:?}")).into())
+}
+
+/// Encode one typed predicate with the same postcard codec as firmware.
+#[wasm_bindgen]
+pub fn encode_lighting_predicate(predicate: LightingRulePredicate) -> Result<LightingPredicate, JsValue> {
+    predicate
+        .encode()
+        .map_err(|error| js_sys::Error::new(&format!("invalid lighting predicate: {error:?}")).into())
 }
 
 impl RynkClient {
@@ -237,6 +260,12 @@ endpoints! {
     put_lighting_advanced_runtime_conditional_scene_chunk(request: PutLightingAdvancedRuntimeConditionalSceneChunkRequest) -> (),
     commit_lighting_advanced_runtime_conditional_scene_replace(request: CommitLightingRuntimeConditionalSceneReplaceRequest) -> LightingState,
     abort_lighting_advanced_runtime_conditional_scene_replace(request: AbortLightingRuntimeConditionalSceneReplaceRequest) -> (),
+    get_lighting_rule_status() -> LightingRuleStatus,
+    get_lighting_rules(request: LightingRuntimeConditionalScenePageRequest) -> LightingRulesPage,
+    begin_lighting_rule_replace(request: BeginLightingRuntimeConditionalSceneReplaceRequest) -> LightingRuntimeConditionalSceneTransaction,
+    put_lighting_rule_chunk(request: PutLightingRuleChunkRequest) -> (),
+    commit_lighting_rule_replace(request: CommitLightingRuntimeConditionalSceneReplaceRequest) -> LightingState,
+    abort_lighting_rule_replace(request: AbortLightingRuntimeConditionalSceneReplaceRequest) -> (),
     set_lighting_scene_cell(request: SetLightingSceneCellRequest) -> LightingState,
     unset_lighting_scene_cell(request: UnsetLightingSceneCellRequest) -> LightingState,
     set_lighting_layer_policy(request: SetLightingLayerPolicyRequest) -> LightingState,

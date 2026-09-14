@@ -50,16 +50,17 @@ use crate::protocol::rynk::{
     LightingExtensionParamsRequest, LightingExtensionResult, LightingFramePageResult, LightingFrameRequest,
     LightingKeysPageResult, LightingLedsPageResult, LightingOutputModeStateResult, LightingOutputsPageResult,
     LightingOverlayPageRequest, LightingOverlayPageResult, LightingOverlayTransactionResult, LightingPageRequest,
-    LightingPhysicalKeysPageResult, LightingReplicaStatusResult, LightingRoutesPageResult,
-    LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatusResult,
+    LightingPhysicalKeysPageResult, LightingReplicaStatusResult, LightingRoutesPageResult, LightingRuleStatusResult,
+    LightingRulesPageResult, LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatusResult,
     LightingRuntimeConditionalSceneTransactionResult, LightingRuntimeConditionalScenesPageResult,
     LightingScenePageRequest, LightingSceneStatusResult, LightingSceneTransactionResult, LightingScenesPageResult,
     LightingStateResult, LightingUnitResult, LightingZoneMembershipsPageResult, LightingZonesPageResult,
     PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
-    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetLightingExtensionLayersRequest,
-    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
-    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetLightingWakeLayersRequest, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
+    PutLightingRuleChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
+    SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
+    SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
+    SetLightingSceneCellRequest, SetLightingStateRequest, SetLightingWakeLayersRequest, UnsetLightingOverlayRequest,
+    UnsetLightingSceneCellRequest,
 };
 #[cfg(all(feature = "_ble", feature = "split"))]
 use crate::protocol::rynk::{SplitCentralLatencyPolicy, SplitCentralLatencyState};
@@ -544,8 +545,8 @@ endpoints! {
     #[cfg(feature = "lighting")]
     AbortLightingAdvancedRuntimeConditionalSceneReplace = 0x0945: AbortLightingRuntimeConditionalSceneReplaceRequest => LightingUnitResult;
     /// Read back what one lighting node last presented to its LEDs, paged.
-    /// `LightingFeatureFlags` has no bits left, so support is discovered by
-    /// probing: firmware without it answers `UnknownCmd`.
+    /// Support remains discovered by probing: firmware without it answers
+    /// `UnknownCmd`.
     #[cfg(feature = "lighting")]
     GetLightingFrame = 0x0936: LightingFrameRequest => LightingFramePageResult;
     /// Read both sides of the split lighting replication handshake. Probed
@@ -554,6 +555,24 @@ endpoints! {
     /// fresh peripheral report is required.
     #[cfg(feature = "lighting")]
     GetLightingReplicaStatus = 0x0937: () => LightingReplicaStatusResult;
+    /// Discover the self-describing runtime rule table and parseable tags.
+    #[cfg(feature = "lighting")]
+    GetLightingRuleStatus = 0x0950: () => LightingRuleStatusResult;
+    /// Read concatenated whole rules under one pinned state revision.
+    #[cfg(feature = "lighting")]
+    GetLightingRules = 0x0951: LightingRuntimeConditionalScenePageRequest => LightingRulesPageResult;
+    /// Begin an atomic self-describing rule-table replacement.
+    #[cfg(feature = "lighting")]
+    BeginLightingRuleReplace = 0x0952: BeginLightingRuntimeConditionalSceneReplaceRequest => LightingRuntimeConditionalSceneTransactionResult;
+    /// Stage concatenated whole rules for a replacement.
+    #[cfg(feature = "lighting")]
+    PutLightingRuleChunk = 0x0953: PutLightingRuleChunkRequest => LightingUnitResult;
+    /// Publish a complete rule-table replacement.
+    #[cfg(feature = "lighting")]
+    CommitLightingRuleReplace = 0x0954: CommitLightingRuntimeConditionalSceneReplaceRequest => LightingStateResult;
+    /// Discard an in-progress rule-table replacement.
+    #[cfg(feature = "lighting")]
+    AbortLightingRuleReplace = 0x0955: AbortLightingRuntimeConditionalSceneReplaceRequest => LightingUnitResult;
 }
 
 // Define topics: `Name = value: Payload;`

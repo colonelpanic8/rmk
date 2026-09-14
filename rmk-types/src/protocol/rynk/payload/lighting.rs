@@ -26,6 +26,12 @@ pub const LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE: usize = 7;
 /// effects, layers, and indicator predicates (two of them 32-bit layer masks)
 /// and the page still has to fit `LIGHTING_PAYLOAD_SIZE`.
 pub const LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE: usize = 3;
+/// Maximum number of predicates carried by one self-describing lighting rule.
+pub const LIGHTING_RULE_MAX_PREDICATES: usize = 8;
+/// Maximum postcard body size of one tagged lighting predicate.
+pub const LIGHTING_PREDICATE_BODY_MAX: usize = 16;
+/// Maximum number of concatenated postcard rule bytes in one page or chunk.
+pub const LIGHTING_RULE_PAGE_BYTES: usize = 224;
 /// Chunk size of the original connection/effects endpoint.
 pub const LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE: usize = 5;
 /// Number of RGB cells in one presented-frame page.
@@ -45,6 +51,13 @@ pub const LIGHTING_EXTENSION_NAME_CHUNK: usize = 8;
 pub const LIGHTING_EXTENSION_PARAM_CHUNK: usize = 8;
 
 macro_rules! wire_type {
+    (@owned $item:item) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+        #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+        #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+        #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+        $item
+    };
     ($item:item) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
         #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -237,6 +250,9 @@ impl LightingFeatureFlags {
     /// The advanced conditional-scene endpoints support layer-set and host
     /// lock-indicator predicates. The extended endpoints retain their format.
     pub const RUNTIME_LAYER_INDICATOR_CONDITIONS: u32 = 1 << 16;
+    /// Self-describing runtime lighting rules are available through the rule
+    /// endpoint family.
+    pub const RULES: u32 = 1 << 17;
 
     pub const fn contains(self, bits: u32) -> bool {
         self.0 & bits == bits
@@ -747,6 +763,341 @@ wire_type! {
     }
 }
 
+/// Predicate tag for [`LightingLayerCondition`].
+pub const LIGHTING_PREDICATE_LAYER: u8 = 1;
+/// Predicate tag for [`LightingBatteryCondition`].
+pub const LIGHTING_PREDICATE_BATTERY: u8 = 2;
+/// Predicate tag for [`LightingOutputMode`].
+pub const LIGHTING_PREDICATE_OUTPUT_MODE: u8 = 3;
+/// Predicate tag for [`LightingConnectionCondition`].
+pub const LIGHTING_PREDICATE_CONNECTION: u8 = 4;
+/// Predicate tag for [`LightingEffectsCondition`].
+pub const LIGHTING_PREDICATE_EFFECTS: u8 = 5;
+/// Predicate tag for [`LightingLayersCondition`].
+pub const LIGHTING_PREDICATE_LAYERS: u8 = 6;
+/// Predicate tag for [`LightingIndicatorCondition`].
+pub const LIGHTING_PREDICATE_INDICATORS: u8 = 7;
+/// Predicate tag for [`LightingMaintenanceCondition`].
+pub const LIGHTING_PREDICATE_MAINTENANCE: u8 = 8;
+/// Predicate tag for [`LightingSplitTransportCondition`].
+pub const LIGHTING_PREDICATE_SPLIT_TRANSPORT: u8 = 9;
+
+/// Bitmask of predicate tags parsed by this protocol generation.
+pub const LIGHTING_RULE_PREDICATES: u64 = (1 << LIGHTING_PREDICATE_LAYER)
+    | (1 << LIGHTING_PREDICATE_BATTERY)
+    | (1 << LIGHTING_PREDICATE_OUTPUT_MODE)
+    | (1 << LIGHTING_PREDICATE_CONNECTION)
+    | (1 << LIGHTING_PREDICATE_EFFECTS)
+    | (1 << LIGHTING_PREDICATE_LAYERS)
+    | (1 << LIGHTING_PREDICATE_INDICATORS)
+    | (1 << LIGHTING_PREDICATE_MAINTENANCE)
+    | (1 << LIGHTING_PREDICATE_SPLIT_TRANSPORT);
+
+wire_type! {
+    /// Gate on whether host mutations are currently unlocked.
+    pub struct LightingMaintenanceCondition {
+        pub unlocked: bool,
+    }
+}
+
+wire_type! {
+    /// Link currently carrying split traffic.
+    pub enum LightingSplitLink {
+        Wired,
+        Ble,
+    }
+}
+
+wire_type! {
+    /// Volatile split-link selection override.
+    pub enum LightingSplitForce {
+        Auto,
+        Wired,
+        Ble,
+    }
+}
+
+wire_type! {
+    /// Gate on the automatic split-transport selector. A board without an
+    /// automatic selector parses this condition but can never satisfy it.
+    pub struct LightingSplitTransportCondition {
+        pub link: Option<LightingSplitLink>,
+        pub force: Option<LightingSplitForce>,
+    }
+}
+
+wire_type! { @owned
+    /// One tagged, length-delimited predicate body.
+    pub struct LightingPredicate {
+        pub tag: u8,
+        pub body: Vec<u8, LIGHTING_PREDICATE_BODY_MAX>,
+    }
+}
+
+impl MaxSize for LightingPredicate {
+    const POSTCARD_MAX_SIZE: usize =
+        u8::POSTCARD_MAX_SIZE + crate::heapless_vec_max_size::<u8, LIGHTING_PREDICATE_BODY_MAX>();
+}
+
+wire_type! { @owned
+    /// One ordered runtime lighting rule. Predicate tags must be strictly
+    /// ascending; an empty predicate list makes the rule unconditional.
+    pub struct LightingRule {
+        pub led_id: LightingLedId,
+        pub effect: LightingEffect,
+        pub predicates: Vec<LightingPredicate, LIGHTING_RULE_MAX_PREDICATES>,
+    }
+}
+
+impl MaxSize for LightingRule {
+    const POSTCARD_MAX_SIZE: usize = LightingLedId::POSTCARD_MAX_SIZE
+        + LightingEffect::POSTCARD_MAX_SIZE
+        + crate::heapless_vec_max_size::<LightingPredicate, LIGHTING_RULE_MAX_PREDICATES>();
+}
+
+impl LightingRule {
+    /// Validate the canonical envelope without interpreting predicate bodies.
+    pub fn validate(&self) -> LightingResult<()> {
+        self.effect.validate()?;
+        let mut previous = 0;
+        for predicate in &self.predicates {
+            if predicate.tag == 0 || predicate.tag <= previous {
+                return Err(LightingError::InvalidRequest);
+            }
+            previous = predicate.tag;
+        }
+        Ok(())
+    }
+
+    /// Encode one legacy advanced cell into canonical tagged predicates.
+    pub fn from_advanced(cell: LightingAdvancedConditionalSceneCell) -> LightingResult<Self> {
+        cell.validate()?;
+        let mut predicates = Vec::new();
+        if let Some(value) = cell.cell.conditions.layer {
+            push_wire_predicate(&mut predicates, LIGHTING_PREDICATE_LAYER, &value)?;
+        }
+        if let Some(value) = cell.cell.conditions.battery {
+            push_wire_predicate(&mut predicates, LIGHTING_PREDICATE_BATTERY, &value)?;
+        }
+        if let Some(value) = cell.cell.conditions.output_mode {
+            push_wire_predicate(&mut predicates, LIGHTING_PREDICATE_OUTPUT_MODE, &value)?;
+        }
+        if let Some(value) = cell.connection {
+            push_wire_predicate(&mut predicates, LIGHTING_PREDICATE_CONNECTION, &value)?;
+        }
+        if let Some(value) = cell.effects {
+            push_wire_predicate(&mut predicates, LIGHTING_PREDICATE_EFFECTS, &value)?;
+        }
+        if let Some(value) = cell.layers {
+            push_wire_predicate(&mut predicates, LIGHTING_PREDICATE_LAYERS, &value)?;
+        }
+        if let Some(value) = cell.indicators {
+            push_wire_predicate(&mut predicates, LIGHTING_PREDICATE_INDICATORS, &value)?;
+        }
+        let rule = Self {
+            led_id: cell.cell.led_id,
+            effect: cell.cell.effect,
+            predicates,
+        };
+        rule.validate()?;
+        Ok(rule)
+    }
+
+    /// Decode a rule that uses only predicates expressible by the advanced
+    /// legacy endpoint.
+    pub fn to_advanced(&self) -> LightingResult<LightingAdvancedConditionalSceneCell> {
+        self.validate()?;
+        let mut cell = LightingAdvancedConditionalSceneCell {
+            cell: LightingConditionalSceneCell {
+                conditions: LightingConditionSet {
+                    layer: None,
+                    battery: None,
+                    output_mode: None,
+                },
+                led_id: self.led_id,
+                effect: self.effect,
+            },
+            connection: None,
+            effects: None,
+            layers: None,
+            indicators: None,
+        };
+        for predicate in &self.predicates {
+            match predicate.tag {
+                LIGHTING_PREDICATE_LAYER => cell.cell.conditions.layer = Some(decode_wire_predicate(&predicate.body)?),
+                LIGHTING_PREDICATE_BATTERY => {
+                    cell.cell.conditions.battery = Some(decode_wire_predicate(&predicate.body)?)
+                }
+                LIGHTING_PREDICATE_OUTPUT_MODE => {
+                    cell.cell.conditions.output_mode = Some(decode_wire_predicate(&predicate.body)?)
+                }
+                LIGHTING_PREDICATE_CONNECTION => cell.connection = Some(decode_wire_predicate(&predicate.body)?),
+                LIGHTING_PREDICATE_EFFECTS => cell.effects = Some(decode_wire_predicate(&predicate.body)?),
+                LIGHTING_PREDICATE_LAYERS => cell.layers = Some(decode_wire_predicate(&predicate.body)?),
+                LIGHTING_PREDICATE_INDICATORS => cell.indicators = Some(decode_wire_predicate(&predicate.body)?),
+                LIGHTING_PREDICATE_MAINTENANCE | LIGHTING_PREDICATE_SPLIT_TRANSPORT => {
+                    return Err(LightingError::Unsupported);
+                }
+                tag => return Err(LightingError::UnknownPredicate { tag }),
+            }
+        }
+        cell.validate()?;
+        Ok(cell)
+    }
+}
+
+fn push_wire_predicate<T: Serialize>(
+    predicates: &mut Vec<LightingPredicate, LIGHTING_RULE_MAX_PREDICATES>,
+    tag: u8,
+    value: &T,
+) -> LightingResult<()> {
+    let mut scratch = [0; LIGHTING_PREDICATE_BODY_MAX];
+    let encoded = postcard::to_slice(value, &mut scratch).map_err(|_| LightingError::InvalidRequest)?;
+    predicates
+        .push(LightingPredicate {
+            tag,
+            body: Vec::from_slice(encoded).map_err(|_| LightingError::InvalidRequest)?,
+        })
+        .map_err(|_| LightingError::InvalidRequest)
+}
+
+fn decode_wire_predicate<T: serde::de::DeserializeOwned>(body: &[u8]) -> LightingResult<T> {
+    let (value, rest) = postcard::take_from_bytes(body).map_err(|_| LightingError::InvalidRequest)?;
+    if !rest.is_empty() {
+        return Err(LightingError::InvalidRequest);
+    }
+    Ok(value)
+}
+
+/// Typed host-side view of a tagged lighting predicate.
+#[cfg(feature = "host")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum LightingRulePredicate {
+    Layer(LightingLayerCondition),
+    Battery(LightingBatteryCondition),
+    OutputMode(LightingOutputMode),
+    Connection(LightingConnectionCondition),
+    Effects(LightingEffectsCondition),
+    Layers(LightingLayersCondition),
+    Indicators(LightingIndicatorCondition),
+    Maintenance(LightingMaintenanceCondition),
+    SplitTransport(LightingSplitTransportCondition),
+    Unknown {
+        tag: u8,
+        body: Vec<u8, LIGHTING_PREDICATE_BODY_MAX>,
+    },
+}
+
+#[cfg(feature = "host")]
+impl LightingRulePredicate {
+    pub const fn tag(&self) -> u8 {
+        match self {
+            Self::Layer(_) => LIGHTING_PREDICATE_LAYER,
+            Self::Battery(_) => LIGHTING_PREDICATE_BATTERY,
+            Self::OutputMode(_) => LIGHTING_PREDICATE_OUTPUT_MODE,
+            Self::Connection(_) => LIGHTING_PREDICATE_CONNECTION,
+            Self::Effects(_) => LIGHTING_PREDICATE_EFFECTS,
+            Self::Layers(_) => LIGHTING_PREDICATE_LAYERS,
+            Self::Indicators(_) => LIGHTING_PREDICATE_INDICATORS,
+            Self::Maintenance(_) => LIGHTING_PREDICATE_MAINTENANCE,
+            Self::SplitTransport(_) => LIGHTING_PREDICATE_SPLIT_TRANSPORT,
+            Self::Unknown { tag, .. } => *tag,
+        }
+    }
+
+    pub fn decode(predicate: LightingPredicate) -> LightingResult<Self> {
+        macro_rules! decode {
+            ($ty:ty, $variant:ident) => {{
+                let (value, rest) =
+                    postcard::take_from_bytes::<$ty>(&predicate.body).map_err(|_| LightingError::InvalidRequest)?;
+                if !rest.is_empty() {
+                    return Err(LightingError::InvalidRequest);
+                }
+                Ok(Self::$variant(value))
+            }};
+        }
+        match predicate.tag {
+            LIGHTING_PREDICATE_LAYER => decode!(LightingLayerCondition, Layer),
+            LIGHTING_PREDICATE_BATTERY => decode!(LightingBatteryCondition, Battery),
+            LIGHTING_PREDICATE_OUTPUT_MODE => decode!(LightingOutputMode, OutputMode),
+            LIGHTING_PREDICATE_CONNECTION => decode!(LightingConnectionCondition, Connection),
+            LIGHTING_PREDICATE_EFFECTS => decode!(LightingEffectsCondition, Effects),
+            LIGHTING_PREDICATE_LAYERS => decode!(LightingLayersCondition, Layers),
+            LIGHTING_PREDICATE_INDICATORS => decode!(LightingIndicatorCondition, Indicators),
+            LIGHTING_PREDICATE_MAINTENANCE => decode!(LightingMaintenanceCondition, Maintenance),
+            LIGHTING_PREDICATE_SPLIT_TRANSPORT => {
+                decode!(LightingSplitTransportCondition, SplitTransport)
+            }
+            tag => Ok(Self::Unknown {
+                tag,
+                body: predicate.body,
+            }),
+        }
+    }
+
+    pub fn encode(self) -> LightingResult<LightingPredicate> {
+        let tag = self.tag();
+        let mut body = Vec::new();
+        macro_rules! encode {
+            ($value:expr) => {{
+                let mut bytes = [0; LIGHTING_PREDICATE_BODY_MAX];
+                let encoded = postcard::to_slice(&$value, &mut bytes).map_err(|_| LightingError::InvalidRequest)?;
+                body.extend_from_slice(encoded)
+                    .map_err(|_| LightingError::InvalidRequest)?;
+            }};
+        }
+        match self {
+            Self::Layer(value) => encode!(value),
+            Self::Battery(value) => encode!(value),
+            Self::OutputMode(value) => encode!(value),
+            Self::Connection(value) => encode!(value),
+            Self::Effects(value) => encode!(value),
+            Self::Layers(value) => encode!(value),
+            Self::Indicators(value) => encode!(value),
+            Self::Maintenance(value) => encode!(value),
+            Self::SplitTransport(value) => encode!(value),
+            Self::Unknown { body: unknown, .. } => body = unknown,
+        }
+        Ok(LightingPredicate { tag, body })
+    }
+}
+
+#[cfg(feature = "host")]
+impl LightingRule {
+    pub fn predicates(&self) -> LightingResult<Vec<LightingRulePredicate, LIGHTING_RULE_MAX_PREDICATES>> {
+        self.validate()?;
+        let mut decoded = Vec::new();
+        for predicate in &self.predicates {
+            decoded
+                .push(LightingRulePredicate::decode(predicate.clone())?)
+                .map_err(|_| LightingError::InvalidRequest)?;
+        }
+        Ok(decoded)
+    }
+
+    pub fn from_predicates(
+        led_id: LightingLedId,
+        effect: LightingEffect,
+        predicates: &[LightingRulePredicate],
+    ) -> LightingResult<Self> {
+        let mut encoded = Vec::new();
+        for predicate in predicates {
+            encoded
+                .push(predicate.clone().encode()?)
+                .map_err(|_| LightingError::InvalidRequest)?;
+        }
+        let rule = Self {
+            led_id,
+            effect,
+            predicates: encoded,
+        };
+        rule.validate()?;
+        Ok(rule)
+    }
+}
+
 wire_type! {
     /// Additive runtime conditional cell used by the extended endpoints. The
     /// nested legacy cell keeps its established postcard field order intact.
@@ -1015,6 +1366,36 @@ wire_type! {
 }
 
 wire_type! {
+    /// Limits, occupancy, and parseable predicate tags for the rule table.
+    pub struct LightingRuleStatus {
+        pub revision: u32,
+        pub capacity: u16,
+        pub rule_len: u16,
+        pub page_bytes: u16,
+        pub max_predicates: u8,
+        pub predicates: u64,
+    }
+}
+
+wire_type! { @owned
+    /// A rule-indexed page of concatenated postcard-encoded [`LightingRule`]s.
+    pub struct LightingRulesPage {
+        pub revision: u32,
+        pub total_count: u16,
+        pub offset: u16,
+        pub count: u8,
+        pub rules: Vec<u8, LIGHTING_RULE_PAGE_BYTES>,
+    }
+}
+
+impl MaxSize for LightingRulesPage {
+    const POSTCARD_MAX_SIZE: usize = u32::POSTCARD_MAX_SIZE
+        + 2 * u16::POSTCARD_MAX_SIZE
+        + u8::POSTCARD_MAX_SIZE
+        + crate::heapless_vec_max_size::<u8, LIGHTING_RULE_PAGE_BYTES>();
+}
+
+wire_type! {
     pub struct LightingRuntimeConditionalScenePageRequest {
         pub revision: u32,
         pub offset: u16,
@@ -1114,6 +1495,23 @@ pub struct PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
     pub offset: u16,
     #[cfg_attr(feature = "wasm", tsify(type = "LightingAdvancedConditionalSceneCell[]"))]
     pub cells: Vec<LightingAdvancedConditionalSceneCell, LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE>,
+}
+
+wire_type! { @owned
+    /// A replacement chunk of concatenated postcard-encoded [`LightingRule`]s.
+    pub struct PutLightingRuleChunkRequest {
+        pub transaction_id: u32,
+        pub offset: u16,
+        pub count: u8,
+        pub rules: Vec<u8, LIGHTING_RULE_PAGE_BYTES>,
+    }
+}
+
+impl MaxSize for PutLightingRuleChunkRequest {
+    const POSTCARD_MAX_SIZE: usize = u32::POSTCARD_MAX_SIZE
+        + u16::POSTCARD_MAX_SIZE
+        + u8::POSTCARD_MAX_SIZE
+        + crate::heapless_vec_max_size::<u8, LIGHTING_RULE_PAGE_BYTES>();
 }
 
 impl MaxSize for PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
@@ -1439,6 +1837,8 @@ wire_type! {
         /// answers this node — retrying is pointless there and reasonable
         /// here.
         NodeUnavailable { node: LightingNodeId },
+        /// A rule names a predicate tag this firmware cannot parse.
+        UnknownPredicate { tag: u8 },
     }
 }
 
@@ -1472,6 +1872,8 @@ pub type LightingRuntimeConditionalScenesPageResult = LightingResult<LightingRun
 pub type LightingAdvancedRuntimeConditionalScenesPageResult =
     LightingResult<LightingAdvancedRuntimeConditionalScenesPage>;
 pub type LightingRuntimeConditionalSceneTransactionResult = LightingResult<LightingRuntimeConditionalSceneTransaction>;
+pub type LightingRuleStatusResult = LightingResult<LightingRuleStatus>;
+pub type LightingRulesPageResult = LightingResult<LightingRulesPage>;
 pub type LightingFramePageResult = LightingResult<LightingFramePage>;
 pub type LightingReplicaStatusResult = LightingResult<LightingReplicaStatus>;
 pub type LightingUnitResult = LightingResult<()>;
@@ -1545,6 +1947,9 @@ const _: () = {
     );
     assert_endpoint_fits!(CommitLightingRuntimeConditionalSceneReplaceRequest, LightingStateResult);
     assert_endpoint_fits!(AbortLightingRuntimeConditionalSceneReplaceRequest, LightingUnitResult);
+    assert_endpoint_fits!((), LightingRuleStatusResult);
+    assert_endpoint_fits!(LightingRuntimeConditionalScenePageRequest, LightingRulesPageResult);
+    assert_endpoint_fits!(PutLightingRuleChunkRequest, LightingUnitResult);
     assert_endpoint_fits!(SetLightingSceneCellRequest, LightingStateResult);
     assert_endpoint_fits!(UnsetLightingSceneCellRequest, LightingStateResult);
     assert_endpoint_fits!(SetLightingLayerPolicyRequest, LightingStateResult);
@@ -1960,7 +2365,7 @@ mod tests {
         round_trip(&cell);
         assert_eq!(
             LightingExtendedConditionalSceneCell::try_from(cell),
-            Err(LightingError::InvalidRequest)
+            Err(LightingError::Unsupported)
         );
         let compatible = LightingAdvancedConditionalSceneCell {
             layers: None,
@@ -1991,6 +2396,84 @@ mod tests {
         round_trip(&request);
         assert_max_size_bound(&request);
         assert!(PutLightingAdvancedRuntimeConditionalSceneChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+    }
+
+    #[cfg(feature = "host")]
+    #[test]
+    fn lighting_rule_predicates_round_trip_and_preserve_unknown_tags() {
+        let unknown_body = Vec::from_slice(&[0xaa, 0xbb]).unwrap();
+        let predicates = [
+            LightingRulePredicate::Layer(LightingLayerCondition { layer: 2, active: true }),
+            LightingRulePredicate::Maintenance(LightingMaintenanceCondition { unlocked: false }),
+            LightingRulePredicate::Unknown {
+                tag: 63,
+                body: unknown_body.clone(),
+            },
+        ];
+        let rule = LightingRule::from_predicates(
+            LightingLedId(42),
+            LightingEffect::Solid {
+                color: LightingRgb8 { r: 1, g: 2, b: 3 },
+            },
+            &predicates,
+        )
+        .unwrap();
+        assert_eq!(rule.predicates().unwrap().as_slice(), predicates.as_slice());
+        assert_eq!(rule.predicates[2].body, unknown_body);
+
+        let mut duplicate = rule.clone();
+        duplicate.predicates[1].tag = LIGHTING_PREDICATE_LAYER;
+        assert_eq!(duplicate.validate(), Err(LightingError::InvalidRequest));
+
+        let mut trailing = rule.predicates[0].clone();
+        trailing.body.push(0).unwrap();
+        assert_eq!(
+            LightingRulePredicate::decode(trailing),
+            Err(LightingError::InvalidRequest)
+        );
+    }
+
+    #[test]
+    fn maximum_lighting_rule_and_page_respect_wire_bounds() {
+        let predicate = LightingPredicate {
+            tag: 1,
+            body: Vec::from_slice(&[u8::MAX; LIGHTING_PREDICATE_BODY_MAX]).unwrap(),
+        };
+        let mut predicates = Vec::new();
+        for tag in 1..=LIGHTING_RULE_MAX_PREDICATES as u8 {
+            predicates
+                .push(LightingPredicate {
+                    tag,
+                    ..predicate.clone()
+                })
+                .unwrap();
+        }
+        let rule = LightingRule {
+            led_id: LightingLedId(u16::MAX),
+            effect: LightingEffect::Blink {
+                color: LightingRgb8 {
+                    r: u8::MAX,
+                    g: u8::MAX,
+                    b: u8::MAX,
+                },
+                period_ms: u32::MAX,
+                phase_ms: u32::MAX,
+                duty: u8::MAX,
+            },
+            predicates,
+        };
+        round_trip(&rule);
+        assert_max_size_bound(&rule);
+
+        let page = LightingRulesPage {
+            revision: u32::MAX,
+            total_count: u16::MAX,
+            offset: u16::MAX,
+            count: u8::MAX,
+            rules: Vec::from_slice(&[u8::MAX; LIGHTING_RULE_PAGE_BYTES]).unwrap(),
+        };
+        round_trip(&page);
+        assert_max_size_bound(&page);
     }
 
     #[test]
@@ -2200,7 +2683,7 @@ impl TryFrom<LightingAdvancedConditionalSceneCell> for LightingExtendedCondition
     type Error = LightingError;
     fn try_from(value: LightingAdvancedConditionalSceneCell) -> LightingResult<Self> {
         if value.layers.is_some() || value.indicators.is_some() {
-            return Err(LightingError::InvalidRequest);
+            return Err(LightingError::Unsupported);
         }
         Ok(Self {
             cell: value.cell,
