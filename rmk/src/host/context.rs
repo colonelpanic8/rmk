@@ -16,7 +16,40 @@ use crate::event::KeyboardEventPos;
 use crate::keyboard::combo::Combo;
 use crate::keymap::KeyMap;
 #[cfg(feature = "storage")]
-use crate::storage::{StorageItem, store};
+use crate::storage::{self, StorageItem, store};
+
+/// How long a Rynk keymap write may wait for flash-queue room and its writes
+/// before the host hears `Busy`. Short enough to sit inside any host reply
+/// timeout; long enough that a host retrying on `Busy` polls a migrating store
+/// at a gentle rate instead of hammering it.
+#[cfg(feature = "storage")]
+const PERSIST_ROOM_WAIT: Duration = Duration::from_millis(500);
+#[cfg(feature = "storage")]
+const PERSIST_ROOM_POLL: Duration = Duration::from_millis(20);
+
+/// Whether `count` persist messages can enter a queue with `free` of
+/// `capacity` slots open without parking the sender.
+#[cfg(feature = "storage")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PersistRoom {
+    /// Every message fits right now.
+    Fits,
+    /// The queue is draining; ask again shortly.
+    Wait,
+    /// More messages than the queue holds at once: they can only stream in.
+    Oversize,
+}
+
+#[cfg(feature = "storage")]
+pub(crate) fn persist_room(count: usize, free: usize, capacity: usize) -> PersistRoom {
+    if count > capacity {
+        PersistRoom::Oversize
+    } else if count <= free {
+        PersistRoom::Fits
+    } else {
+        PersistRoom::Wait
+    }
+}
 
 /// Context shared between Vial and Rynk host services.
 pub(crate) struct KeyboardContext<'a> {
@@ -49,6 +82,39 @@ impl<'a> KeyboardContext<'a> {
     /// The opaque, compressed physical-layout blob served by `GetLayout`.
     pub fn layout_blob(&self) -> &'static [u8] {
         self.layout_blob
+    }
+
+    /// Run `persist`, which writes `count` items to flash, without parking the
+    /// caller on a busy store. `None` means the host should hear `Busy` and retry.
+    ///
+    /// The storage task drains its queue in order, and a single item can hold
+    /// it for tens of seconds while sequential-storage migrates a page through
+    /// radio-scheduled flash timeslots. A Rynk handler waiting on such a write
+    /// parks the session, and a parked session reads no requests, so the host's
+    /// USB write times out and the keyboard looks dead. So `persist` only
+    /// starts once the queue has room for all `count` items, and must land
+    /// within the same bound. A timeout can leave earlier items applied; the
+    /// host resends the whole page, which rewrites them unchanged. More items
+    /// than the queue holds can never fit at once and stream in unbounded, so
+    /// hosts that page by payload size alone still work.
+    pub async fn persist_bounded<T>(&self, count: usize, persist: impl Future<Output = T>) -> Option<T> {
+        #[cfg(feature = "storage")]
+        {
+            let deadline = embassy_time::Instant::now() + PERSIST_ROOM_WAIT;
+            loop {
+                match persist_room(count, storage::free_capacity(), crate::FLASH_CHANNEL_SIZE) {
+                    PersistRoom::Fits => return embassy_time::with_deadline(deadline, persist).await.ok(),
+                    PersistRoom::Oversize => return Some(persist.await),
+                    PersistRoom::Wait if embassy_time::Instant::now() >= deadline => return None,
+                    PersistRoom::Wait => embassy_time::Timer::after(PERSIST_ROOM_POLL).await,
+                }
+            }
+        }
+        #[cfg(not(feature = "storage"))]
+        {
+            let _ = count;
+            Some(persist.await)
+        }
     }
 
     pub async fn set_action(&self, layer: u8, row: u8, col: u8, action: KeyAction) -> Result<(), ()> {
@@ -329,5 +395,18 @@ impl<'a> KeyboardContext<'a> {
     #[cfg(feature = "host_lock")]
     pub fn read_matrix_state(&self, target: &mut [u8]) {
         self.keymap.read_matrix_state(target);
+    }
+}
+
+#[cfg(all(test, feature = "storage"))]
+mod tests {
+    use super::{PersistRoom, persist_room};
+
+    #[test]
+    fn persist_room_boundaries() {
+        assert_eq!(persist_room(4, 4, 4), PersistRoom::Fits);
+        assert_eq!(persist_room(4, 3, 4), PersistRoom::Wait);
+        assert_eq!(persist_room(0, 0, 4), PersistRoom::Fits);
+        assert_eq!(persist_room(5, 4, 4), PersistRoom::Oversize);
     }
 }

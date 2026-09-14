@@ -93,6 +93,11 @@ pub(crate) fn read(key: StorageKey) -> impl Future<Output = Result<Option<Storag
     request(FlashOperationMessage::Read(key))
 }
 
+/// Free slots in the storage task's request queue.
+pub(crate) fn free_capacity() -> usize {
+    FLASH_CHANNEL.free_capacity()
+}
+
 /// Erase everything and reboot. Fire and forget.
 pub(crate) fn reset() -> impl Future<Output = ()> {
     FLASH_CHANNEL.send((FlashOperationMessage::Reset, None))
