@@ -84,10 +84,21 @@ pub struct LightingContext {
 /// trait. The compositor itself remains generic over the complete context.
 pub trait LightingContextProvider {
     fn lighting_context(&self) -> &LightingContext;
+
+    /// The same snapshot with its layer state replaced. The engine renders
+    /// through this while a released wake layer lingers, so every source
+    /// sees the lingering layer as still active.
+    fn with_layers(&self, layers: LayerState) -> Self
+    where
+        Self: Sized;
 }
 
 impl LightingContextProvider for LightingContext {
     fn lighting_context(&self) -> &LightingContext {
         self
+    }
+
+    fn with_layers(&self, layers: LayerState) -> Self {
+        Self { layers, ..*self }
     }
 }
