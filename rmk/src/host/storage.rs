@@ -142,6 +142,9 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         *item = morse;
                     }
                 }
+                (StorageKey::UnicodeMode, StorageData::UnicodeMode(mode)) => {
+                    behavior.unicode.mode = mode;
+                }
                 _ => {}
             }
 
