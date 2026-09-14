@@ -57,6 +57,12 @@ impl Crc32 {
     }
 }
 
+impl Default for Crc32 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Compute the CRC-32 of `data` in one shot.
 ///
 /// Equivalent to:
