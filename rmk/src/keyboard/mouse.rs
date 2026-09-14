@@ -10,7 +10,7 @@ use embassy_time::{Duration, Instant};
 use rmk_types::keycode::HidKeyCode;
 use usbd_hid::descriptor::MouseReport;
 
-use crate::config::MouseKeyConfig;
+use crate::config::{MouseKeyConfig, MouseLayerScaleConfig};
 
 /// Result of processing a mouse key event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +145,10 @@ pub(crate) struct MouseState {
     accel: u8,
     movement: DirectionState,
     wheel: DirectionState,
+    move_scale: [u16; 2],
+    scroll_scale: [u16; 2],
+    move_remainder: [i32; 2],
+    scroll_remainder: [i32; 2],
 }
 
 impl Default for MouseState {
@@ -166,6 +170,10 @@ impl MouseState {
             accel: 0,
             movement: DirectionState::default(),
             wheel: DirectionState::default(),
+            move_scale: [1, 1],
+            scroll_scale: [1, 1],
+            move_remainder: [0; 2],
+            scroll_remainder: [0; 2],
         }
     }
 
@@ -301,6 +309,33 @@ impl MouseState {
             r.pan = p;
         }
         r
+    }
+
+    pub fn scale_report(&mut self, mut report: MouseReport, config: Option<MouseLayerScaleConfig>) -> MouseReport {
+        let (move_scale, scroll_scale) = config
+            .map(|config| (config.move_scale, config.scroll_scale))
+            .unwrap_or(([1, 1], [1, 1]));
+        if self.move_scale != move_scale {
+            self.move_scale = move_scale;
+            self.move_remainder = [0; 2];
+        }
+        if self.scroll_scale != scroll_scale {
+            self.scroll_scale = scroll_scale;
+            self.scroll_remainder = [0; 2];
+        }
+
+        report.x = Self::scale_axis(report.x, move_scale, &mut self.move_remainder[0]);
+        report.y = Self::scale_axis(report.y, move_scale, &mut self.move_remainder[1]);
+        report.pan = Self::scale_axis(report.pan, scroll_scale, &mut self.scroll_remainder[0]);
+        report.wheel = Self::scale_axis(report.wheel, scroll_scale, &mut self.scroll_remainder[1]);
+        report
+    }
+
+    fn scale_axis(value: i8, [numerator, denominator]: [u16; 2], remainder: &mut i32) -> i8 {
+        let denominator = i32::from(denominator.max(1));
+        let scaled = i32::from(value) * i32::from(numerator) + *remainder;
+        *remainder = scaled % denominator;
+        (scaled / denominator).clamp(i8::MIN as i32, i8::MAX as i32) as i8
     }
 
     /// Two-step speed calculation:
