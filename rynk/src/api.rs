@@ -1858,6 +1858,7 @@ impl Client {
         expected_revision: u32,
         rules: &[LightingRule],
     ) -> Result<LightingState, RynkHostError> {
+        let status = self.get_lighting_rule_status().await?;
         let rule_count = u16::try_from(rules.len()).map_err(|_| RynkHostError::Encode(Cmd::PutLightingRuleChunk))?;
         let mut pages: Vec<(u16, u8, heapless::Vec<u8, LIGHTING_RULE_PAGE_BYTES>)> = Vec::new();
         let mut offset = 0u16;
@@ -1865,6 +1866,13 @@ impl Client {
         let mut bytes = heapless::Vec::new();
         for rule in rules {
             rule.validate().map_err(RynkHostError::LightingRejected)?;
+            for predicate in &rule.predicates {
+                if predicate.tag >= u64::BITS as u8 || status.predicates & (1_u64 << predicate.tag) == 0 {
+                    return Err(RynkHostError::LightingRejected(
+                        rmk_types::protocol::rynk::LightingError::UnknownPredicate { tag: predicate.tag },
+                    ));
+                }
+            }
             let encoded = postcard::to_allocvec(rule).map_err(|_| RynkHostError::Encode(Cmd::PutLightingRuleChunk))?;
             if encoded.len() > LIGHTING_RULE_PAGE_BYTES {
                 return Err(RynkHostError::Encode(Cmd::PutLightingRuleChunk));

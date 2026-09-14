@@ -6,8 +6,9 @@ use rmk_types::action::KeyAction;
 use rmk_types::battery::BatteryStatus;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::protocol::rynk::{
-    GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, PeripheralStatus, ProtocolVersion,
-    SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest,
+    GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, LIGHTING_RULE_PAGE_BYTES, LightingEffect,
+    LightingError, LightingLedId, LightingPredicate, LightingRgb8, LightingRule, LightingRuleStatus, LightingRulesPage,
+    PeripheralStatus, ProtocolVersion, SetComboBulkRequest, SetKeymapBulkRequest, SetMorseBulkRequest,
 };
 use tokio::time::timeout;
 
@@ -607,6 +608,101 @@ async fn read_all_keymap_concatenates_pages() {
     drive(&mut driver, &client, async {
         assert_eq!(client.read_all_keymap().await.unwrap(), keymap_page(0, 10).actions);
         // The distinct trailing command detects an unexpected fifth fetch.
+        assert_eq!(client.get_wpm().await.unwrap(), 42);
+    })
+    .await;
+}
+
+fn unknown_lighting_rule(tag: u8) -> LightingRule {
+    let mut predicates = heapless::Vec::new();
+    predicates
+        .push(LightingPredicate {
+            tag,
+            body: heapless::Vec::from_slice(&[0xaa, 0xbb]).unwrap(),
+        })
+        .unwrap();
+    LightingRule {
+        led_id: LightingLedId(7),
+        effect: LightingEffect::Solid {
+            color: LightingRgb8 { r: 1, g: 2, b: 3 },
+        },
+        predicates,
+    }
+}
+
+#[tokio::test]
+async fn read_all_lighting_rules_preserves_unknown_predicates() {
+    let rule = unknown_lighting_rule(63);
+    let encoded = postcard::to_allocvec(&rule).unwrap();
+    let mut bytes = heapless::Vec::<u8, LIGHTING_RULE_PAGE_BYTES>::new();
+    bytes.extend_from_slice(&encoded).unwrap();
+    let status = LightingRuleStatus {
+        revision: 9,
+        capacity: 100,
+        rule_len: 1,
+        page_bytes: LIGHTING_RULE_PAGE_BYTES as u16,
+        max_predicates: 8,
+        predicates: 1_u64 << 63,
+    };
+    let page = LightingRulesPage {
+        revision: 9,
+        total_count: 1,
+        offset: 0,
+        count: 1,
+        rules: bytes,
+    };
+    let mut capabilities = caps();
+    capabilities.lighting_enabled = true;
+    let (client, mut driver) = connect_session(
+        handshake_steps(capabilities),
+        vec![
+            Step::AwaitWrites(3),
+            Step::Chunk(reply(Cmd::GetLightingRuleStatus, 3, Ok::<_, LightingError>(status))),
+            Step::AwaitWrites(4),
+            Step::Chunk(reply(Cmd::GetLightingRules, 4, Ok::<_, LightingError>(page))),
+            Step::Hang,
+        ],
+    )
+    .await;
+    let (revision, rules) = drive(&mut driver, &client, client.read_all_lighting_rules())
+        .await
+        .unwrap();
+    assert_eq!(revision, 9);
+    assert_eq!(rules, vec![rule]);
+}
+
+#[tokio::test]
+async fn replace_all_lighting_rules_rejects_unsupported_tags_before_begin() {
+    let status = LightingRuleStatus {
+        revision: 9,
+        capacity: 100,
+        rule_len: 0,
+        page_bytes: LIGHTING_RULE_PAGE_BYTES as u16,
+        max_predicates: 8,
+        predicates: 0,
+    };
+    let mut capabilities = caps();
+    capabilities.lighting_enabled = true;
+    let (client, mut driver) = connect_session(
+        handshake_steps(capabilities),
+        vec![
+            Step::AwaitWrites(3),
+            Step::Chunk(reply(Cmd::GetLightingRuleStatus, 3, Ok::<_, LightingError>(status))),
+            Step::AwaitWrites(4),
+            Step::Chunk(reply(Cmd::GetWpm, 4, 42u16)),
+            Step::Hang,
+        ],
+    )
+    .await;
+    drive(&mut driver, &client, async {
+        let error = client
+            .replace_all_lighting_rules(9, &[unknown_lighting_rule(63)])
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            RynkHostError::LightingRejected(LightingError::UnknownPredicate { tag: 63 })
+        ));
         assert_eq!(client.get_wpm().await.unwrap(), 42);
     })
     .await;
