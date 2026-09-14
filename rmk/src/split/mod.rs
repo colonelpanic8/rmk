@@ -76,14 +76,31 @@ pub mod ble;
 pub mod central;
 /// Common abstraction layer of split driver
 pub(crate) mod driver;
+#[cfg(feature = "_nrf_ble")]
+pub mod nrf;
 pub mod peripheral;
 #[cfg(feature = "rp2040")]
 pub mod rp;
-#[cfg(not(feature = "_ble"))]
+pub mod selector;
 pub mod serial;
 
-/// Maximum size of a split message
-pub const SPLIT_MESSAGE_MAX_SIZE: usize = SplitMessage::POSTCARD_MAX_SIZE + 4;
+/// Maximum size of a split message frame on the wire: link header, postcard
+/// payload, 4-byte CRC-32, COBS overhead, and the sentinel byte.
+pub const SPLIT_MESSAGE_MAX_SIZE: usize = SplitMessage::POSTCARD_MAX_SIZE + 16;
+
+/// Volatile split-transport force from the application (one of
+/// `selector::FORCE_*`). The force is desired state replicated to the
+/// peripheral: each connected peripheral's manager sends it and the central
+/// applies it locally only once the peripheral acknowledges that generation,
+/// so both halves rendezvous on the forced transport. A newer request
+/// supersedes an unacknowledged one. With no peripheral connected it applies
+/// locally at once, so a stranded central can still be steered.
+pub fn request_transport_force(mode: u8) {
+    selector::request_force(mode);
+    if !driver::any_peripheral_connected() {
+        selector::set_forced(mode);
+    }
+}
 
 /// The rectangular region of the central's keymap covered by one split
 /// peripheral: its matrix size, and where it sits.
@@ -171,6 +188,20 @@ pub(crate) enum SplitMessage {
     /// Complete central layer state, including lower active layers hidden by
     /// a higher effective layer.
     LayerState(SplitLayerState),
+
+    /// Half-duplex central request for one queued peripheral message.
+    HalfDuplexPoll,
+    /// Half-duplex response when the peripheral has nothing queued.
+    HalfDuplexIdle,
+
+    /// Central → Peripheral: desired split-transport force
+    /// (`selector::FORCE_*`) and its generation. The peripheral applies it
+    /// and answers with [`Self::TransportOverrideAck`]; the central applies
+    /// the same force to itself only on that acknowledgement, so both halves
+    /// rendezvous on the forced transport.
+    TransportOverride { generation: u8, mode: u8 },
+    /// Peripheral → Central: the force generation the peripheral applied.
+    TransportOverrideAck(u8),
 }
 
 // -----------------------------------------------------------------------
