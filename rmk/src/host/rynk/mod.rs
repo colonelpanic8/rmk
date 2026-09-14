@@ -191,7 +191,6 @@ impl<'a> RynkService<'a> {
             | Cmd::SetBehaviorOptions
             | Cmd::SetAutoMouseLayerConfigs
             | Cmd::SetPointingConfig
-            | Cmd::SetComboDefinition
             | Cmd::SetComboDefinitionBulk => Some(true),
             #[cfg(feature = "lighting")]
             Cmd::SetLightingState
