@@ -2,7 +2,7 @@ use trouble_host::prelude::*;
 use usbd_hid::descriptor::{AsInputReport, SerializedDescriptor};
 
 use super::battery_service::BatteryService;
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 use super::battery_service::PeripheralBatteryServices;
 use super::device_info::DeviceConfigurationService;
 #[cfg(all(feature = "dongle", feature = "host"))]
@@ -27,7 +27,7 @@ use rmk_types::protocol::rynk::{
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
-    #[cfg(feature = "split")]
+    #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
     pub(crate) peripheral_battery_services: PeripheralBatteryServices,
     pub(crate) hid_service: HidService,
     #[cfg(feature = "vial")]
