@@ -16,7 +16,8 @@ pub use lighting::{
     LightingReplicationStatus, PeripheralReplicaStatus, RYNK_LIGHTING_TRANSACTION_CAPACITY, RemoteFrame,
     RemoteFramePort, RemoteFrameRequest, ReplicaDigests, ReplicationHealth, ReplicationMachineState,
     RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox, RynkLightingReadback,
-    StandardRynkLightingAdapter, install_lighting_runtime_conditional_scenes, install_lighting_scenes,
+    StandardRynkLightingAdapter, install_lighting_rule, install_lighting_runtime_conditional_scenes,
+    install_lighting_scenes,
 };
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::constants::RYNK_BUFFER_SIZE;
@@ -204,7 +205,11 @@ impl<'a> RynkService<'a> {
             | Cmd::BeginLightingAdvancedRuntimeConditionalSceneReplace
             | Cmd::PutLightingAdvancedRuntimeConditionalSceneChunk
             | Cmd::CommitLightingAdvancedRuntimeConditionalSceneReplace
-            | Cmd::AbortLightingAdvancedRuntimeConditionalSceneReplace => self.lock_config.write_requires_unlock,
+            | Cmd::AbortLightingAdvancedRuntimeConditionalSceneReplace
+            | Cmd::BeginLightingRuleReplace
+            | Cmd::PutLightingRuleChunk
+            | Cmd::CommitLightingRuleReplace
+            | Cmd::AbortLightingRuleReplace => self.lock_config.write_requires_unlock,
             _ => false,
         }
     }
@@ -404,6 +409,18 @@ impl<'a> RynkService<'a> {
             Cmd::GetLightingFrame => serve::<command::GetLightingFrame, _>(self, msg).await,
             #[cfg(feature = "lighting")]
             Cmd::GetLightingReplicaStatus => serve::<command::GetLightingReplicaStatus, _>(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingRuleStatus => serve::<command::GetLightingRuleStatus, _>(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingRules => serve::<command::GetLightingRules, _>(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::BeginLightingRuleReplace => serve::<command::BeginLightingRuleReplace, _>(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::PutLightingRuleChunk => serve::<command::PutLightingRuleChunk, _>(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::CommitLightingRuleReplace => serve::<command::CommitLightingRuleReplace, _>(self, msg).await,
+            #[cfg(feature = "lighting")]
+            Cmd::AbortLightingRuleReplace => serve::<command::AbortLightingRuleReplace, _>(self, msg).await,
             #[cfg(feature = "lighting")]
             Cmd::BeginLightingExtendedRuntimeConditionalSceneReplace => {
                 serve::<command::BeginLightingExtendedRuntimeConditionalSceneReplace, _>(self, msg).await
