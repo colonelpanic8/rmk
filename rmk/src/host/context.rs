@@ -18,6 +18,37 @@ use crate::keymap::KeyMap;
 #[cfg(feature = "storage")]
 use crate::{channel::FLASH_CHANNEL, storage::FlashOperationMessage};
 
+/// How long a Rynk keymap write waits for flash-queue room before the host
+/// hears `Busy`. Short enough to sit inside any host reply timeout; long
+/// enough that a host retrying on `Busy` polls a migrating store at a gentle
+/// rate instead of hammering it.
+#[cfg(feature = "storage")]
+const PERSIST_ROOM_WAIT: Duration = Duration::from_millis(500);
+#[cfg(feature = "storage")]
+const PERSIST_ROOM_POLL: Duration = Duration::from_millis(20);
+
+/// Whether `count` persist messages can enter a queue with `free` of
+/// `capacity` slots open without parking the sender.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PersistRoom {
+    /// Every message fits right now.
+    Fits,
+    /// The queue is draining; ask again shortly.
+    Wait,
+    /// More messages than the queue holds at once: they can only stream in.
+    Oversize,
+}
+
+pub(crate) fn persist_room(count: usize, free: usize, capacity: usize) -> PersistRoom {
+    if count > capacity {
+        PersistRoom::Oversize
+    } else if count <= free {
+        PersistRoom::Fits
+    } else {
+        PersistRoom::Wait
+    }
+}
+
 /// Context shared between Vial and Rynk host services.
 pub(crate) struct KeyboardContext<'a> {
     pub keymap: &'a KeyMap<'a>,
@@ -49,6 +80,36 @@ impl<'a> KeyboardContext<'a> {
     /// The opaque, compressed physical-layout blob served by `GetLayout`.
     pub fn layout_blob(&self) -> &'static [u8] {
         self.layout_blob
+    }
+
+    /// Wait, briefly, until the flash queue has room for `count` persists.
+    ///
+    /// The storage task drains the queue in order, and a single item can hold
+    /// it for tens of seconds while sequential-storage migrates a page through
+    /// radio-scheduled flash timeslots. A `set_action` past the free slots then
+    /// parks the Rynk session on the channel, and a parked session reads no
+    /// requests, so the host's USB write times out and the keyboard looks
+    /// dead. `Err` means the host should hear `Busy` and retry; nothing has
+    /// been applied. A page larger than the whole queue can never fit at once
+    /// and keeps streaming in as before, so hosts that page by payload size
+    /// alone still work.
+    pub async fn wait_for_persist_room(&self, count: usize) -> Result<(), ()> {
+        #[cfg(feature = "storage")]
+        {
+            let deadline = embassy_time::Instant::now() + PERSIST_ROOM_WAIT;
+            loop {
+                match persist_room(count, FLASH_CHANNEL.free_capacity(), crate::FLASH_CHANNEL_SIZE) {
+                    PersistRoom::Fits | PersistRoom::Oversize => return Ok(()),
+                    PersistRoom::Wait if embassy_time::Instant::now() >= deadline => return Err(()),
+                    PersistRoom::Wait => embassy_time::Timer::after(PERSIST_ROOM_POLL).await,
+                }
+            }
+        }
+        #[cfg(not(feature = "storage"))]
+        {
+            let _ = count;
+            Ok(())
+        }
     }
 
     pub async fn set_action(&self, layer: u8, row: u8, col: u8, action: KeyAction) {
@@ -380,5 +441,18 @@ impl<'a> KeyboardContext<'a> {
     #[cfg(feature = "host_lock")]
     pub fn read_matrix_state(&self, target: &mut [u8]) {
         self.keymap.read_matrix_state(target);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PersistRoom, persist_room};
+
+    #[test]
+    fn persist_room_boundaries() {
+        assert_eq!(persist_room(4, 4, 4), PersistRoom::Fits);
+        assert_eq!(persist_room(4, 3, 4), PersistRoom::Wait);
+        assert_eq!(persist_room(0, 0, 4), PersistRoom::Fits);
+        assert_eq!(persist_room(5, 4, 4), PersistRoom::Oversize);
     }
 }
