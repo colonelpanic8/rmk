@@ -28,6 +28,8 @@ use rynk::{Client, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 /// single legal frame fits without the writer blocking on an un-polled reader.
 type Link = Pipe<NoopRawMutex, RYNK_BUFFER_SIZE>;
 
+static MAINTENANCE_STATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The host side of the two pipes as a device — reads device→host, writes
 /// host→device — so the test connects through [`RynkDevice::connect`]. `&Pipe`
 /// implements the embedded-io traits itself; both sides use it directly.
@@ -61,12 +63,15 @@ async fn with_session(device: DuplexDevice<'_>, script: impl AsyncFnOnce(&Client
 
 #[tokio::test(flavor = "current_thread")]
 async fn client_against_run_session() {
+    let _state_guard = MAINTENANCE_STATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     // Firmware side.
     let mut behavior = BehaviorConfig::default();
     let positional: PositionalConfig<2, 2> = PositionalConfig::default();
     let mut data: KeymapData<2, 2, 2, 0> = KeymapData::new([[[KeyAction::No; 2]; 2]; 2]);
     let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-    // Keep the lock gate open; lock behavior is covered elsewhere.
+    // Keep the legacy lock configuration permissive; maintenance is enabled by default.
     let mut config: RmkConfig<'static> = RmkConfig::default();
     config.lock_config.insecure = true;
 
@@ -210,24 +215,25 @@ async fn client_against_run_session() {
     }
 }
 
-/// The lock gate end to end: a locked device refuses a gated command with
-/// `RynkError::Locked` flattened to [`RynkHostError::Rejected`], advertises its
-/// challenge over the wire, and serves the three lock endpoints. The key-hold →
-/// unlock transition needs matrix simulation and is covered by the firmware
-/// `host::lock` / `host::rynk` tests.
+/// The maintenance gate end to end: a disabled device refuses a gated command,
+/// reports the live/default state, and leaves the legacy lock endpoints inert.
 #[tokio::test(flavor = "current_thread")]
-async fn lock_gate_rejects_and_reports() {
+async fn maintenance_gate_rejects_and_reports() {
+    let _state_guard = MAINTENANCE_STATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut behavior = BehaviorConfig::default();
     let positional: PositionalConfig<2, 2> = PositionalConfig::default();
     let mut data: KeymapData<2, 2, 1, 0> = KeymapData::new([[[KeyAction::No; 2]; 2]; 1]);
     let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
 
-    // Challenge configured but never held (the test can't drive the matrix), so
-    // the device stays locked throughout.
+    // Legacy unlock keys remain accepted in configuration but no longer
+    // authorize Rynk operations.
     const UNLOCK_KEYS: &[(u8, u8)] = &[(0, 0)];
     let mut config: RmkConfig<'static> = RmkConfig::default();
     config.lock_config.unlock_keys = UNLOCK_KEYS;
     let service = RynkService::new(&keymap, &config);
+    rmk::state::set_maintenance_mode(false);
 
     let h2d = Link::new();
     let d2h = Link::new();
@@ -236,27 +242,26 @@ async fn lock_gate_rejects_and_reports() {
     let device = DuplexDevice { rx: &d2h, tx: &h2d };
 
     let script = with_session(device, async |client| {
-        // GetLockStatus is open and advertises the challenge across the wire
-        // (the `heapless::Vec<(u8,u8)>` round-trips intact).
-        let status = client.get_lock_status().await.unwrap();
-        assert!(status.locked);
-        assert!(!status.unlocking);
-        assert_eq!(status.key_positions.as_slice(), &[(0, 0)]);
+        let maintenance = client.get_maintenance_mode().await.unwrap();
+        assert!(!maintenance.enabled);
+        assert!(maintenance.default_enabled);
 
-        // A hard-locked command flattens `RynkError::Locked` to `Rejected` end to end.
+        let status = client.get_lock_status().await.unwrap();
+        assert!(!status.locked);
+        assert!(!status.unlocking);
+        assert!(status.key_positions.is_empty());
+
         let gated = client.get_matrix_state().await;
         assert!(
-            matches!(gated, Err(RynkHostError::Rejected(RynkError::Locked))),
-            "expected Rejected(Locked), got {gated:?}"
+            matches!(gated, Err(RynkHostError::Rejected(RynkError::NotReady))),
+            "expected Rejected(NotReady), got {gated:?}"
         );
 
-        // Polling arms the attempt but cannot unlock without the configured key.
         let polled = client.unlock_poll().await.unwrap();
-        assert!(polled.locked);
-        assert!(polled.unlocking);
-        assert_eq!(polled.remaining_keys, 1);
+        assert!(!polled.locked);
+        assert!(!polled.unlocking);
+        assert_eq!(polled.remaining_keys, 0);
 
-        // Lock is always dispatchable.
         client.lock().await.unwrap();
     });
 
@@ -268,6 +273,7 @@ async fn lock_gate_rejects_and_reports() {
         Either::First(_) => panic!("run_session ended before the client script finished"),
         Either::Second(()) => {}
     }
+    rmk::state::set_maintenance_mode(true);
 }
 
 /// A silent peer must keep `connect` pending: the client is runtime-free and
