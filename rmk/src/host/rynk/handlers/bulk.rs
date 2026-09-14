@@ -18,6 +18,11 @@ pub(super) fn bulk_page(start: usize, cap: usize, total: usize) -> Result<core::
     Ok(start..(start + cap).min(total))
 }
 
+/// The element count a bulk write declares, without consuming it.
+pub(super) fn bulk_count(cursor: &[u8]) -> Result<usize, RynkError> {
+    take_element::<u16>(&mut { cursor }).map(usize::from)
+}
+
 /// Decode a bulk write's element `Vec` (postcard: varint count + elements)
 /// as `(flat_index, element)` pairs, validating the whole payload up front
 /// so malformed input cannot cause a partial write.
