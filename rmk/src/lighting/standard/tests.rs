@@ -178,6 +178,8 @@ fn context(layer: u8) -> LightingContext {
         local_powered: false,
         connection: Default::default(),
         bonded_slots: 0,
+        maintenance_unlocked: false,
+        split_transport: Default::default(),
     }
 }
 
@@ -1808,6 +1810,8 @@ fn runtime_conditional_replace_preserves_order_and_output_mode_is_revision_check
                 effects: None,
                 layers: None,
                 indicators: None,
+                maintenance: None,
+                split_transport: None,
             },
             slot: LedSlot(1),
             effect: BuiltinEffect::Solid { color: RED },
@@ -1823,6 +1827,8 @@ fn runtime_conditional_replace_preserves_order_and_output_mode_is_revision_check
                 effects: None,
                 layers: None,
                 indicators: None,
+                maintenance: None,
+                split_transport: None,
             },
             slot: LedSlot(1),
             effect: BuiltinEffect::Solid { color: GREEN },
@@ -2094,6 +2100,8 @@ fn conditional_rules_share_styles_without_losing_order_or_conditions() {
                 effects: None,
                 layers: None,
                 indicators: None,
+                maintenance: None,
+                split_transport: None,
             },
             slot: LedSlot(3),
             effect,
@@ -2107,6 +2115,8 @@ fn conditional_rules_share_styles_without_losing_order_or_conditions() {
                 effects: None,
                 layers: None,
                 indicators: None,
+                maintenance: None,
+                split_transport: None,
             },
             slot: LedSlot(3),
             effect,
@@ -2348,6 +2358,8 @@ fn output_mode_conditions_select_between_runtime_rules() {
             effects: None,
             layers: None,
             indicators: None,
+            maintenance: None,
+            split_transport: None,
         },
         slot: LedSlot(0),
         effect: BuiltinEffect::Solid { color },
@@ -2376,6 +2388,8 @@ fn output_mode_conditions_select_between_runtime_rules() {
         local_powered: true,
         connection: Default::default(),
         bonded_slots: 0,
+        maintenance_unlocked: false,
+        split_transport: Default::default(),
     };
     let mut frame = LogicalFrame::new(Rgb8::BLACK);
     let render = |engine: &mut ConditionalEngine, frame: &mut LogicalFrame<Rgb8, 2>| {
@@ -2437,6 +2451,8 @@ fn compiled_output_mode_conditions_observe_the_engine_policy() {
                 effects: None,
                 layers: None,
                 indicators: None,
+                maintenance: None,
+                split_transport: None,
             },
             slot: LedSlot(0),
             effect: BuiltinEffect::Solid { color },
@@ -2464,6 +2480,8 @@ fn compiled_output_mode_conditions_observe_the_engine_policy() {
         local_powered: true,
         connection: Default::default(),
         bonded_slots: 0,
+        maintenance_unlocked: false,
+        split_transport: Default::default(),
     };
     let mut frame = LogicalFrame::new(Rgb8::BLACK);
     let render = |engine: &mut CompiledEngine, frame: &mut LogicalFrame<Rgb8, 2>| {
@@ -2584,6 +2602,8 @@ fn effects_conditions_follow_the_extension_value() {
             effects: Some(EffectsCondition { enabled }),
             layers: None,
             indicators: None,
+            maintenance: None,
+            split_transport: None,
         },
         slot: LedSlot(0),
         effect: BuiltinEffect::Solid { color },
@@ -2620,6 +2640,8 @@ fn effects_conditions_follow_the_extension_value() {
         local_powered: true,
         connection: Default::default(),
         bonded_slots: 0,
+        maintenance_unlocked: false,
+        split_transport: Default::default(),
     };
     let mut frame = LogicalFrame::new(Rgb8::BLACK);
     let render = |engine: &mut ConditionalEngine, frame: &mut LogicalFrame<Rgb8, 2>| {
@@ -2682,6 +2704,8 @@ fn runtime_conditional_cells_outrank_layer_scenes_and_compiled_conditional_rules
             effects: None,
             layers: None,
             indicators: None,
+            maintenance: None,
+            split_transport: None,
         },
         slot: LedSlot(0),
         effect: BuiltinEffect::Solid { color: GREEN },
@@ -2735,6 +2759,8 @@ fn runtime_conditional_cells_outrank_layer_scenes_and_compiled_conditional_rules
                 effects: None,
                 layers: None,
                 indicators: None,
+                maintenance: None,
+                split_transport: None,
             },
             slot: LedSlot(0),
             effect: BuiltinEffect::Solid { color: BLUE },
