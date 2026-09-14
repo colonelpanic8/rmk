@@ -20,7 +20,7 @@ use crate::action::{Action, EncoderAction, KeyAction, KeyboardAction, LightActio
 use crate::auto_mouse::AutoMouseLayerConfig;
 use crate::battery::{BatteryStatus, ChargeState};
 use crate::ble::{BleState, BleStatus};
-use crate::combo::Combo;
+use crate::combo::{Combo, ComboDefinition, MatrixPosition, PositionCombo};
 use crate::connection::{ConnectionStatus, ConnectionType, UsbState};
 use crate::fork::{Fork, StateBits};
 use crate::keycode::{ConsumerKey, HidKeyCode, KeyCode, SpecialKey, SystemControlKey};
@@ -216,6 +216,7 @@ struct Exemplars {
     connection: ConnectionStatus,
     state_bits: StateBits,
     combo: Combo,
+    combo_definition: ComboDefinition,
     fork: Fork,
     morse: Morse,
     hold_trigger_positions: MorseHoldTriggerPositions,
@@ -362,6 +363,11 @@ fn exemplars() -> Exemplars {
         KeyAction::Morse(1),
         Some(2),
     );
+    let combo_definition = ComboDefinition::Positions(PositionCombo::new(
+        [MatrixPosition { row: 3, col: 4 }, MatrixPosition { row: 5, col: 6 }],
+        KeyAction::Morse(1),
+        Some(2),
+    ));
     let fork = Fork::new(
         KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A))),
         KeyAction::No,
@@ -422,6 +428,7 @@ fn exemplars() -> Exemplars {
         connection,
         state_bits,
         combo,
+        combo_definition,
         fork,
         morse,
         hold_trigger_positions,
@@ -621,6 +628,10 @@ fn wire_values_locked() {
         ),
         ("EncoderAction{Morse(3),No}", encode(&ex.encoder)),
         ("Combo{[Single(A)],Morse(1),L2}", encode(&ex.combo)),
+        (
+            "ComboDefinition::Positions{[(3,4),(5,6)],Morse(1),L2}",
+            encode(&ex.combo_definition)
+        ),
         ("Fork{Single(A),No,Morse(2)}", encode(&ex.fork)),
         ("StateBits{LCtrl,Caps,B1}", encode(&ex.state_bits)),
         ("Morse{TAP->Key(A)}", encode(&ex.morse)),
@@ -714,6 +725,13 @@ fn wire_values_locked() {
             encode(&SetComboRequest {
                 index: 3,
                 config: ex.combo.clone()
+            })
+        ),
+        (
+            "SetComboDefinitionRequest{3,positions}",
+            encode(&SetComboDefinitionRequest {
+                index: 3,
+                definition: ex.combo_definition.clone()
             })
         ),
         (
@@ -1052,6 +1070,33 @@ fn wire_frames_locked() {
         (
             "SetCombo reply Ok(())",
             encode_frame(Cmd::SetCombo, SEQ, &Ok::<(), RynkError>(()))
+        ),
+        (
+            "GetComboDefinition request 3",
+            encode_frame(Cmd::GetComboDefinition, SEQ, &3u8)
+        ),
+        (
+            "GetComboDefinition reply Ok(Positions{[(3,4),(5,6)],Morse(1),L2})",
+            encode_frame(
+                Cmd::GetComboDefinition,
+                SEQ,
+                &Ok::<ComboDefinition, RynkError>(ex.combo_definition.clone())
+            ),
+        ),
+        (
+            "SetComboDefinition request SetComboDefinitionRequest{3,positions}",
+            encode_frame(
+                Cmd::SetComboDefinition,
+                SEQ,
+                &SetComboDefinitionRequest {
+                    index: 3,
+                    definition: ex.combo_definition.clone()
+                }
+            ),
+        ),
+        (
+            "SetComboDefinition reply Ok(())",
+            encode_frame(Cmd::SetComboDefinition, SEQ, &Ok::<(), RynkError>(()))
         ),
         // Morse (0x04xx).
         ("GetMorse request 0", encode_frame(Cmd::GetMorse, SEQ, &0u8)),

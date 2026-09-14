@@ -41,6 +41,7 @@ BuildInfo{my-firmware..}                                1f 6d 79 2d 66 69 72 6d 
 ChargeState::Charging                                   00
 ChargeState::Discharging                                01
 ChargeState::Unknown                                    02
+ComboDefinition::Positions{[(3,4),(5,6)],Morse(1),L2}   01 02 03 04 05 06 05 01 01 02
 Combo{[Single(A)],Morse(1),L2}                          01 02 01 00 04 05 01 01 02
 ConnectionStatus{Configured,{1,Adv},Ble}                02 01 00 01
 ConnectionType::Ble                                     01
@@ -87,7 +88,7 @@ Morse{TAP->Key(A)}                                      00 01 02 01 00 04
 MouseButtons(B1|B8)                                     81
 PointingCapabilities{Keypad}                            01
 PointingMode::Keypad                                    06 00 01 01 00 f0 01 3c 80 01 81 01 ac 01 ab 01 ae 01
-ProtocolVersion::CURRENT                                00 01
+ProtocolVersion::CURRENT                                00 02
 ProtocolVersion{1,0}                                    01 00
 Result<(),RynkError>::Err(StorageFault)                 01 02
 Result<(),RynkError>::Ok                                00
@@ -101,6 +102,7 @@ RynkError::StorageFault                                 02
 RynkError::Unimplemented                                04
 RynkError::UnknownCmd                                   06
 SetAutoMouseLayerConfigsRequest{[device1->layer2]}      01 01 01 02 f4 03 03 01 01 00 d9 01 00
+SetComboDefinitionRequest{3,positions}                  03 01 02 03 04 05 06 05 01 01 02
 SetComboRequest{3,combo}                                03 01 02 01 00 04 05 01 01 02
 SetEncoderRequest{1,2,{Morse(3),No}}                    01 02 05 03 00
 SetForkRequest{2,fork}                                  02 02 01 00 04 00 05 02 01 02 01 00 00 00 02 01
