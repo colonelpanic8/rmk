@@ -482,17 +482,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             let _ = storage.flash.erase_all().await;
 
             // Initialize storage from keymap and config
-            if storage
-                .initialize_storage_with_config(
-                    #[cfg(feature = "host")]
-                    keymap,
-                    #[cfg(feature = "host")]
-                    encoder_map,
-                    behavior_config,
-                )
-                .await
-                .is_err()
-            {
+            if storage.initialize_storage_with_config(behavior_config).await.is_err() {
                 // When there's an error, `enable: false` should be saved back to storage, preventing partial initialization of storage
                 storage
                     .store_data(
@@ -540,12 +530,17 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         Ok(())
     }
 
-    async fn initialize_storage_with_config(
-        &mut self,
-        #[cfg(feature = "host")] keymap: &[[[KeyAction; COL]; ROW]; NUM_LAYER],
-        #[cfg(feature = "host")] encoder_map: &Option<&mut [[EncoderAction; NUM_ENCODER]; NUM_LAYER]>,
-        behavior: &config::BehaviorConfig,
-    ) -> Result<(), ()> {
+    /// Seed a freshly erased store with the records boot reads back.
+    ///
+    /// Keymap and encoder cells are deliberately not written here. Boot
+    /// starts from the compiled keymap and overlays whatever cells the store
+    /// holds (`read_boot_data`), so a cell that was never changed needs no
+    /// record: storing every cell of every layer, as this once did, put
+    /// `NUM_LAYER * ROW * COL` items of 16-24 bytes into the map before any
+    /// user data (about 22 KiB for a 16-layer, 84-key board), which left a
+    /// small partition nearly full and made sequential-storage migrate a page
+    /// every few dozen writes.
+    async fn initialize_storage_with_config(&mut self, behavior: &config::BehaviorConfig) -> Result<(), ()> {
         // Save storage config
         self.store_data(
             StorageKey::StorageConfig,
@@ -572,35 +567,6 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         self.store_data(StorageKey::BehaviorConfig, &StorageData::from(behavior))
             .await
             .map_err(|e| print_storage_error::<F>(e))?;
-
-        #[cfg(feature = "host")]
-        for (layer, layer_data) in keymap.iter().enumerate() {
-            for (row, row_data) in layer_data.iter().enumerate() {
-                for (col, action) in row_data.iter().enumerate() {
-                    self.store_data(
-                        StorageKey::keymap(layer as u8, row as u8, col as u8),
-                        &StorageData::KeyAction(*action),
-                    )
-                    .await
-                    .map_err(|e| print_storage_error::<F>(e))?;
-                }
-            }
-        }
-
-        // Save encoder configurations
-        #[cfg(feature = "host")]
-        if let Some(encoder_map) = encoder_map {
-            for (layer, layer_data) in encoder_map.iter().enumerate() {
-                for (idx, action) in layer_data.iter().enumerate() {
-                    self.store_data(
-                        StorageKey::encoder(idx as u8, layer as u8),
-                        &StorageData::EncoderAction(*action),
-                    )
-                    .await
-                    .map_err(|e| print_storage_error::<F>(e))?;
-                }
-            }
-        }
 
         Ok(())
     }
@@ -1118,6 +1084,35 @@ mod tests {
                     build_hash: BUILD_HASH,
                 })
             ));
+        });
+    }
+
+    #[cfg(feature = "host")]
+    #[test]
+    fn a_fresh_store_holds_no_keymap_cells_and_boots_the_compiled_keymap() {
+        block_on(async {
+            type Flash = TestFlash<16_384, 4_096, 1>;
+            let key_a = KeyAction::Single(rmk_types::action::Action::Key(rmk_types::keycode::KeyCode::Hid(
+                rmk_types::keycode::HidKeyCode::A,
+            )));
+            let compiled = [[[key_a; 2]; 1]; 1];
+            let encoder_map: Option<&mut [[EncoderAction; 0]; 1]> = None;
+            let mut storage = Storage::<Flash, 1, 2, 1, 0>::new(
+                Flash::new(),
+                &compiled,
+                &encoder_map,
+                &RuntimeStorageConfig::default(),
+                &RuntimeBehaviorConfig::default(),
+            )
+            .await;
+
+            assert!(storage.fetch_data(StorageKey::keymap(0, 0, 0)).await.is_none());
+            assert!(storage.fetch_data(StorageKey::keymap(0, 0, 1)).await.is_none());
+
+            let mut data = crate::keymap::KeymapData::<1, 2, 1, 0>::new(compiled);
+            let mut behavior = RuntimeBehaviorConfig::default();
+            storage.read_keymap(&mut data, &mut behavior).await.unwrap();
+            assert_eq!(data.keymap, compiled);
         });
     }
 
