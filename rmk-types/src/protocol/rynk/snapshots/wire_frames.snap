@@ -61,6 +61,8 @@ GetMorseHoldTriggerPositions reply Ok({16,[(default,1,2),(3,4,5)]})             
 GetMorseHoldTriggerPositions request ()                                         04 0a 04 01 00
 GetPeripheralStatus reply Ok(PeripheralStatus{true,Available{Discharging,85}})  04 04 08 01 06 01 01 01 01 55 00
 GetPeripheralStatus request 1                                                   05 04 08 01 01 00
+GetPointingCapabilities reply Ok(PointingCapabilities{Keypad})                  04 03 0a 01 02 01 00
+GetPointingCapabilities request ()                                              04 03 0a 01 00
 GetSleepState reply Ok(true)                                                    04 06 08 01 02 01 00
 GetSleepState request ()                                                        04 06 08 01 00
 GetVersion reply Ok(CURRENT)                                                    02 01 02 01 01 02 01 00

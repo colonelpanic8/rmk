@@ -7,6 +7,8 @@ use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::PointingConfig;
 #[cfg(all(feature = "lighting", feature = "rynk"))]
 use rmk_types::protocol::rynk::{
     LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE,
@@ -213,6 +215,9 @@ pub(crate) enum FlashOperationMessage {
     ReadActiveBleProfile,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingExtensionOverlay(LightingExtensionOverlayRecord),
+    #[cfg(feature = "rynk")]
+    // Every pointing device's behavior, replaced as one unit.
+    PointingConfig(PointingConfig),
     // Barrier: storage task replies via `FLUSHED` once every earlier message is processed.
     Flush,
 }
@@ -270,6 +275,8 @@ pub(crate) enum StorageKey {
     #[cfg(feature = "host")]
     MorseHoldTriggerPositions,
     UnicodeMode,
+    #[cfg(feature = "rynk")]
+    PointingConfig,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingSceneCommit,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -384,6 +391,8 @@ pub(crate) enum StorageData {
     #[cfg(feature = "host")]
     MorseHoldTriggerPositions(HoldTriggerPositions),
     UnicodeMode(UnicodeMode),
+    #[cfg(feature = "rynk")]
+    PointingConfig(PointingConfig),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingSceneCommit(LightingSceneCommitRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -1293,6 +1302,15 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         }
         false
     }
+    /// The stored pointing configuration, or `None` when nothing was ever
+    /// written, which means no pointing policy rather than a default one.
+    #[cfg(feature = "rynk")]
+    pub async fn read_pointing_config(&mut self) -> Option<PointingConfig> {
+        match self.fetch_data(StorageKey::PointingConfig).await {
+            Some(StorageData::PointingConfig(config)) => Some(config),
+            _ => None,
+        }
+    }
 }
 
 impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_ENCODER: usize>
@@ -1444,6 +1462,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         cccd_table: heapless::Vec::new(),
                     };
                     self.store_data(StorageKey::bond_info(slot_num), &StorageData::BondInfo(empty))
+                        .await
+                }
+                #[cfg(feature = "rynk")]
+                FlashOperationMessage::PointingConfig(config) => {
+                    self.store_data(StorageKey::PointingConfig, &StorageData::PointingConfig(config))
                         .await
                 }
                 #[cfg(feature = "_ble")]
@@ -2384,6 +2407,39 @@ mod tests {
             // The freshly built keymap exposes the stored value to the via
             // GET handler.
             assert_eq!(keymap.layout_option(), 42);
+        });
+    }
+    #[cfg(feature = "rynk")]
+    #[test]
+    fn pointing_configuration_restored_by_keymap_boot() {
+        block_on(async {
+            type Flash = TestFlash<16_384, 4_096, 1>;
+            let mut map =
+                MapStorage::<StorageKey, _, _>::new(Flash::new(), MapConfig::new(8192..16384), Cache::new_uncached());
+            let mut buffer = [0u8; get_buffer_size()];
+            let config = PointingConfig {
+                revision: 17,
+                ..Default::default()
+            };
+            map.store_item(
+                &mut buffer,
+                &StorageKey::PointingConfig,
+                &StorageData::PointingConfig(config),
+            )
+            .await
+            .unwrap();
+            let (flash, _) = map.destroy();
+            let mut storage = Storage::<Flash, 1, 1, 1, 0> {
+                flash: MapStorage::<StorageKey, _, _>::new(flash, MapConfig::new(8192..16384), Cache::new_uncached()),
+                buffer: [0; get_buffer_size()],
+            };
+            let mut keymap = crate::keymap::KeymapData::new([[[KeyAction::No]]]);
+            let mut behavior = RuntimeBehaviorConfig::default();
+            let positional = crate::config::PositionalConfig::<1, 1>::default();
+            let _keymap =
+                crate::keymap::KeyMap::new_from_storage(&mut keymap, Some(&mut storage), &mut behavior, &positional)
+                    .await;
+            assert_eq!(crate::input_device::pointing_config::get().await, config);
         });
     }
 }
