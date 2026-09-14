@@ -1,0 +1,129 @@
+# Morse profile endpoints: the named timing profiles tap-hold keys resolve
+# through, retuned over the wire instead of by reflashing.
+#
+# Profiles are interned into the table in sorted name order, so `index_finger`
+# is slot 0 and `pinky` is slot 1. The two home-row mods on the board differ
+# only by which slot they name, which is what lets a write to one slot show up
+# in one key and not the other.
+features = ["rynk"]
+
+[layout]
+rows = 1
+cols = 3
+map = """
+(0,0)  (0,1)  (0,2)
+"""
+
+[[keymap.layer]]
+keys = "MT(A, LShift, index_finger)  MT(B, LCtrl, pinky)  C"
+
+[behavior.morse.profiles.index_finger]
+normal_mode = true
+hold_timeout = "100ms"
+gap_timeout = "100ms"
+
+[behavior.morse.profiles.pinky]
+normal_mode = true
+hold_timeout = "300ms"
+gap_timeout = "300ms"
+
+# The same 150 ms press resolves as a hold before the write and as a tap after
+# it: the profile a key names is read at use time, not baked into the key.
+[[test]]
+name = "a_profile_write_changes_how_long_its_keys_hold"
+steps = [
+  { tap = { pos = [0, 0], duration = 150 } },
+  { rynk = { cmd = "SetMorseProfile", payload = { index = 0, profile = { mode = "Normal", hold_timeout_ms = 300, gap_timeout_ms = 300 } } } },
+  { tap = { pos = [0, 0], duration = 150 } },
+]
+expect = [["LShift"], [], ["A"], []]
+
+# The whole point of indexing profiles: one request retunes every finger, and
+# each key follows only the slot it names. The two 150 ms presses swap verdicts
+# because the bulk write swapped the two slots' hold timeouts.
+[[test]]
+name = "one_bulk_write_retunes_every_per_finger_profile"
+steps = [
+  { tap = { pos = [0, 0], duration = 150 } },
+  { tap = { pos = [0, 1], duration = 150 } },
+  { rynk = { cmd = "SetMorseProfileBulk", payload = { start_index = 0, profiles = [
+    { mode = "Normal", hold_timeout_ms = 300, gap_timeout_ms = 300 },
+    { mode = "Normal", hold_timeout_ms = 100, gap_timeout_ms = 100 },
+  ] } } },
+  { tap = { pos = [0, 0], duration = 150 } },
+  { tap = { pos = [0, 1], duration = 150 } },
+]
+expect = [["LShift"], [], ["B"], [], ["A"], [], ["LCtrl"], []]
+
+# Two different writes, each read back, so the read follows the write instead of
+# echoing a compiled value that happens to match.
+[[test]]
+name = "profile_read_returns_what_was_written"
+steps = [
+  { rynk = { cmd = "SetMorseProfile", payload = { index = 1, profile = { unilateral_tap = true, enable_flow_tap = false, mode = "PermissiveHold", hold_timeout_ms = 120, gap_timeout_ms = 90, quick_tap_timeout_ms = 60 } } } },
+  { rynk = { cmd = "GetMorseProfile", payload = 1, reply = { unilateral_tap = true, enable_flow_tap = false, mode = "PermissiveHold", hold_timeout_ms = 120, gap_timeout_ms = 90, quick_tap_timeout_ms = 60 } } },
+  { rynk = { cmd = "SetMorseProfile", payload = { index = 1, profile = { unilateral_tap = false, enable_flow_tap = true, mode = "HoldOnOtherPress", hold_timeout_ms = 200, gap_timeout_ms = 150 } } } },
+  { rynk = { cmd = "GetMorseProfile", payload = 1, reply = { unilateral_tap = false, enable_flow_tap = true, mode = "HoldOnOtherPress", hold_timeout_ms = 200, gap_timeout_ms = 150 } } },
+]
+
+# A slot no profile was compiled into reads as the default profile — the same
+# thing a key bound to that slot resolves to — rather than erroring.
+[[test]]
+name = "an_unwritten_profile_slot_reads_as_the_default"
+steps = [
+  { rynk = { cmd = "GetMorseProfile", payload = 5, reply = { enable_flow_tap = false, hold_timeout_ms = 250, gap_timeout_ms = 250 } } },
+]
+
+# The table holds `morse_profile_max_num` slots, so slot 16 is the first one
+# that does not exist. 255 is the index a key with no profile carries, and it
+# has to stay unwritable for that reason.
+[[test]]
+name = "out_of_range_profile_slots_are_refused"
+steps = [
+  { rynk = { cmd = "GetMorseProfileCount", reply = 16 } },
+  { rynk = { cmd = "GetMorseProfile", payload = 16, error = "Invalid" } },
+  { rynk = { cmd = "SetMorseProfile", payload = { index = 16, profile = { hold_timeout_ms = 100 } }, error = "Invalid" } },
+  { rynk = { cmd = "SetMorseProfile", payload = { index = 255, profile = { hold_timeout_ms = 100 } }, error = "Invalid" } },
+  # The refused writes left the compiled profile alone: 150 ms still holds.
+  { tap = { pos = [0, 0], duration = 150 } },
+]
+expect = [["LShift"], []]
+
+# Reading near the end of the table keeps the page short whatever the buffer
+# size, and a read that starts past the end is the empty page a host pages until.
+[[test]]
+name = "profile_bulk_reads_back_a_bulk_write"
+steps = [
+  { rynk = { cmd = "SetMorseProfileBulk", payload = { start_index = 14, profiles = [
+    { mode = "Normal", hold_timeout_ms = 80, gap_timeout_ms = 80 },
+    { mode = "Normal", hold_timeout_ms = 90, gap_timeout_ms = 90 },
+  ] } } },
+  { rynk = { cmd = "GetMorseProfileBulk", payload = { start_index = 14 }, reply = { profiles = [
+    { mode = "Normal", hold_timeout_ms = 80, gap_timeout_ms = 80 },
+    { mode = "Normal", hold_timeout_ms = 90, gap_timeout_ms = 90 },
+  ] } } },
+  { rynk = { cmd = "GetMorseProfileBulk", payload = { start_index = 16 }, reply = { profiles = [] } } },
+]
+
+[[test]]
+name = "named_profile_catalog_is_sparse_and_renameable"
+steps = [
+  { rynk = { cmd = "GetMorseProfileState", payload = { offset = 0 }, reply = { capacity = 16, total = 2, entries = [
+    { index = 0, name = "index_finger", profile = { mode = "Normal", hold_timeout_ms = 100, gap_timeout_ms = 100 } },
+    { index = 1, name = "pinky", profile = { mode = "Normal", hold_timeout_ms = 300, gap_timeout_ms = 300 } },
+  ] } } },
+  { rynk = { cmd = "SetMorseProfileEntry", payload = { entry = { index = 1, name = "left-pinky", profile = { mode = "Normal", hold_timeout_ms = 275, gap_timeout_ms = 275 } } } } },
+  { rynk = { cmd = "GetMorseProfileState", payload = { offset = 1 }, reply = { capacity = 16, total = 2, entries = [
+    { index = 1, name = "left-pinky", profile = { mode = "Normal", hold_timeout_ms = 275, gap_timeout_ms = 275 } },
+  ] } } },
+]
+
+[[test]]
+name = "deleting_a_profile_vacates_without_compacting"
+steps = [
+  { rynk = { cmd = "DeleteMorseProfile", payload = 0 } },
+  { rynk = { cmd = "GetMorseProfileState", payload = { offset = 0 }, reply = { capacity = 16, total = 1, entries = [
+    { index = 1, name = "pinky", profile = { mode = "Normal", hold_timeout_ms = 300, gap_timeout_ms = 300 } },
+  ] } } },
+  { rynk = { cmd = "GetMorseProfile", payload = 0, reply = { enable_flow_tap = false, hold_timeout_ms = 250, gap_timeout_ms = 250 } } },
+]

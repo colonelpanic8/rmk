@@ -1,8 +1,9 @@
 use embassy_time::Duration;
 use heapless::Vec;
+use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::fork::Fork;
 use rmk_types::keycode::KeyCode;
-use rmk_types::morse::{Morse, MorseMode, MorseProfile};
+use rmk_types::morse::{Morse, MorseMode, MorseProfile, MorseProfileName};
 use rmk_types::unicode::UnicodeMode;
 
 use crate::keyboard::combo::Combo;
@@ -40,6 +41,8 @@ pub struct BehaviorConfig {
     pub auto_mouse_layer: Vec<AutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>,
     pub mouse_layer_scale: Vec<MouseLayerScaleConfig, MOUSE_LAYER_SCALE_MAX_NUM>,
     pub unicode: UnicodeConfig,
+    #[doc(hidden)]
+    pub runtime_auto_mouse_layer: Option<Vec<RuntimeAutoMouseLayerConfig, AUTO_MOUSE_LAYER_MAX_NUM>>,
 }
 
 /// Mouse movement and scroll scaling for one active layer.
@@ -170,6 +173,10 @@ pub struct MorsesConfig {
     /// Key positions allowed to trigger the hold, keyed by profile index.
     pub hold_trigger_positions: HoldTriggerPositions,
 
+    /// Stable human-facing names parallel to `profiles`. An empty name marks
+    /// a vacant slot without renumbering later bindings.
+    pub profile_names: Vec<MorseProfileName, MORSE_PROFILE_MAX_NUM>,
+
     pub morses: Vec<Morse, MORSE_MAX_NUM>,
 }
 
@@ -181,6 +188,7 @@ impl Default for MorsesConfig {
             default_profile: MorseProfile::new(Some(false), Some(MorseMode::Normal), Some(250u16), Some(250u16)),
             profiles: Vec::new(),
             hold_trigger_positions: Vec::new(),
+            profile_names: Vec::new(),
             morses: Vec::new(),
         }
     }
