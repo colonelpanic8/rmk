@@ -29,9 +29,10 @@ pub use rynk::{
     LightingReplicationStatus, PeripheralReplicaStatus, RYNK_LIGHTING_TRANSACTION_CAPACITY, RemoteFrame,
     RemoteFramePort, RemoteFrameRequest, ReplicaDigests, ReplicationHealth, ReplicationMachineState,
     RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox, RynkLightingReadback,
-    StandardRynkLightingAdapter, install_lighting_rule, install_lighting_runtime_conditional_scenes,
-    install_lighting_scenes,
+    StandardRynkLightingAdapter, install_lighting_rule, install_lighting_scenes,
 };
+#[cfg(all(feature = "rynk", feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
+pub use rynk::install_lighting_runtime_conditional_scenes;
 /// RMK's semantic version, available to downstream firmware build labels.
 #[cfg(feature = "rynk")]
 pub use rynk::{RMK_VERSION, RMK_VERSION_STRING};

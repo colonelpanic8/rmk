@@ -115,7 +115,14 @@ features = ["split", "vial", "async_matrix", "_ble"]
 cortex-m = { version = "0.7" }
 
 [features]
-default = ["defmt", "storage", "vial", "host_lock", "watchdog"]
+default = [
+    "defmt",
+    "storage",
+    "vial",
+    "host_lock",
+    "watchdog",
+    "lighting_legacy_conditional_scenes",
+]
 
 ## Enable hardware watchdog support
 watchdog = ["rmk-macro/watchdog"]
@@ -203,6 +210,9 @@ std = [
 display = ["dep:embedded-graphics", "rmk-types/display", "_render_state"]
 ## Enable topology-aware composable lighting support.
 lighting = ["rmk-types/lighting", "_render_state"]
+## Keep the three pre-rules runtime conditional-scene endpoint families.
+## Enabled by default for compatibility; constrained boards may omit it.
+lighting_legacy_conditional_scenes = []
 ## Shared authoritative state needed by display and lighting renderers.
 _render_state = []
 ## Enable SSD1306 OLED driver

@@ -16,18 +16,22 @@ use embassy_sync::signal::Signal;
 use heapless::{String, Vec};
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::protocol::rynk::{
-    LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_EXTENSION_NAME_CHUNK, LIGHTING_EXTENSION_NAME_SIZE,
-    LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_OVERLAY_CHUNK_SIZE, LIGHTING_SCENE_CHUNK_SIZE,
-    LightingAdvancedConditionalSceneCell as WireAdvancedConditionalSceneCell,
-    LightingAdvancedRuntimeConditionalScenesPage, LightingBackgroundMode, LightingBackgroundState,
+    LIGHTING_EXTENSION_NAME_CHUNK, LIGHTING_EXTENSION_NAME_SIZE, LIGHTING_EXTENSION_PARAM_CHUNK,
+    LIGHTING_OVERLAY_CHUNK_SIZE, LIGHTING_SCENE_CHUNK_SIZE, LightingBackgroundMode, LightingBackgroundState,
     LightingCompiledScenesPage, LightingConditionalSceneCell as WireConditionalSceneCell,
     LightingControls as WireLightingControls, LightingError, LightingExtension, LightingExtensionLayers,
     LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionParam, LightingExtensionParamsPage,
     LightingExtensionState as WireExtensionState, LightingLayerPolicy, LightingMutableState,
     LightingOutputMode as WireLightingOutputMode, LightingOutputModeIndicator as WireLightingOutputModeIndicator,
     LightingOutputModeState, LightingOverlayCell, LightingOverlayPage, LightingResult, LightingRgb8, LightingRule,
-    LightingRulesPage, LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage,
-    LightingSceneCell, LightingSceneTransaction, LightingScenesPage, LightingState,
+    LightingRulesPage, LightingRuntimeConditionalSceneTransaction, LightingSceneCell, LightingSceneTransaction,
+    LightingScenesPage, LightingState,
+};
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
+use rmk_types::protocol::rynk::{
+    LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE,
+    LightingAdvancedConditionalSceneCell as WireAdvancedConditionalSceneCell,
+    LightingAdvancedRuntimeConditionalScenesPage, LightingRuntimeConditionalScenesPage,
 };
 
 use crate::RawMutex;
@@ -516,7 +520,9 @@ pub enum RynkLightingReadback {
     ExtensionLayers(LightingExtensionLayers),
     ExtensionNamesPage(LightingExtensionNamesPage),
     ExtensionParamsPage(LightingExtensionParamsPage),
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     RuntimeConditionalScenesPage(LightingRuntimeConditionalScenesPage),
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     AdvancedRuntimeConditionalScenesPage(LightingAdvancedRuntimeConditionalScenesPage),
     RulesPage(LightingRulesPage),
     RuntimeConditionalSceneTransaction(LightingRuntimeConditionalSceneTransaction),
@@ -720,10 +726,12 @@ pub(super) enum RynkLightingCommand {
         value: u8,
     },
     ReadRuntimeConditionalSceneStatus,
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     ReadRuntimeConditionalScenes {
         expected_revision: u32,
         offset: u16,
     },
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     ReadAdvancedRuntimeConditionalScenes {
         expected_revision: u32,
         offset: u16,
@@ -736,11 +744,13 @@ pub(super) enum RynkLightingCommand {
         expected_revision: u32,
         cell_count: u16,
     },
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     PutRuntimeConditionalSceneChunk {
         transaction_id: u32,
         offset: u16,
         cells: Vec<WireConditionalSceneCell, { rmk_types::protocol::rynk::LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE }>,
     },
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     PutAdvancedRuntimeConditionalSceneChunk {
         transaction_id: u32,
         offset: u16,
@@ -1390,6 +1400,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     cell_len: state.runtime_conditional_scene_len.min(u16::MAX as usize) as u16,
                 });
             }
+            #[cfg(feature = "lighting_legacy_conditional_scenes")]
             RynkLightingCommand::ReadRuntimeConditionalScenes {
                 expected_revision,
                 offset,
@@ -1433,6 +1444,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     },
                 ));
             }
+            #[cfg(feature = "lighting_legacy_conditional_scenes")]
             RynkLightingCommand::ReadAdvancedRuntimeConditionalScenes {
                 expected_revision,
                 offset,
@@ -1549,6 +1561,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     _ => Err(LightingError::InvalidRequest),
                 };
             }
+            #[cfg(feature = "lighting_legacy_conditional_scenes")]
             RynkLightingCommand::PutRuntimeConditionalSceneChunk {
                 transaction_id,
                 offset,
@@ -1568,6 +1581,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 .await?;
                 return Ok(RynkLightingReadback::Unit);
             }
+            #[cfg(feature = "lighting_legacy_conditional_scenes")]
             RynkLightingCommand::PutAdvancedRuntimeConditionalSceneChunk {
                 transaction_id,
                 offset,
@@ -1831,6 +1845,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         })
     }
 
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     fn runtime_conditional_scene_cell_from_wire(
         &self,
         cell: WireConditionalSceneCell,
@@ -1844,6 +1859,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         })
     }
 
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     fn runtime_conditional_scene_cell_from_extended_wire(
         &self,
         cell: WireAdvancedConditionalSceneCell,
@@ -1876,6 +1892,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         })
     }
 
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     fn runtime_conditional_scene_cell_to_wire(
         &self,
         cell: RuntimeConditionalSceneCell,
@@ -1883,6 +1900,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         Some(self.runtime_conditional_scene_cell_to_extended_wire(cell)?.cell)
     }
 
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     fn runtime_conditional_scene_cell_to_extended_wire(
         &self,
         cell: RuntimeConditionalSceneCell,
@@ -2199,6 +2217,7 @@ pub fn install_lighting_scenes<Extension, Status, const N: usize, const OVERLAY_
 }
 
 /// Install the persisted ordered runtime conditional source at startup.
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 pub fn install_lighting_runtime_conditional_scenes<
     Extension,
     Status,
