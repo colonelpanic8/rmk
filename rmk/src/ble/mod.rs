@@ -72,11 +72,28 @@ pub(crate) mod rng;
 #[cfg(any(feature = "split", feature = "dongle"))]
 pub(crate) mod scan;
 
+/// Number of host BLE profiles configured for this firmware build.
+pub const fn profile_count() -> u8 {
+    crate::NUM_BLE_PROFILES as u8
+}
+
 /// Forget the bond in the active BLE host profile.
 pub async fn clear_active_profile() {
     crate::channel::BLE_PROFILE_CHANNEL
         .send(profile::BleProfileAction::ClearBond(None))
         .await;
+}
+
+/// Forget the bond in one BLE host profile without changing the active slot.
+/// Returns `false` without touching non-host bond slots when `slot` is invalid.
+pub async fn clear_profile(slot: u8) -> bool {
+    if slot >= profile_count() {
+        return false;
+    }
+    crate::channel::BLE_PROFILE_CHANNEL
+        .send(profile::BleProfileAction::ClearBond(Some(slot)))
+        .await;
+    true
 }
 
 /// Forget the bonds in every BLE host profile, preserving split and dongle bonds.

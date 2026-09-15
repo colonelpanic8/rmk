@@ -54,11 +54,12 @@ Each peer holds one frame in a buffer of `rynk_buffer_size` bytes (a `[rmk]` opt
 
 The transport that carries input follows one rule: USB is ready when `usb` is `Configured` or `Suspended`, BLE is ready when `ble[selected].state` is `Connected`, and `preferred` decides when both are ready; `ConnectionStatus::decide_active()` (`decide_active_connection` in `rynk-wasm`) applies this rule. `GetConnectionType` returns only `preferred`.
 
-| Command                | Effect                                                                           | Bond                        | Needs unlock |
-| ---------------------- | -------------------------------------------------------------------------------- | --------------------------- | ------------ |
-| `SwitchBleProfile`     | Selects the profile and advertises if it has no connection.                      | Kept                        | No           |
-| `DisconnectBleProfile` | Closes the profile's connection; the selected profile then waits for a new host. | Kept until a new host pairs | Yes          |
-| `ClearBleProfile`      | Closes the profile's connection; the selected profile then waits for a new host. | Deleted, even if offline    | Yes          |
+| Command                | Effect                                                                             | Bond                        | Needs unlock |
+| ---------------------- | ---------------------------------------------------------------------------------- | --------------------------- | ------------ |
+| `SwitchBleProfile`     | Selects the profile and advertises if it has no connection.                        | Kept                        | No           |
+| `DisconnectBleProfile` | Closes the profile's connection; the selected profile then waits for a new host.   | Kept until a new host pairs | Yes          |
+| `ClearBleProfile`      | Closes the profile's connection; the selected profile then waits for a new host.   | Deleted, even if offline    | Yes          |
+| `ClearAllBleProfiles`  | Clears every host profile like `ClearBleProfile`; the dongle profile is untouched. | Deleted, even if offline    | Yes          |
 
 These commands answer `Ok` once the keyboard accepts the action, before it takes effect; watch `ConnectionChange` for the result. `NotReady` means earlier profile actions are still pending; retry. If the action closes the link the request arrived on, the link can drop before the reply arrives, but the action still runs.
 
@@ -82,7 +83,7 @@ A request's response is postcard `Result<T, RynkError>`; the `Err` side is one o
 
 ## Lock
 
-Commands that can flash firmware, wipe storage, or read the matrix sit behind a physical-presence unlock. `BootloaderJump`, `StorageReset`, `GetMatrixState`, and (with `_ble`) `ClearBleProfile` and `DisconnectBleProfile` always need an unlocked connection; every `Set*` command joins them when the firmware was built with `[host] write_requires_unlock = true`. A gated command on a locked connection answers `Locked` and does nothing. `GetLockStatus`, `UnlockPoll`, and `Lock` are never gated.
+Commands that can flash firmware, wipe storage, or read the matrix sit behind a physical-presence unlock. `BootloaderJump`, `StorageReset`, `GetMatrixState`, and (with `_ble`) `ClearBleProfile`, `ClearAllBleProfiles`, and `DisconnectBleProfile` always need an unlocked connection; every `Set*` command joins them when the firmware was built with `[host] write_requires_unlock = true`. A gated command on a locked connection answers `Locked` and does nothing. `GetLockStatus`, `UnlockPoll`, and `Lock` are never gated.
 
 The lock belongs to the connection and starts locked; `Lock` or disconnection relocks it. To unlock, a host polls `UnlockPoll` while the user holds the challenge keys that `LockStatus.key_positions` reports (`[host].unlock_keys`); the connection is unlocked once `locked` clears. With no `unlock_keys` configured the challenge is empty and the gated commands can never be unlocked; a firmware built with `[host] insecure = true` starts unlocked and ignores `Lock`. See [Rynk](../features/rynk#locking-dangerous-operations) for the user-facing side.
 
@@ -127,6 +128,7 @@ The lock belongs to the connection and starts locked; `Lock` or disconnection re
 | `0x0704` | `SwitchBleProfile`     | `u8`                   | `()`                    | `_ble`  | Select a profile.                                                            |
 | `0x0705` | `ClearBleProfile`      | `u8`                   | `()`                    | `_ble`  | Disconnect a profile and forget its bond.                                    |
 | `0x0706` | `DisconnectBleProfile` | `u8`                   | `()`                    | `_ble`  | Disconnect a profile and keep its bond until a new host pairs with it.       |
+| `0x070C` | `ClearAllBleProfiles`  | `()`                   | `()`                    | `_ble`  | Disconnect every host profile and forget their bonds.                        |
 | `0x0801` | `GetCurrentLayer`      | `()`                   | `u8`                    |         |                                                                              |
 | `0x0802` | `GetMatrixState`       | `()`                   | `MatrixState`           |         |                                                                              |
 | `0x0803` | `GetBatteryStatus`     | `()`                   | `BatteryStatus`         |         |                                                                              |

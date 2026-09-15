@@ -325,6 +325,9 @@ endpoints! {
     /// Disconnect a profile and keep its bond until a new host pairs with it.
     #[cfg(feature = "_ble")]
     DisconnectBleProfile = 0x0706: u8 => ();
+    /// Disconnect every host profile and forget their bonds.
+    #[cfg(feature = "_ble")]
+    ClearAllBleProfiles = 0x070C: () => ();
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;

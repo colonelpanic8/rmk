@@ -3,7 +3,9 @@
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::protocol::rynk::RynkError;
 #[cfg(feature = "_ble")]
-use rmk_types::protocol::rynk::command::{ClearBleProfile, DisconnectBleProfile, SwitchBleProfile};
+use rmk_types::protocol::rynk::command::{
+    ClearAllBleProfiles, ClearBleProfile, DisconnectBleProfile, SwitchBleProfile,
+};
 use rmk_types::protocol::rynk::command::{GetConnectionStatus, GetConnectionType};
 
 use super::super::RynkService;
@@ -57,6 +59,17 @@ impl Handle<DisconnectBleProfile> for RynkService<'_> {
         Self::check_ble_profile(profile)?;
         crate::channel::BLE_PROFILE_CHANNEL
             .try_send(crate::ble::profile::BleProfileAction::Disconnect(profile))
+            .map_err(|_| RynkError::NotReady)
+    }
+}
+
+/// `Cmd::ClearAllBleProfiles` — wipes every host bond while preserving split
+/// peripheral and dongle bonds.
+#[cfg(feature = "_ble")]
+impl Handle<ClearAllBleProfiles> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<(), RynkError> {
+        crate::channel::BLE_PROFILE_CHANNEL
+            .try_send(crate::ble::profile::BleProfileAction::ClearAllBonds)
             .map_err(|_| RynkError::NotReady)
     }
 }
