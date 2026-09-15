@@ -35,19 +35,18 @@ use rynk::rmk_types::protocol::rynk::{
     LightingExtensionNamesPage, LightingExtensionNamesRequest, LightingExtensionParamsPage,
     LightingExtensionParamsRequest, LightingKeysPage, LightingLedsPage, LightingOutputModeState, LightingOutputsPage,
     LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest,
-    LightingPhysicalKeysPage, LightingPredicate, LightingRoutesPage, LightingRulePredicate, LightingRuleStatus,
-    LightingRulesPage, LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
-    LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
-    LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZoneMembershipsPage,
-    LightingZonesPage, LockStatus, MacroData, MaintenanceMode, MatrixState, PeripheralStatus,
-    ProtocolVersion,
+    LightingPhysicalKeysPage, LightingPredicate, LightingRoutesPage, LightingRule, LightingRulePredicate,
+    LightingRuleStatus, LightingRulesPage, LightingRuntimeConditionalScenePageRequest,
+    LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneTransaction,
+    LightingRuntimeConditionalScenesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
+    LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData,
+    MaintenanceMode, MatrixState, PeripheralStatus, ProtocolVersion,
     PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
     PutLightingOverlayChunkRequest, PutLightingRuleChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest,
     PutLightingSceneChunkRequest, SetComboBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMorseBulkRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, SplitTransportState,
-    StorageResetMode,
+    SetMorseBulkRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, SplitTransportState, StorageResetMode,
     UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
@@ -102,6 +101,34 @@ pub fn encode_lighting_predicate(predicate: LightingRulePredicate) -> Result<Lig
     predicate
         .encode()
         .map_err(|error| js_sys::Error::new(&format!("invalid lighting predicate: {error:?}")).into())
+}
+
+/// Decode one byte-bounded rule page with the firmware's postcard codec.
+#[wasm_bindgen]
+pub fn decode_lighting_rules(bytes: Vec<u8>, count: u8) -> Result<JsValue, JsValue> {
+    let mut remaining = bytes.as_slice();
+    let mut rules = Vec::with_capacity(usize::from(count));
+    for _ in 0..count {
+        let (rule, rest) = postcard::take_from_bytes::<LightingRule>(remaining)
+            .map_err(|error| js_sys::Error::new(&format!("invalid lighting rule page: {error}")))?;
+        rule.validate()
+            .map_err(|error| js_sys::Error::new(&format!("invalid lighting rule: {error:?}")))?;
+        rules.push(rule);
+        remaining = rest;
+    }
+    if !remaining.is_empty() {
+        return Err(js_sys::Error::new("lighting rule page has trailing bytes").into());
+    }
+    serde_wasm_bindgen::to_value(&rules).map_err(Into::into)
+}
+
+/// Encode one rule for packing into a byte-bounded transaction chunk.
+#[wasm_bindgen]
+pub fn encode_lighting_rule(rule: LightingRule) -> Result<Vec<u8>, JsValue> {
+    rule.validate()
+        .map_err(|error| js_sys::Error::new(&format!("invalid lighting rule: {error:?}")))?;
+    postcard::to_allocvec(&rule)
+        .map_err(|error| js_sys::Error::new(&format!("could not encode lighting rule: {error}")).into())
 }
 
 impl RynkClient {
