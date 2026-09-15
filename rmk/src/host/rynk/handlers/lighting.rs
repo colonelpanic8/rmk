@@ -2,39 +2,40 @@
 use embassy_time::Instant;
 use heapless::{String, Vec};
 use rmk_types::protocol::rynk::command::{
-    AbortLightingAdvancedRuntimeConditionalSceneReplace, AbortLightingExtendedRuntimeConditionalSceneReplace,
-    AbortLightingRuleReplace, AbortLightingRuntimeConditionalSceneReplace,
-    BeginLightingAdvancedRuntimeConditionalSceneReplace, BeginLightingExtendedRuntimeConditionalSceneReplace,
-    BeginLightingRuleReplace, BeginLightingRuntimeConditionalSceneReplace, ClearLightingOverlay,
-    CommitLightingAdvancedRuntimeConditionalSceneReplace, CommitLightingExtendedRuntimeConditionalSceneReplace,
-    CommitLightingRuleReplace, CommitLightingRuntimeConditionalSceneReplace,
-    GetLightingAdvancedRuntimeConditionalSceneStatus, GetLightingAdvancedRuntimeConditionalScenes,
+    AbortLightingRuleReplace, BeginLightingRuleReplace, ClearLightingOverlay, CommitLightingRuleReplace,
     GetLightingCapabilities, GetLightingCompiledSceneStatus, GetLightingCompiledScenes,
-    GetLightingConditionalSceneStatus, GetLightingConditionalScenes, GetLightingExtendedRuntimeConditionalSceneStatus,
-    GetLightingExtendedRuntimeConditionalScenes, GetLightingExtension, GetLightingExtensionLayers,
+    GetLightingConditionalSceneStatus, GetLightingConditionalScenes, GetLightingExtension, GetLightingExtensionLayers,
     GetLightingExtensionNames, GetLightingExtensionParams, GetLightingFrame, GetLightingKeys, GetLightingLeds,
     GetLightingOutputMode, GetLightingOutputs, GetLightingOverlay, GetLightingPhysicalKeys, GetLightingReplicaStatus,
-    GetLightingRoutes, GetLightingRuleStatus, GetLightingRules, GetLightingRuntimeConditionalSceneStatus,
-    GetLightingRuntimeConditionalScenes, GetLightingSceneStatus, GetLightingScenes, GetLightingState,
-    GetLightingZoneMemberships, GetLightingZones, PutLightingAdvancedRuntimeConditionalSceneChunk,
-    PutLightingExtendedRuntimeConditionalSceneChunk, PutLightingRuleChunk, PutLightingRuntimeConditionalSceneChunk,
+    GetLightingRoutes, GetLightingRuleStatus, GetLightingRules, GetLightingSceneStatus, GetLightingScenes,
+    GetLightingState, GetLightingZoneMemberships, GetLightingZones, PutLightingRuleChunk,
     SetLightingExtensionLayers, SetLightingExtensionParam, SetLightingExtensionState, SetLightingLayerPolicy,
     SetLightingOutputMode, SetLightingOverlay, SetLightingSceneCell, SetLightingState, SetLightingWakeLayers,
     UnsetLightingOverlay, UnsetLightingSceneCell,
+};
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
+use rmk_types::protocol::rynk::command::{
+    AbortLightingAdvancedRuntimeConditionalSceneReplace, AbortLightingExtendedRuntimeConditionalSceneReplace,
+    AbortLightingRuntimeConditionalSceneReplace, BeginLightingAdvancedRuntimeConditionalSceneReplace,
+    BeginLightingExtendedRuntimeConditionalSceneReplace, BeginLightingRuntimeConditionalSceneReplace,
+    CommitLightingAdvancedRuntimeConditionalSceneReplace, CommitLightingExtendedRuntimeConditionalSceneReplace,
+    CommitLightingRuntimeConditionalSceneReplace, GetLightingAdvancedRuntimeConditionalSceneStatus,
+    GetLightingAdvancedRuntimeConditionalScenes, GetLightingExtendedRuntimeConditionalSceneStatus,
+    GetLightingExtendedRuntimeConditionalScenes, GetLightingRuntimeConditionalSceneStatus,
+    GetLightingRuntimeConditionalScenes, PutLightingAdvancedRuntimeConditionalSceneChunk,
+    PutLightingExtendedRuntimeConditionalSceneChunk, PutLightingRuntimeConditionalSceneChunk,
 };
 use rmk_types::protocol::rynk::{
     AbortLightingOverlayReplaceRequest, AbortLightingRuntimeConditionalSceneReplaceRequest,
     AbortLightingSceneReplaceRequest, BeginLightingOverlayReplaceRequest,
     BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, ClearLightingOverlayRequest,
     CommitLightingOverlayReplaceRequest, CommitLightingRuntimeConditionalSceneReplaceRequest,
-    CommitLightingSceneReplaceRequest, LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE,
-    LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_PAGE_SIZE, LIGHTING_SCENE_CHUNK_SIZE, LIGHTING_ZONE_NAME_SIZE,
-    LightingAdvancedRuntimeConditionalScenesPageResult, LightingCapabilities, LightingCapabilitiesResult,
+    CommitLightingSceneReplaceRequest, LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_PAGE_SIZE,
+    LIGHTING_SCENE_CHUNK_SIZE, LIGHTING_ZONE_NAME_SIZE, LightingCapabilities, LightingCapabilitiesResult,
     LightingCentralReplicaState, LightingCompiledSceneStatus, LightingCompiledSceneStatusResult,
     LightingCompiledScenesPageResult, LightingConditionalSceneCell, LightingConditionalSceneStatus,
     LightingConditionalSceneStatusResult, LightingConditionalScenesPage, LightingConditionalScenesPageResult,
-    LightingEffectFlags, LightingError, LightingExtendedRuntimeConditionalScenesPage,
-    LightingExtendedRuntimeConditionalScenesPageResult, LightingExtensionLayersResult,
+    LightingEffectFlags, LightingError, LightingExtensionLayersResult,
     LightingExtensionNamesPageResult, LightingExtensionNamesRequest, LightingExtensionParamsPageResult,
     LightingExtensionParamsRequest, LightingExtensionResult, LightingFeatureFlags, LightingFramePage,
     LightingFramePageResult, LightingFrameRequest, LightingKeysPage, LightingKeysPageResult, LightingLed,
@@ -46,18 +47,24 @@ use rmk_types::protocol::rynk::{
     LightingReplicaDigests, LightingReplicaStatus, LightingReplicaStatusResult, LightingReplicationHealth,
     LightingReplicationMachine, LightingResult, LightingRgb8, LightingRoute, LightingRoutesPage,
     LightingRoutesPageResult, LightingRuleStatus, LightingRuleStatusResult, LightingRulesPageResult,
-    LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
-    LightingRuntimeConditionalSceneStatusResult, LightingRuntimeConditionalSceneTransactionResult,
-    LightingRuntimeConditionalScenesPageResult, LightingScenePageRequest, LightingSceneStatus,
+    LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneTransactionResult,
+    LightingScenePageRequest, LightingSceneStatus,
     LightingSceneStatusResult, LightingSceneTransactionResult, LightingScenesPageResult, LightingState,
     LightingStateResult, LightingUnitResult, LightingZone, LightingZoneId, LightingZoneMembershipsPage,
-    LightingZoneMembershipsPageResult, LightingZonesPage, LightingZonesPageResult,
-    PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
-    PutLightingOverlayChunkRequest, PutLightingRuleChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest,
-    PutLightingSceneChunkRequest, RynkError, RynkMessage, SetLightingExtensionLayersRequest,
+    LightingZoneMembershipsPageResult, LightingZonesPage, LightingZonesPageResult, PutLightingOverlayChunkRequest,
+    PutLightingRuleChunkRequest, PutLightingSceneChunkRequest, RynkError, RynkMessage,
+    SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
     SetLightingWakeLayersRequest, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
+};
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
+use rmk_types::protocol::rynk::{
+    LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE, LightingAdvancedRuntimeConditionalScenesPageResult,
+    LightingExtendedRuntimeConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPageResult,
+    LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneStatusResult,
+    LightingRuntimeConditionalScenesPageResult, PutLightingAdvancedRuntimeConditionalSceneChunkRequest,
+    PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest,
 };
 
 use super::super::lighting::{
@@ -405,6 +412,7 @@ impl Handle<GetLightingConditionalScenes> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<GetLightingRuntimeConditionalSceneStatus> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<LightingRuntimeConditionalSceneStatusResult, RynkError> {
         Ok(match runtime_conditional_scene_controller(self) {
@@ -428,6 +436,7 @@ impl Handle<GetLightingRuntimeConditionalSceneStatus> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<GetLightingAdvancedRuntimeConditionalSceneStatus> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<LightingRuntimeConditionalSceneStatusResult, RynkError> {
         Ok(match runtime_conditional_scene_controller(self) {
@@ -476,6 +485,7 @@ impl Handle<GetLightingRuleStatus> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<GetLightingRuntimeConditionalScenes> for RynkService<'_> {
     async fn handle(
         &self,
@@ -498,6 +508,7 @@ impl Handle<GetLightingRuntimeConditionalScenes> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<GetLightingAdvancedRuntimeConditionalScenes> for RynkService<'_> {
     async fn handle(
         &self,
@@ -542,6 +553,7 @@ impl Handle<GetLightingRules> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<BeginLightingRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
@@ -569,6 +581,7 @@ impl Handle<BeginLightingRuntimeConditionalSceneReplace> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<BeginLightingAdvancedRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
@@ -601,10 +614,29 @@ impl Handle<BeginLightingRuleReplace> for RynkService<'_> {
         &self,
         req: BeginLightingRuntimeConditionalSceneReplaceRequest,
     ) -> Result<LightingRuntimeConditionalSceneTransactionResult, RynkError> {
-        <Self as Handle<BeginLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
+        Ok(match runtime_conditional_scene_controller(self) {
+            Ok(controller) if req.cell_count > controller.runtime_conditional_scene_capacity => {
+                Err(LightingError::ConditionalSceneFull {
+                    capacity: controller.runtime_conditional_scene_capacity,
+                })
+            }
+            Ok(controller) => match controller
+                .request(RynkLightingCommand::BeginRuntimeConditionalSceneReplace {
+                    expected_revision: req.expected_revision,
+                    cell_count: req.cell_count,
+                })
+                .await
+            {
+                Ok(RynkLightingReadback::RuntimeConditionalSceneTransaction(transaction)) => Ok(transaction),
+                Ok(_) => Err(LightingError::InvalidRequest),
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        })
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<PutLightingRuntimeConditionalSceneChunk> for RynkService<'_> {
     async fn handle(
         &self,
@@ -649,6 +681,7 @@ impl Handle<PutLightingRuntimeConditionalSceneChunk> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<PutLightingAdvancedRuntimeConditionalSceneChunk> for RynkService<'_> {
     async fn handle(
         &self,
@@ -728,6 +761,7 @@ impl Handle<PutLightingRuleChunk> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<CommitLightingRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
@@ -746,6 +780,7 @@ impl Handle<CommitLightingRuntimeConditionalSceneReplace> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<CommitLightingAdvancedRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
@@ -769,10 +804,20 @@ impl Handle<CommitLightingRuleReplace> for RynkService<'_> {
         &self,
         req: CommitLightingRuntimeConditionalSceneReplaceRequest,
     ) -> Result<LightingStateResult, RynkError> {
-        <Self as Handle<CommitLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
+        Ok(match runtime_conditional_scene_controller(self) {
+            Ok(controller) => {
+                controller
+                    .request_state(RynkLightingCommand::CommitRuntimeConditionalSceneReplace {
+                        transaction_id: req.transaction_id,
+                    })
+                    .await
+            }
+            Err(error) => Err(error),
+        })
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<AbortLightingRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
@@ -794,6 +839,7 @@ impl Handle<AbortLightingRuntimeConditionalSceneReplace> for RynkService<'_> {
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<AbortLightingAdvancedRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
@@ -820,7 +866,19 @@ impl Handle<AbortLightingRuleReplace> for RynkService<'_> {
         &self,
         req: AbortLightingRuntimeConditionalSceneReplaceRequest,
     ) -> Result<LightingUnitResult, RynkError> {
-        <Self as Handle<AbortLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
+        Ok(match runtime_conditional_scene_controller(self) {
+            Ok(controller) => match controller
+                .request(RynkLightingCommand::AbortRuntimeConditionalSceneReplace {
+                    transaction_id: req.transaction_id,
+                })
+                .await
+            {
+                Ok(RynkLightingReadback::Unit) => Ok(()),
+                Ok(_) => Err(LightingError::InvalidRequest),
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        })
     }
 }
 
@@ -1292,11 +1350,14 @@ fn capabilities(binding: RynkLightingController<'_>) -> LightingCapabilities {
         features.0 |= LightingFeatureFlags::COMPILED_CONDITIONAL_SCENES;
     }
     if binding.runtime_conditional_scene_capacity > 0 {
-        features.0 |= LightingFeatureFlags::RUNTIME_CONDITIONAL_SCENES
-            | LightingFeatureFlags::RUNTIME_CONNECTION_CONDITIONS
-            | LightingFeatureFlags::RUNTIME_EFFECTS_CONDITIONS
-            | LightingFeatureFlags::RUNTIME_LAYER_INDICATOR_CONDITIONS
-            | LightingFeatureFlags::RULES;
+        features.0 |= LightingFeatureFlags::RULES;
+        #[cfg(feature = "lighting_legacy_conditional_scenes")]
+        {
+            features.0 |= LightingFeatureFlags::RUNTIME_CONDITIONAL_SCENES
+                | LightingFeatureFlags::RUNTIME_CONNECTION_CONDITIONS
+                | LightingFeatureFlags::RUNTIME_EFFECTS_CONDITIONS
+                | LightingFeatureFlags::RUNTIME_LAYER_INDICATOR_CONDITIONS;
+        }
     }
     // The standard engine always owns an output-mode policy, so this advertises
     // the engine's support rather than whether a board happened to bind a key to
@@ -1741,12 +1802,14 @@ async fn abort(
     Err(state.transaction_error(req.transaction_id))
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<GetLightingExtendedRuntimeConditionalSceneStatus> for RynkService<'_> {
     async fn handle(&self, req: ()) -> Result<LightingRuntimeConditionalSceneStatusResult, RynkError> {
         <Self as Handle<GetLightingAdvancedRuntimeConditionalSceneStatus>>::handle(self, req).await
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<BeginLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
@@ -1756,6 +1819,7 @@ impl Handle<BeginLightingExtendedRuntimeConditionalSceneReplace> for RynkService
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<CommitLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
@@ -1765,6 +1829,7 @@ impl Handle<CommitLightingExtendedRuntimeConditionalSceneReplace> for RynkServic
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<AbortLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
     async fn handle(
         &self,
@@ -1774,6 +1839,7 @@ impl Handle<AbortLightingExtendedRuntimeConditionalSceneReplace> for RynkService
     }
 }
 
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<GetLightingExtendedRuntimeConditionalScenes> for RynkService<'_> {
     async fn handle(
         &self,
@@ -1802,6 +1868,7 @@ impl Handle<GetLightingExtendedRuntimeConditionalScenes> for RynkService<'_> {
         )
     }
 }
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 impl Handle<PutLightingExtendedRuntimeConditionalSceneChunk> for RynkService<'_> {
     async fn handle(
         &self,
@@ -1977,6 +2044,26 @@ mod tests {
             },
             overlay_len,
         }
+    }
+
+    #[test]
+    fn legacy_conditional_scene_capabilities_follow_the_cargo_feature() {
+        let mailbox = RynkLightingMailbox::new();
+        let features = capabilities(
+            RynkLightingController::new(&mailbox, descriptor(), 8)
+                .with_runtime_conditional_scene_capacity(4),
+        )
+        .features;
+        let legacy = LightingFeatureFlags::RUNTIME_CONDITIONAL_SCENES
+            | LightingFeatureFlags::RUNTIME_CONNECTION_CONDITIONS
+            | LightingFeatureFlags::RUNTIME_EFFECTS_CONDITIONS
+            | LightingFeatureFlags::RUNTIME_LAYER_INDICATOR_CONDITIONS;
+
+        assert!(features.contains(LightingFeatureFlags::RULES));
+        #[cfg(feature = "lighting_legacy_conditional_scenes")]
+        assert!(features.contains(legacy));
+        #[cfg(not(feature = "lighting_legacy_conditional_scenes"))]
+        assert_eq!(features.0 & legacy, 0);
     }
 
     fn session() -> RynkSession {
@@ -2386,7 +2473,7 @@ mod tests {
         });
     }
 
-    #[cfg(feature = "_ble")]
+    #[cfg(all(feature = "_ble", feature = "lighting_legacy_conditional_scenes"))]
     #[test]
     fn extended_chunk_rejects_out_of_range_connection_profile() {
         block_on(async {
@@ -2500,6 +2587,7 @@ mod tests {
 
     /// Full stack: handler validation → protocol mailbox → adapter → engine,
     /// with scene persistence observed on the flash channel.
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     #[test]
     fn scene_endpoints_flow_through_adapter_and_engine() {
         use embassy_futures::select::{Either3, select3};

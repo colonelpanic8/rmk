@@ -16,9 +16,10 @@ pub use lighting::{
     LightingReplicationStatus, PeripheralReplicaStatus, RYNK_LIGHTING_TRANSACTION_CAPACITY, RemoteFrame,
     RemoteFramePort, RemoteFrameRequest, ReplicaDigests, ReplicationHealth, ReplicationMachineState,
     RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox, RynkLightingReadback,
-    StandardRynkLightingAdapter, install_lighting_rule, install_lighting_runtime_conditional_scenes,
-    install_lighting_scenes,
+    StandardRynkLightingAdapter, install_lighting_rule, install_lighting_scenes,
 };
+#[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
+pub use lighting::install_lighting_runtime_conditional_scenes;
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::constants::RYNK_BUFFER_SIZE;
 use rmk_types::protocol::rynk::{
@@ -201,7 +202,12 @@ impl<'a> RynkService<'a> {
             | Cmd::SetLightingExtensionParam
             | Cmd::SetLightingOutputMode
             | Cmd::SetLightingWakeLayers
-            | Cmd::BeginLightingRuntimeConditionalSceneReplace
+            | Cmd::BeginLightingRuleReplace
+            | Cmd::PutLightingRuleChunk
+            | Cmd::CommitLightingRuleReplace
+            | Cmd::AbortLightingRuleReplace => self.lock_config.write_requires_unlock,
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
+            Cmd::BeginLightingRuntimeConditionalSceneReplace
             | Cmd::PutLightingRuntimeConditionalSceneChunk
             | Cmd::CommitLightingRuntimeConditionalSceneReplace
             | Cmd::AbortLightingRuntimeConditionalSceneReplace
@@ -212,11 +218,7 @@ impl<'a> RynkService<'a> {
             | Cmd::BeginLightingAdvancedRuntimeConditionalSceneReplace
             | Cmd::PutLightingAdvancedRuntimeConditionalSceneChunk
             | Cmd::CommitLightingAdvancedRuntimeConditionalSceneReplace
-            | Cmd::AbortLightingAdvancedRuntimeConditionalSceneReplace
-            | Cmd::BeginLightingRuleReplace
-            | Cmd::PutLightingRuleChunk
-            | Cmd::CommitLightingRuleReplace
-            | Cmd::AbortLightingRuleReplace => self.lock_config.write_requires_unlock,
+            | Cmd::AbortLightingAdvancedRuntimeConditionalSceneReplace => self.lock_config.write_requires_unlock,
             _ => Self::needs_storage_write(cmd) && self.lock_config.write_requires_unlock,
         }
     }
@@ -372,43 +374,43 @@ impl<'a> RynkService<'a> {
             Cmd::SetLightingOutputMode => serve::<command::SetLightingOutputMode, _>(self, msg).await,
             #[cfg(feature = "lighting")]
             Cmd::SetLightingWakeLayers => serve::<command::SetLightingWakeLayers, _>(self, msg).await,
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::GetLightingRuntimeConditionalSceneStatus => {
                 serve::<command::GetLightingRuntimeConditionalSceneStatus, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::GetLightingRuntimeConditionalScenes => {
                 serve::<command::GetLightingRuntimeConditionalScenes, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::BeginLightingRuntimeConditionalSceneReplace => {
                 serve::<command::BeginLightingRuntimeConditionalSceneReplace, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::PutLightingRuntimeConditionalSceneChunk => {
                 serve::<command::PutLightingRuntimeConditionalSceneChunk, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::CommitLightingRuntimeConditionalSceneReplace => {
                 serve::<command::CommitLightingRuntimeConditionalSceneReplace, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::AbortLightingRuntimeConditionalSceneReplace => {
                 serve::<command::AbortLightingRuntimeConditionalSceneReplace, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::GetLightingExtendedRuntimeConditionalSceneStatus => {
                 serve::<command::GetLightingExtendedRuntimeConditionalSceneStatus, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::GetLightingAdvancedRuntimeConditionalSceneStatus => {
                 serve::<command::GetLightingAdvancedRuntimeConditionalSceneStatus, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::GetLightingExtendedRuntimeConditionalScenes => {
                 serve::<command::GetLightingExtendedRuntimeConditionalScenes, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::GetLightingAdvancedRuntimeConditionalScenes => {
                 serve::<command::GetLightingAdvancedRuntimeConditionalScenes, _>(self, msg).await
             }
@@ -428,35 +430,35 @@ impl<'a> RynkService<'a> {
             Cmd::CommitLightingRuleReplace => serve::<command::CommitLightingRuleReplace, _>(self, msg).await,
             #[cfg(feature = "lighting")]
             Cmd::AbortLightingRuleReplace => serve::<command::AbortLightingRuleReplace, _>(self, msg).await,
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::BeginLightingExtendedRuntimeConditionalSceneReplace => {
                 serve::<command::BeginLightingExtendedRuntimeConditionalSceneReplace, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::BeginLightingAdvancedRuntimeConditionalSceneReplace => {
                 serve::<command::BeginLightingAdvancedRuntimeConditionalSceneReplace, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::PutLightingExtendedRuntimeConditionalSceneChunk => {
                 serve::<command::PutLightingExtendedRuntimeConditionalSceneChunk, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::PutLightingAdvancedRuntimeConditionalSceneChunk => {
                 serve::<command::PutLightingAdvancedRuntimeConditionalSceneChunk, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::CommitLightingExtendedRuntimeConditionalSceneReplace => {
                 serve::<command::CommitLightingExtendedRuntimeConditionalSceneReplace, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::CommitLightingAdvancedRuntimeConditionalSceneReplace => {
                 serve::<command::CommitLightingAdvancedRuntimeConditionalSceneReplace, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::AbortLightingExtendedRuntimeConditionalSceneReplace => {
                 serve::<command::AbortLightingExtendedRuntimeConditionalSceneReplace, _>(self, msg).await
             }
-            #[cfg(feature = "lighting")]
+            #[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
             Cmd::AbortLightingAdvancedRuntimeConditionalSceneReplace => {
                 serve::<command::AbortLightingAdvancedRuntimeConditionalSceneReplace, _>(self, msg).await
             }
