@@ -112,57 +112,6 @@ pub(crate) fn power_source_changed() {
     LATENCY_CHANGED.immediate_publisher().publish_immediate(());
 }
 
-#[cfg(test)]
-mod latency_tests {
-    use super::*;
-
-    #[test]
-    fn policy_selects_power_source_unless_overridden() {
-        let policy = LatencyPolicy {
-            powered: 0,
-            battery: 4,
-            override_latency: None,
-        };
-        assert_eq!(policy.effective(true), 0);
-        assert_eq!(policy.effective(false), 4);
-        assert_eq!(
-            LatencyPolicy {
-                override_latency: Some(2),
-                ..policy
-            }
-            .effective(true),
-            2
-        );
-        assert_eq!(
-            LatencyPolicy {
-                override_latency: Some(2),
-                ..policy
-            }
-            .effective(false),
-            2
-        );
-    }
-
-    #[test]
-    fn policy_rejects_values_outside_the_ble_limit() {
-        let valid = LatencyPolicy {
-            powered: 499,
-            battery: 499,
-            override_latency: Some(499),
-        };
-        assert!(valid.is_valid());
-        assert!(!LatencyPolicy { powered: 500, ..valid }.is_valid());
-        assert!(!LatencyPolicy { battery: 500, ..valid }.is_valid());
-        assert!(
-            !LatencyPolicy {
-                override_latency: Some(500),
-                ..valid
-            }
-            .is_valid()
-        );
-    }
-}
-
 /// Scan for peripheral addresses, connect them, and hand each connection to
 /// that slot's session; sessions report back on `ended`.
 pub(crate) async fn scan_and_connect_peripherals<'a, C: Controller + ControllerCmdSync<LeSetScanParams>>(
@@ -721,5 +670,56 @@ async fn update_conn_params_on_sleep_change<
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod latency_tests {
+    use super::*;
+
+    #[test]
+    fn policy_selects_power_source_unless_overridden() {
+        let policy = LatencyPolicy {
+            powered: 0,
+            battery: 4,
+            override_latency: None,
+        };
+        assert_eq!(policy.effective(true), 0);
+        assert_eq!(policy.effective(false), 4);
+        assert_eq!(
+            LatencyPolicy {
+                override_latency: Some(2),
+                ..policy
+            }
+            .effective(true),
+            2
+        );
+        assert_eq!(
+            LatencyPolicy {
+                override_latency: Some(2),
+                ..policy
+            }
+            .effective(false),
+            2
+        );
+    }
+
+    #[test]
+    fn policy_rejects_values_outside_the_ble_limit() {
+        let valid = LatencyPolicy {
+            powered: 499,
+            battery: 499,
+            override_latency: Some(499),
+        };
+        assert!(valid.is_valid());
+        assert!(!LatencyPolicy { powered: 500, ..valid }.is_valid());
+        assert!(!LatencyPolicy { battery: 500, ..valid }.is_valid());
+        assert!(
+            !LatencyPolicy {
+                override_latency: Some(500),
+                ..valid
+            }
+            .is_valid()
+        );
     }
 }
