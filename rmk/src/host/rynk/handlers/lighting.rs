@@ -1,18 +1,6 @@
 //! Native Rynk lighting handlers and bounded replacement transactions.
 use embassy_time::Instant;
 use heapless::{String, Vec};
-use rmk_types::protocol::rynk::command::{
-    AbortLightingRuleReplace, BeginLightingRuleReplace, ClearLightingOverlay, CommitLightingRuleReplace,
-    GetLightingCapabilities, GetLightingCompiledSceneStatus, GetLightingCompiledScenes,
-    GetLightingConditionalSceneStatus, GetLightingConditionalScenes, GetLightingExtension, GetLightingExtensionLayers,
-    GetLightingExtensionNames, GetLightingExtensionParams, GetLightingFrame, GetLightingKeys, GetLightingLeds,
-    GetLightingOutputMode, GetLightingOutputs, GetLightingOverlay, GetLightingPhysicalKeys, GetLightingReplicaStatus,
-    GetLightingRoutes, GetLightingRuleStatus, GetLightingRules, GetLightingSceneStatus, GetLightingScenes,
-    GetLightingState, GetLightingZoneMemberships, GetLightingZones, PutLightingRuleChunk,
-    SetLightingExtensionLayers, SetLightingExtensionParam, SetLightingExtensionState, SetLightingLayerPolicy,
-    SetLightingOutputMode, SetLightingOverlay, SetLightingSceneCell, SetLightingState, SetLightingWakeLayers,
-    UnsetLightingOverlay, UnsetLightingSceneCell,
-};
 #[cfg(feature = "lighting_legacy_conditional_scenes")]
 use rmk_types::protocol::rynk::command::{
     AbortLightingAdvancedRuntimeConditionalSceneReplace, AbortLightingExtendedRuntimeConditionalSceneReplace,
@@ -25,6 +13,18 @@ use rmk_types::protocol::rynk::command::{
     GetLightingRuntimeConditionalScenes, PutLightingAdvancedRuntimeConditionalSceneChunk,
     PutLightingExtendedRuntimeConditionalSceneChunk, PutLightingRuntimeConditionalSceneChunk,
 };
+use rmk_types::protocol::rynk::command::{
+    AbortLightingRuleReplace, BeginLightingRuleReplace, ClearLightingOverlay, CommitLightingRuleReplace,
+    GetLightingCapabilities, GetLightingCompiledSceneStatus, GetLightingCompiledScenes,
+    GetLightingConditionalSceneStatus, GetLightingConditionalScenes, GetLightingExtension, GetLightingExtensionLayers,
+    GetLightingExtensionNames, GetLightingExtensionParams, GetLightingFrame, GetLightingKeys, GetLightingLeds,
+    GetLightingOutputMode, GetLightingOutputs, GetLightingOverlay, GetLightingPhysicalKeys, GetLightingReplicaStatus,
+    GetLightingRoutes, GetLightingRuleStatus, GetLightingRules, GetLightingSceneStatus, GetLightingScenes,
+    GetLightingState, GetLightingZoneMemberships, GetLightingZones, PutLightingRuleChunk, SetLightingExtensionLayers,
+    SetLightingExtensionParam, SetLightingExtensionState, SetLightingLayerPolicy, SetLightingOutputMode,
+    SetLightingOverlay, SetLightingSceneCell, SetLightingState, SetLightingWakeLayers, UnsetLightingOverlay,
+    UnsetLightingSceneCell,
+};
 use rmk_types::protocol::rynk::{
     AbortLightingOverlayReplaceRequest, AbortLightingRuntimeConditionalSceneReplaceRequest,
     AbortLightingSceneReplaceRequest, BeginLightingOverlayReplaceRequest,
@@ -35,28 +35,27 @@ use rmk_types::protocol::rynk::{
     LightingCentralReplicaState, LightingCompiledSceneStatus, LightingCompiledSceneStatusResult,
     LightingCompiledScenesPageResult, LightingConditionalSceneCell, LightingConditionalSceneStatus,
     LightingConditionalSceneStatusResult, LightingConditionalScenesPage, LightingConditionalScenesPageResult,
-    LightingEffectFlags, LightingError, LightingExtensionLayersResult,
-    LightingExtensionNamesPageResult, LightingExtensionNamesRequest, LightingExtensionParamsPageResult,
-    LightingExtensionParamsRequest, LightingExtensionResult, LightingFeatureFlags, LightingFramePage,
-    LightingFramePageResult, LightingFrameRequest, LightingKeysPage, LightingKeysPageResult, LightingLed,
-    LightingLedId, LightingLedsPage, LightingLedsPageResult, LightingMatrixPosition, LightingNodeId, LightingOutput,
-    LightingOutputCapabilities, LightingOutputCoverage, LightingOutputModeStateResult, LightingOutputsPage,
-    LightingOutputsPageResult, LightingOverlayCell, LightingOverlayPageRequest, LightingOverlayPageResult,
-    LightingOverlayTransaction, LightingOverlayTransactionResult, LightingPageRequest, LightingPeripheralReplicaState,
-    LightingPhysicalKey, LightingPhysicalKeysPage, LightingPhysicalKeysPageResult, LightingPoint3,
-    LightingReplicaDigests, LightingReplicaStatus, LightingReplicaStatusResult, LightingReplicationHealth,
-    LightingReplicationMachine, LightingResult, LightingRgb8, LightingRoute, LightingRoutesPage,
-    LightingRoutesPageResult, LightingRuleStatus, LightingRuleStatusResult, LightingRulesPageResult,
-    LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneTransactionResult,
-    LightingScenePageRequest, LightingSceneStatus,
+    LightingEffectFlags, LightingError, LightingExtensionLayersResult, LightingExtensionNamesPageResult,
+    LightingExtensionNamesRequest, LightingExtensionParamsPageResult, LightingExtensionParamsRequest,
+    LightingExtensionResult, LightingFeatureFlags, LightingFramePage, LightingFramePageResult, LightingFrameRequest,
+    LightingKeysPage, LightingKeysPageResult, LightingLed, LightingLedId, LightingLedsPage, LightingLedsPageResult,
+    LightingMatrixPosition, LightingNodeId, LightingOutput, LightingOutputCapabilities, LightingOutputCoverage,
+    LightingOutputModeStateResult, LightingOutputsPage, LightingOutputsPageResult, LightingOverlayCell,
+    LightingOverlayPageRequest, LightingOverlayPageResult, LightingOverlayTransaction,
+    LightingOverlayTransactionResult, LightingPageRequest, LightingPeripheralReplicaState, LightingPhysicalKey,
+    LightingPhysicalKeysPage, LightingPhysicalKeysPageResult, LightingPoint3, LightingReplicaDigests,
+    LightingReplicaStatus, LightingReplicaStatusResult, LightingReplicationHealth, LightingReplicationMachine,
+    LightingResult, LightingRgb8, LightingRoute, LightingRoutesPage, LightingRoutesPageResult, LightingRuleStatus,
+    LightingRuleStatusResult, LightingRulesPageResult, LightingRuntimeConditionalScenePageRequest,
+    LightingRuntimeConditionalSceneTransactionResult, LightingScenePageRequest, LightingSceneStatus,
     LightingSceneStatusResult, LightingSceneTransactionResult, LightingScenesPageResult, LightingState,
     LightingStateResult, LightingUnitResult, LightingZone, LightingZoneId, LightingZoneMembershipsPage,
     LightingZoneMembershipsPageResult, LightingZonesPage, LightingZonesPageResult, PutLightingOverlayChunkRequest,
     PutLightingRuleChunkRequest, PutLightingSceneChunkRequest, RynkError, RynkMessage,
-    SetLightingExtensionLayersRequest,
-    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
-    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetLightingWakeLayersRequest, UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
+    SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
+    SetLightingLayerPolicyRequest, SetLightingOutputModeRequest, SetLightingOverlayRequest,
+    SetLightingSceneCellRequest, SetLightingStateRequest, SetLightingWakeLayersRequest, UnsetLightingOverlayRequest,
+    UnsetLightingSceneCellRequest,
 };
 #[cfg(feature = "lighting_legacy_conditional_scenes")]
 use rmk_types::protocol::rynk::{
@@ -2050,8 +2049,7 @@ mod tests {
     fn legacy_conditional_scene_capabilities_follow_the_cargo_feature() {
         let mailbox = RynkLightingMailbox::new();
         let features = capabilities(
-            RynkLightingController::new(&mailbox, descriptor(), 8)
-                .with_runtime_conditional_scene_capacity(4),
+            RynkLightingController::new(&mailbox, descriptor(), 8).with_runtime_conditional_scene_capacity(4),
         )
         .features;
         let legacy = LightingFeatureFlags::RUNTIME_CONDITIONAL_SCENES

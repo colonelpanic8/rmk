@@ -15,6 +15,12 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use heapless::{String, Vec};
 use postcard::experimental::max_size::MaxSize;
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
+use rmk_types::protocol::rynk::{
+    LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE,
+    LightingAdvancedConditionalSceneCell as WireAdvancedConditionalSceneCell,
+    LightingAdvancedRuntimeConditionalScenesPage, LightingRuntimeConditionalScenesPage,
+};
 use rmk_types::protocol::rynk::{
     LIGHTING_EXTENSION_NAME_CHUNK, LIGHTING_EXTENSION_NAME_SIZE, LIGHTING_EXTENSION_PARAM_CHUNK,
     LIGHTING_OVERLAY_CHUNK_SIZE, LIGHTING_SCENE_CHUNK_SIZE, LightingBackgroundMode, LightingBackgroundState,
@@ -26,12 +32,6 @@ use rmk_types::protocol::rynk::{
     LightingOutputModeState, LightingOverlayCell, LightingOverlayPage, LightingResult, LightingRgb8, LightingRule,
     LightingRulesPage, LightingRuntimeConditionalSceneTransaction, LightingSceneCell, LightingSceneTransaction,
     LightingScenesPage, LightingState,
-};
-#[cfg(feature = "lighting_legacy_conditional_scenes")]
-use rmk_types::protocol::rynk::{
-    LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE,
-    LightingAdvancedConditionalSceneCell as WireAdvancedConditionalSceneCell,
-    LightingAdvancedRuntimeConditionalScenesPage, LightingRuntimeConditionalScenesPage,
 };
 
 use crate::RawMutex;
