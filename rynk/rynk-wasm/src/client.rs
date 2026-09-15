@@ -40,13 +40,13 @@ use rynk::rmk_types::protocol::rynk::{
     LightingRulesPage, LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
     LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
     LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZoneMembershipsPage,
-    LightingZonesPage, LockStatus, MatrixState, PeripheralStatus, ProtocolVersion,
+    LightingZonesPage, LockStatus, MaintenanceMode, MatrixState, PeripheralStatus, ProtocolVersion,
     PutLightingAdvancedRuntimeConditionalSceneChunkRequest, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
     PutLightingOverlayChunkRequest, PutLightingRuleChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest,
     PutLightingSceneChunkRequest, SetComboBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMorseBulkRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
+    SetMorseBulkRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, SplitTransportState, StorageResetMode,
     UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
@@ -223,6 +223,8 @@ endpoints! {
     get_peripheral_status(slot: u8) -> PeripheralStatus,
     get_wpm() -> u16,
     get_sleep_state() -> bool,
+    get_maintenance_mode() -> MaintenanceMode,
+    get_split_transport() -> SplitTransportState,
     // lighting
     get_lighting_capabilities() -> LightingCapabilities,
     get_lighting_state() -> LightingState,
