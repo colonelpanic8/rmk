@@ -2010,7 +2010,7 @@ mod tests {
         };
         round_trip(&request);
         assert_max_size_bound(&request);
-        assert!(PutLightingOverlayChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(PutLightingOverlayChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
 
         let page = LightingOverlayPage {
             revision: u32::MAX,
@@ -2019,7 +2019,7 @@ mod tests {
         };
         round_trip(&page);
         assert_max_size_bound(&page);
-        assert!(LightingOverlayPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingOverlayPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
     }
 
     #[test]
@@ -2098,7 +2098,7 @@ mod tests {
         };
         round_trip(&request);
         assert_max_size_bound(&request);
-        assert!(PutLightingSceneChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(PutLightingSceneChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
 
         let page = LightingScenesPage {
             revision: u32::MAX,
@@ -2107,7 +2107,7 @@ mod tests {
         };
         round_trip(&page);
         assert_max_size_bound(&page);
-        assert!(LightingScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
 
         let compiled_page = LightingCompiledScenesPage {
             topology_revision: u32::MAX,
@@ -2116,7 +2116,7 @@ mod tests {
         };
         round_trip(&compiled_page);
         assert_max_size_bound(&compiled_page);
-        assert!(LightingCompiledScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingCompiledScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
     }
 
     #[test]
@@ -2141,7 +2141,7 @@ mod tests {
         };
         round_trip(&page);
         assert_max_size_bound(&page);
-        assert!(LightingFramePage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingFramePage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
 
         // The unpresented and empty-tail cases hosts hit while paging.
         round_trip(&LightingFramePage {
@@ -2207,7 +2207,7 @@ mod tests {
         };
         round_trip(&full);
         assert_max_size_bound(&full);
-        assert!(LightingReplicaStatus::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingReplicaStatus::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
 
         // Never-heard-from is encoded as absence, not as a zero snapshot.
         round_trip(&LightingReplicaStatus {
@@ -2267,7 +2267,7 @@ mod tests {
         };
         round_trip(&page);
         assert_max_size_bound(&page);
-        assert!(LightingConditionalScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingConditionalScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
     }
 
     #[test]
@@ -2312,7 +2312,7 @@ mod tests {
         };
         round_trip(&page);
         assert_max_size_bound(&page);
-        assert!(LightingExtendedRuntimeConditionalScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingExtendedRuntimeConditionalScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
 
         let request = PutLightingExtendedRuntimeConditionalSceneChunkRequest {
             transaction_id: u32::MAX,
@@ -2321,7 +2321,7 @@ mod tests {
         };
         round_trip(&request);
         assert_max_size_bound(&request);
-        assert!(PutLightingExtendedRuntimeConditionalSceneChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(PutLightingExtendedRuntimeConditionalSceneChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
     }
 
     #[test]
@@ -2386,7 +2386,7 @@ mod tests {
         };
         round_trip(&page);
         assert_max_size_bound(&page);
-        assert!(LightingAdvancedRuntimeConditionalScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingAdvancedRuntimeConditionalScenesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
 
         let request = PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
             transaction_id: u32::MAX,
@@ -2395,7 +2395,7 @@ mod tests {
         };
         round_trip(&request);
         assert_max_size_bound(&request);
-        assert!(PutLightingAdvancedRuntimeConditionalSceneChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(PutLightingAdvancedRuntimeConditionalSceneChunkRequest::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
     }
 
     #[cfg(feature = "host")]
@@ -2573,7 +2573,7 @@ mod tests {
         };
         round_trip(&page);
         assert_max_size_bound(&page);
-        assert!(LightingExtensionParamsPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingExtensionParamsPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
     }
 
     #[test]
@@ -2589,7 +2589,7 @@ mod tests {
         let page = LightingExtensionNamesPage { total: u8::MAX, items };
         round_trip(&page);
         assert_max_size_bound(&page);
-        assert!(LightingExtensionNamesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE);
+        const { assert!(LightingExtensionNamesPage::POSTCARD_MAX_SIZE <= LIGHTING_PAYLOAD_SIZE) };
     }
 
     #[test]

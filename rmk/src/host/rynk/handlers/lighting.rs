@@ -1741,6 +1741,96 @@ async fn abort(
     Err(state.transaction_error(req.transaction_id))
 }
 
+impl Handle<GetLightingExtendedRuntimeConditionalSceneStatus> for RynkService<'_> {
+    async fn handle(&self, req: ()) -> Result<LightingRuntimeConditionalSceneStatusResult, RynkError> {
+        <Self as Handle<GetLightingAdvancedRuntimeConditionalSceneStatus>>::handle(self, req).await
+    }
+}
+
+impl Handle<BeginLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: BeginLightingRuntimeConditionalSceneReplaceRequest,
+    ) -> Result<LightingRuntimeConditionalSceneTransactionResult, RynkError> {
+        <Self as Handle<BeginLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
+    }
+}
+
+impl Handle<CommitLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: CommitLightingRuntimeConditionalSceneReplaceRequest,
+    ) -> Result<LightingStateResult, RynkError> {
+        <Self as Handle<CommitLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
+    }
+}
+
+impl Handle<AbortLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: AbortLightingRuntimeConditionalSceneReplaceRequest,
+    ) -> Result<LightingUnitResult, RynkError> {
+        <Self as Handle<AbortLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
+    }
+}
+
+impl Handle<GetLightingExtendedRuntimeConditionalScenes> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: LightingRuntimeConditionalScenePageRequest,
+    ) -> Result<LightingExtendedRuntimeConditionalScenesPageResult, RynkError> {
+        Ok(
+            match <Self as Handle<GetLightingAdvancedRuntimeConditionalScenes>>::handle(self, req).await? {
+                Ok(page) => {
+                    let mut items = heapless::Vec::new();
+                    for cell in page.items {
+                        match cell.try_into() {
+                            Ok(cell) => {
+                                let _ = items.push(cell);
+                            }
+                            Err(error) => return Ok(Err(error)),
+                        }
+                    }
+                    Ok(LightingExtendedRuntimeConditionalScenesPage {
+                        revision: page.revision,
+                        total_count: page.total_count,
+                        items,
+                    })
+                }
+                Err(error) => Err(error),
+            },
+        )
+    }
+}
+impl Handle<PutLightingExtendedRuntimeConditionalSceneChunk> for RynkService<'_> {
+    async fn handle(
+        &self,
+        req: PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    ) -> Result<LightingUnitResult, RynkError> {
+        let mut offset = req.offset;
+        for chunk in req.cells.chunks(LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE) {
+            let mut cells = heapless::Vec::new();
+            for cell in chunk {
+                let _ = cells.push((*cell).into());
+            }
+            let result = <Self as Handle<PutLightingAdvancedRuntimeConditionalSceneChunk>>::handle(
+                self,
+                PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
+                    transaction_id: req.transaction_id,
+                    offset,
+                    cells,
+                },
+            )
+            .await?;
+            if result.is_err() {
+                return Ok(result);
+            }
+            offset += chunk.len() as u16;
+        }
+        Ok(Ok(()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate alloc;
@@ -3191,95 +3281,5 @@ mod tests {
                 )));
             }
         });
-    }
-}
-
-impl Handle<GetLightingExtendedRuntimeConditionalSceneStatus> for RynkService<'_> {
-    async fn handle(&self, req: ()) -> Result<LightingRuntimeConditionalSceneStatusResult, RynkError> {
-        <Self as Handle<GetLightingAdvancedRuntimeConditionalSceneStatus>>::handle(self, req).await
-    }
-}
-
-impl Handle<BeginLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
-    async fn handle(
-        &self,
-        req: BeginLightingRuntimeConditionalSceneReplaceRequest,
-    ) -> Result<LightingRuntimeConditionalSceneTransactionResult, RynkError> {
-        <Self as Handle<BeginLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
-    }
-}
-
-impl Handle<CommitLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
-    async fn handle(
-        &self,
-        req: CommitLightingRuntimeConditionalSceneReplaceRequest,
-    ) -> Result<LightingStateResult, RynkError> {
-        <Self as Handle<CommitLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
-    }
-}
-
-impl Handle<AbortLightingExtendedRuntimeConditionalSceneReplace> for RynkService<'_> {
-    async fn handle(
-        &self,
-        req: AbortLightingRuntimeConditionalSceneReplaceRequest,
-    ) -> Result<LightingUnitResult, RynkError> {
-        <Self as Handle<AbortLightingAdvancedRuntimeConditionalSceneReplace>>::handle(self, req).await
-    }
-}
-
-impl Handle<GetLightingExtendedRuntimeConditionalScenes> for RynkService<'_> {
-    async fn handle(
-        &self,
-        req: LightingRuntimeConditionalScenePageRequest,
-    ) -> Result<LightingExtendedRuntimeConditionalScenesPageResult, RynkError> {
-        Ok(
-            match <Self as Handle<GetLightingAdvancedRuntimeConditionalScenes>>::handle(self, req).await? {
-                Ok(page) => {
-                    let mut items = heapless::Vec::new();
-                    for cell in page.items {
-                        match cell.try_into() {
-                            Ok(cell) => {
-                                let _ = items.push(cell);
-                            }
-                            Err(error) => return Ok(Err(error)),
-                        }
-                    }
-                    Ok(LightingExtendedRuntimeConditionalScenesPage {
-                        revision: page.revision,
-                        total_count: page.total_count,
-                        items,
-                    })
-                }
-                Err(error) => Err(error),
-            },
-        )
-    }
-}
-impl Handle<PutLightingExtendedRuntimeConditionalSceneChunk> for RynkService<'_> {
-    async fn handle(
-        &self,
-        req: PutLightingExtendedRuntimeConditionalSceneChunkRequest,
-    ) -> Result<LightingUnitResult, RynkError> {
-        let mut offset = req.offset;
-        for chunk in req.cells.chunks(LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE) {
-            let mut cells = heapless::Vec::new();
-            for cell in chunk {
-                let _ = cells.push((*cell).into());
-            }
-            let result = <Self as Handle<PutLightingAdvancedRuntimeConditionalSceneChunk>>::handle(
-                self,
-                PutLightingAdvancedRuntimeConditionalSceneChunkRequest {
-                    transaction_id: req.transaction_id,
-                    offset,
-                    cells,
-                },
-            )
-            .await?;
-            if result.is_err() {
-                return Ok(result);
-            }
-            offset += chunk.len() as u16;
-        }
-        Ok(Ok(()))
     }
 }

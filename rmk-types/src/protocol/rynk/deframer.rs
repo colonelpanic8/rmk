@@ -165,8 +165,8 @@ mod tests {
 
         let mut buf = [0u8; 64];
         let mut df = Deframer::new();
-        for i in 0..n {
-            df.tail(&mut buf)[0] = src[i];
+        for (i, &byte) in src[..n].iter().enumerate() {
+            df.tail(&mut buf)[0] = byte;
             df.commit(1);
             if i + 1 < n {
                 assert!(df.next(&mut buf).is_none(), "no frame before the delimiter");
@@ -450,9 +450,8 @@ mod tests {
                         }
                         2 => {
                             // Longer than the buffer with no delimiter: dropped via the overflow drain.
-                            for _ in 0..cap + 1 + rng.below(cap) {
-                                stream.push(0xFF);
-                            }
+                            let run = cap + 1 + rng.below(cap);
+                            stream.resize(stream.len() + run, 0xFF);
                             stream.push(0x00);
                         }
                         _ => {
