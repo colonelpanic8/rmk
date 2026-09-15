@@ -199,6 +199,7 @@ impl<'a> RynkService<'a> {
             | Cmd::PutLightingRuleChunk
             | Cmd::CommitLightingRuleReplace
             | Cmd::AbortLightingRuleReplace => self.lock_config.write_requires_unlock,
+            #[cfg(feature = "lighting")]
             Cmd::BeginLightingRuntimeConditionalSceneReplace
             | Cmd::PutLightingRuntimeConditionalSceneChunk
             | Cmd::CommitLightingRuntimeConditionalSceneReplace
