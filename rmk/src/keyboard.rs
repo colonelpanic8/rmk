@@ -142,7 +142,7 @@ impl Runnable for Keyboard<'_> {
     /// The report is sent using `send_report`.
     async fn run(&mut self) -> ! {
         loop {
-            // TODO: Now the unprocessed_events is only used in held_for_5s.
+            // Events deferred by long-press and profile double-tap detection.
             // Maybe it can be removed in the future?
             if !self.unprocessed_events.is_empty() {
                 // Process unprocessed events
@@ -1701,6 +1701,55 @@ impl<'a> Keyboard<'a> {
         }
     }
 
+    /// Detect a quick second tap of the same physical profile key.
+    ///
+    /// The events are consumed only when a complete second tap arrives inside
+    /// the window. Any interrupted attempt is replayed through the normal
+    /// keyboard pipeline in its original order.
+    #[cfg(feature = "_ble")]
+    async fn profile_double_tapped(&mut self, first_release: KeyboardEvent) -> bool {
+        const DOUBLE_TAP_WINDOW_MS: u64 = 300;
+
+        let second_press = match select(
+            embassy_time::Timer::after_millis(DOUBLE_TAP_WINDOW_MS),
+            self.keyboard_event_subscriber.next_message_pure(),
+        )
+        .await
+        {
+            Either::First(_) => return false,
+            Either::Second(event) if event.pressed && event.pos == first_release.pos => event,
+            Either::Second(event) => {
+                if self.unprocessed_events.push(event).is_err() {
+                    warn!("Unprocessed event queue is full, dropping event");
+                }
+                return false;
+            }
+        };
+
+        match select(
+            embassy_time::Timer::after_millis(DOUBLE_TAP_WINDOW_MS),
+            self.keyboard_event_subscriber.next_message_pure(),
+        )
+        .await
+        {
+            Either::Second(event) if !event.pressed && event.pos == first_release.pos => true,
+            Either::First(_) => {
+                if self.unprocessed_events.push(second_press).is_err() {
+                    warn!("Unprocessed event queue is full, dropping event");
+                }
+                false
+            }
+            Either::Second(event) => {
+                for deferred in [second_press, event] {
+                    if self.unprocessed_events.push(deferred).is_err() {
+                        warn!("Unprocessed event queue is full, dropping event");
+                    }
+                }
+                false
+            }
+        }
+    }
+
     async fn process_user(&mut self, id: u8, event: KeyboardEvent) {
         debug!("Processing user key id: {:?}, event: {:?}", id, event);
 
@@ -1739,8 +1788,19 @@ impl<'a> Keyboard<'a> {
                 // Slots 0..NUM_BLE_PROFILE select a profile directly; the next four are
                 // fixed actions stacked on top.
                 if id < NUM_BLE_PROFILE as u8 {
-                    info!("Switch to profile: {}", id);
-                    BLE_PROFILE_CHANNEL.send(BleProfileAction::Switch(id)).await;
+                    // MoErgo's Magic-layer double tap temporarily disconnects a
+                    // non-selected host without forgetting its bond. RMK keeps only
+                    // the selected host connected, so consuming the switch is the
+                    // equivalent operation: the target stays disconnected and a
+                    // later single tap reconnects it.
+                    let temporarily_disconnected = id != crate::state::current_profile()
+                        && self.profile_double_tapped(event).await;
+                    if temporarily_disconnected {
+                        info!("Keeping BLE profile {} temporarily disconnected", id);
+                    } else {
+                        info!("Switch to profile: {}", id);
+                        BLE_PROFILE_CHANNEL.send(BleProfileAction::Switch(id)).await;
+                    }
                 } else if id == NUM_BLE_PROFILE as u8 {
                     // Next profile
                     BLE_PROFILE_CHANNEL.send(BleProfileAction::Next).await;
@@ -2142,6 +2202,66 @@ mod test {
 
     fn create_test_keyboard() -> Keyboard<'static> {
         create_test_keyboard_with_config(BehaviorConfig::default())
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn profile_double_tap_consumes_the_complete_second_tap() {
+        use crate::event::{AsyncEventPublisher, AsyncPublishableEvent};
+
+        block_on(async {
+            let mut keyboard = create_test_keyboard();
+            let sender = KeyboardEvent::publisher_async().expect("free keyboard-event publisher");
+            let position = KeyboardEventPos::Key(KeyPos { row: 3, col: 6 });
+            let first_release = KeyboardEvent {
+                pressed: false,
+                pos: position,
+            };
+
+            let (detected, ()) = embassy_futures::join::join(
+                keyboard.profile_double_tapped(first_release),
+                async {
+                    sender
+                        .publish_async(KeyboardEvent {
+                            pressed: true,
+                            pos: position,
+                        })
+                        .await;
+                    sender
+                        .publish_async(KeyboardEvent {
+                            pressed: false,
+                            pos: position,
+                        })
+                        .await;
+                },
+            )
+            .await;
+
+            assert!(detected);
+            assert!(keyboard.unprocessed_events.is_empty());
+        });
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn profile_double_tap_replays_an_intervening_event() {
+        use crate::event::{AsyncEventPublisher, AsyncPublishableEvent};
+
+        block_on(async {
+            let mut keyboard = create_test_keyboard();
+            let sender = KeyboardEvent::publisher_async().expect("free keyboard-event publisher");
+            let first_release = KeyboardEvent::key(3, 6, false);
+            let intervening = KeyboardEvent::key(0, 0, false);
+
+            let (detected, ()) = embassy_futures::join::join(
+                keyboard.profile_double_tapped(first_release),
+                sender.publish_async(intervening),
+            )
+            .await;
+
+            assert!(!detected);
+            assert_eq!(keyboard.unprocessed_events.as_slice(), &[intervening]);
+        });
     }
 
     async fn force_timeout_first_hold(keyboard: &mut Keyboard<'static>) {
