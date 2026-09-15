@@ -10,6 +10,8 @@
 BatteryStatusChange topic Available{Discharging,85}                             03 06 80 05 01 01 01 55 00
 BootloaderJump reply Ok(())                                                     02 04 02 01 01 00
 BootloaderJump request ()                                                       02 04 02 01 00
+ClearAllBleProfiles reply Ok(())                                                04 0c 07 01 01 00
+ClearAllBleProfiles request ()                                                  04 0c 07 01 00
 ClearBleProfile reply Ok(())                                                    04 05 07 01 01 00
 ClearBleProfile request 1                                                       05 05 07 01 01 00
 ConnectionChange topic ConnectionStatus{Configured,{1,Adv},Ble}                 03 03 80 03 02 01 02 01 00
@@ -55,7 +57,7 @@ GetPeripheralStatus reply Ok(PeripheralStatus{true,Available{Discharging,85}})  
 GetPeripheralStatus request 1                                                   05 04 08 01 01 00
 GetSleepState reply Ok(true)                                                    04 06 08 01 02 01 00
 GetSleepState request ()                                                        04 06 08 01 00
-GetVersion reply Ok(CURRENT)                                                    02 01 02 01 01 02 01 00
+GetVersion reply Ok(CURRENT)                                                    02 01 02 01 01 02 02 00
 GetVersion request ()                                                           02 01 02 01 00
 GetWpm reply Ok(42)                                                             04 05 08 01 02 2a 00
 GetWpm request ()                                                               04 05 08 01 00

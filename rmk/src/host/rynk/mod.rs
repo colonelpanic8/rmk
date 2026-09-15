@@ -52,7 +52,7 @@ impl<'a> RynkService<'a> {
             Cmd::BootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => true,
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
             #[cfg(feature = "_ble")]
-            Cmd::ClearBleProfile => true,
+            Cmd::ClearBleProfile | Cmd::ClearAllBleProfiles => true,
             Cmd::SetKeyAction
             | Cmd::SetDefaultLayer
             | Cmd::SetEncoderAction
@@ -123,6 +123,8 @@ impl<'a> RynkService<'a> {
             Cmd::SwitchBleProfile => serve::<command::SwitchBleProfile, _>(self, msg).await,
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => serve::<command::ClearBleProfile, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::ClearAllBleProfiles => serve::<command::ClearAllBleProfiles, _>(self, msg).await,
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,

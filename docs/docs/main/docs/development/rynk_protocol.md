@@ -5,7 +5,7 @@
 
 # Rynk Protocol Reference
 
-Current protocol version: **0.1**.
+Current protocol version: **0.2**.
 
 Every transport (USB vendor bulk, BLE GATT, BLE HID) carries the same frame — a 3-byte header plus a [postcard](https://docs.rs/postcard)-encoded payload:
 
@@ -62,7 +62,7 @@ A request's response is postcard `Result<T, RynkError>`; the `Err` side is one o
 
 ## Lock
 
-Commands that can flash firmware, wipe storage, or read the matrix sit behind a physical-presence unlock. `BootloaderJump`, `StorageReset`, `GetMatrixState`, and (with `_ble`) `ClearBleProfile` always need an unlocked session; every `Set*` command joins them when the firmware was built with `[host] write_requires_unlock = true`. A gated command on a locked session answers `Locked` and does nothing. `GetLockStatus`, `UnlockPoll`, and `Lock` are never gated.
+Commands that can flash firmware, wipe storage, or read the matrix sit behind a physical-presence unlock. `BootloaderJump`, `StorageReset`, `GetMatrixState`, and (with `_ble`) `ClearBleProfile` and `ClearAllBleProfiles` always need an unlocked session; every `Set*` command joins them when the firmware was built with `[host] write_requires_unlock = true`. A gated command on a locked session answers `Locked` and does nothing. `GetLockStatus`, `UnlockPoll`, and `Lock` are never gated.
 
 The lock is per session and starts locked; `Lock` or the end of the session (unplug, BLE disconnect) relocks it. To unlock, a host polls `UnlockPoll` while the user holds the challenge keys that `LockStatus.key_positions` reports (`[host].unlock_keys`); the session is unlocked once `locked` clears. With no `unlock_keys` configured the challenge is empty and the gated commands can never be unlocked; a firmware built with `[host] insecure = true` starts unlocked and ignores `Lock`. See [Rynk](../features/rynk#locking-dangerous-operations) for the user-facing side.
 
@@ -107,6 +107,7 @@ The lock is per session and starts locked; `Lock` or the end of the session (unp
 | `0x0703` | `GetBleStatus`        | `()`                   | `BleStatus`             | `_ble`  |                                                                              |
 | `0x0704` | `SwitchBleProfile`    | `u8`                   | `()`                    | `_ble`  |                                                                              |
 | `0x0705` | `ClearBleProfile`     | `u8`                   | `()`                    | `_ble`  |                                                                              |
+| `0x070C` | `ClearAllBleProfiles` | `()`                   | `()`                    | `_ble`  |                                                                              |
 | `0x0801` | `GetCurrentLayer`     | `()`                   | `u8`                    |         |                                                                              |
 | `0x0802` | `GetMatrixState`      | `()`                   | `MatrixState`           |         |                                                                              |
 | `0x0803` | `GetBatteryStatus`    | `()`                   | `BatteryStatus`         | `_ble`  |                                                                              |
