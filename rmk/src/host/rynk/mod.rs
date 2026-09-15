@@ -11,6 +11,8 @@ mod topics;
 
 use embassy_futures::select::{Either, select};
 use embedded_io_async::{Read, Write};
+#[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
+pub use lighting::install_lighting_runtime_conditional_scenes;
 #[cfg(feature = "lighting")]
 pub use lighting::{
     LightingReplicationStatus, PeripheralReplicaStatus, RYNK_LIGHTING_TRANSACTION_CAPACITY, RemoteFrame,
@@ -18,8 +20,6 @@ pub use lighting::{
     RynkLightingController, RynkLightingDescriptor, RynkLightingMailbox, RynkLightingReadback,
     StandardRynkLightingAdapter, install_lighting_rule, install_lighting_scenes,
 };
-#[cfg(all(feature = "lighting", feature = "lighting_legacy_conditional_scenes"))]
-pub use lighting::install_lighting_runtime_conditional_scenes;
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::constants::RYNK_BUFFER_SIZE;
 use rmk_types::protocol::rynk::{
