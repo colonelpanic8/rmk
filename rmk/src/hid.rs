@@ -59,7 +59,7 @@ pub struct ViaReport {
 }
 
 /// Vendor HID report carrying the Rynk config protocol over HID.
-#[cfg(feature = "rynk")]
+#[cfg(any(feature = "rynk", all(feature = "dongle", not(feature = "vial"))))]
 #[gen_hid_descriptor(
     (collection = APPLICATION, usage_page = 0xFF14, usage = 0x61) = {
         (usage = 0x62, logical_min = 0x0) = {
