@@ -55,6 +55,20 @@ pub(crate) mod profile;
 pub(crate) mod scan;
 pub(crate) mod sleep;
 
+/// Forget the bond in the active BLE host profile.
+pub async fn clear_active_profile() {
+    crate::channel::BLE_PROFILE_CHANNEL
+        .send(profile::BleProfileAction::ClearBond)
+        .await;
+}
+
+/// Forget the bonds in every BLE host profile, preserving split and dongle bonds.
+pub async fn clear_all_profiles() {
+    crate::channel::BLE_PROFILE_CHANNEL
+        .send(profile::BleProfileAction::ClearAllBonds)
+        .await;
+}
+
 #[cfg(all(feature = "subrating", feature = "_no_subrating"))]
 compile_error!("You may not enable feature `subrating` on unsupported platforms!");
 

@@ -86,6 +86,7 @@ pub(crate) enum BleProfileAction {
     Previous,
     Next,
     ClearBond,
+    ClearAllBonds,
     /// Clear the bond for an explicit slot, regardless of which slot is
     /// currently active. Rynk's `Cmd::ClearBleProfile` issues this so a host
     /// tool can wipe any bond without first switching to it.
@@ -285,6 +286,26 @@ where
             .await;
     }
 
+    /// Clear bonding information from every host profile.
+    pub(crate) async fn clear_all_bonds(&mut self) {
+        info!("Clearing bonding information from all host profiles");
+
+        for bond_info in self.bonded_devices.iter_mut() {
+            if (bond_info.slot_num as usize) < NUM_BLE_PROFILE {
+                bond_info.removed = true;
+            }
+        }
+
+        self.update_stack_bonds();
+
+        #[cfg(feature = "storage")]
+        for slot_num in 0..NUM_BLE_PROFILE as u8 {
+            FLASH_CHANNEL
+                .send(crate::storage::FlashOperationMessage::ClearSlot(slot_num))
+                .await;
+        }
+    }
+
     /// Switch to the specified profile, return true if the profile is switched
     pub(crate) async fn switch_profile(&mut self, profile: u8) -> bool {
         let current = current_profile();
@@ -349,6 +370,9 @@ where
                         }
                         BleProfileAction::ClearBond => {
                             self.clear_bond(current_profile()).await;
+                        }
+                        BleProfileAction::ClearAllBonds => {
+                            self.clear_all_bonds().await;
                         }
                         BleProfileAction::ClearSlot(slot) => {
                             self.clear_bond(slot).await;
