@@ -40,31 +40,48 @@ pub(crate) fn expand_registered_processor_init(
             };
 
             let (custom_init, custom_exec) = expand_custom_processor(item_fn);
-            let mut mode: Option<bool> = None; // Some(true) = event, Some(false) = poll
+            enum Mode {
+                Event,
+                Poll,
+                Runnable,
+            }
+            let mut mode: Option<Mode> = None;
 
             attr.parse_nested_meta(|meta| {
                 let is_event = meta.path.is_ident("event");
                 let is_poll = meta.path.is_ident("poll");
+                let is_runnable = meta.path.is_ident("runnable");
 
-                if !is_event && !is_poll {
-                    return Err(meta.error("expected `event` or `poll`"));
+                if !is_event && !is_poll && !is_runnable {
+                    return Err(meta.error("expected `event`, `poll`, or `runnable`"));
                 }
                 if mode.is_some() {
                     return Err(meta.error("cannot specify multiple modes"));
                 }
-                mode = Some(is_event);
+                mode = Some(if is_event {
+                    Mode::Event
+                } else if is_poll {
+                    Mode::Poll
+                } else {
+                    Mode::Runnable
+                });
                 Ok(())
             })
             .unwrap_or_else(|e| panic!("#[register_processor] {e}"));
 
             let executor = match mode {
-                Some(true) => quote! {
+                Some(Mode::Event) => quote! {
                     async { use ::rmk::processor::Processor; #custom_exec.process_loop().await }
                 },
-                Some(false) => quote! {
+                Some(Mode::Poll) => quote! {
                     async { use ::rmk::processor::PollingProcessor; #custom_exec.polling_loop().await }
                 },
-                None => panic!("#[register_processor] requires `event` or `poll` argument"),
+                Some(Mode::Runnable) => quote! {
+                    async { use ::rmk::core_traits::Runnable; #custom_exec.run().await }
+                },
+                None => {
+                    panic!("#[register_processor] requires `event`, `poll`, or `runnable` argument")
+                }
             };
 
             initializers.extend(custom_init);
