@@ -185,7 +185,12 @@ impl Default for MorsesConfig {
         Self {
             enable_flow_tap: false,
             prior_idle_time: Duration::from_millis(120),
-            default_profile: MorseProfile::new(Some(false), Some(MorseMode::Normal), Some(250u16), Some(250u16)),
+            default_profile: MorseProfile::new(
+                Some(false),
+                Some(MorseMode::PermissiveHold),
+                Some(250u16),
+                Some(250u16),
+            ),
             profiles: Vec::new(),
             hold_trigger_positions: Vec::new(),
             profile_names: Vec::new(),
@@ -336,5 +341,24 @@ impl MouseKeyConfig {
         } else {
             self.wheel_repeat_interval_ms
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rmk_types::morse::MorseMode;
+
+    use super::MorsesConfig;
+
+    /// A keyboard that configures no resolution mode gets PermissiveHold, so
+    /// the hold lands on the next key's release instead of waiting out
+    /// `hold_timeout`. Changing this changes typing feel for every such
+    /// keyboard, so it has to be a deliberate edit.
+    #[test]
+    fn the_unconfigured_morse_mode_is_permissive_hold() {
+        assert_eq!(
+            MorsesConfig::default().default_profile.mode(),
+            Some(MorseMode::PermissiveHold)
+        );
     }
 }

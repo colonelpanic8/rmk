@@ -405,8 +405,14 @@ impl<'a> Keyboard<'a> {
             _ => {}
         }
 
-        // If no per-key config, use the global default profile
-        keymap.morse_default_profile().mode().unwrap_or(MorseMode::Normal)
+        // If no per-key config, use the global default profile. The last
+        // resort is PermissiveHold: it resolves on the other key's release
+        // rather than only on the hold timeout, which is what ZMK's
+        // `balanced` and QMK's permissive hold do.
+        keymap
+            .morse_default_profile()
+            .mode()
+            .unwrap_or(MorseMode::PermissiveHold)
     }
 
     /// Decides and returns the morse mode
