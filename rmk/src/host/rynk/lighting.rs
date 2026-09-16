@@ -15,12 +15,12 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use heapless::{String, Vec};
 use rmk_types::protocol::rynk::{
-    LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_EXTENSION_NAME_CHUNK, LIGHTING_EXTENSION_NAME_SIZE,
-    LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_OVERLAY_CHUNK_SIZE, LIGHTING_SCENE_CHUNK_SIZE, LightingBackgroundMode,
-    LightingBackgroundState, LightingCompiledScenesPage, LightingConditionalSceneCell as WireConditionalSceneCell,
-    LightingControls as WireLightingControls, LightingError,
-    LightingExtendedConditionalSceneCell as WireExtendedConditionalSceneCell,
-    LightingExtendedRuntimeConditionalScenesPage, LightingExtension, LightingExtensionLayers,
+    LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_EXTENSION_NAME_CHUNK, LIGHTING_EXTENSION_NAME_SIZE,
+    LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_OVERLAY_CHUNK_SIZE, LIGHTING_SCENE_CHUNK_SIZE,
+    LightingAdvancedConditionalSceneCell as WireAdvancedConditionalSceneCell,
+    LightingAdvancedRuntimeConditionalScenesPage, LightingBackgroundMode, LightingBackgroundState,
+    LightingCompiledScenesPage, LightingConditionalSceneCell as WireConditionalSceneCell,
+    LightingControls as WireLightingControls, LightingError, LightingExtension, LightingExtensionLayers,
     LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionParam, LightingExtensionParamsPage,
     LightingExtensionState as WireExtensionState, LightingLayerPolicy, LightingMutableState,
     LightingOutputMode as WireLightingOutputMode, LightingOutputModeIndicator as WireLightingOutputModeIndicator,
@@ -298,6 +298,7 @@ impl<'a> RynkLightingController<'a> {
                 output_toggle_user_action: None,
                 output_mode_cycle_user_action: None,
                 wake_layers: 0,
+                wake_linger_ms: 0,
                 initial_output_mode: crate::lighting::OutputMode::AlwaysOn,
                 powered_only_scope: crate::lighting::PoweredOnlyScope::Authority,
                 output_mode_indicator: None,
@@ -515,7 +516,7 @@ pub enum RynkLightingReadback {
     ExtensionNamesPage(LightingExtensionNamesPage),
     ExtensionParamsPage(LightingExtensionParamsPage),
     RuntimeConditionalScenesPage(LightingRuntimeConditionalScenesPage),
-    ExtendedRuntimeConditionalScenesPage(LightingExtendedRuntimeConditionalScenesPage),
+    AdvancedRuntimeConditionalScenesPage(LightingAdvancedRuntimeConditionalScenesPage),
     RuntimeConditionalSceneTransaction(LightingRuntimeConditionalSceneTransaction),
     Unit,
 }
@@ -534,7 +535,7 @@ fn expect_state(result: LightingResult<RynkLightingReadback>) -> LightingResult<
 /// standard engine mailbox; it never owns renderer or compositor state.
 pub struct RynkLightingMailbox {
     requests: Channel<RawMutex, MailboxRequest, RYNK_LIGHTING_COMMAND_CAPACITY>,
-    response: Signal<RawMutex, MailboxResponse>,
+    response: Signal<RawMutex, Vec<MailboxResponse, 1>>,
     caller: Mutex<RawMutex, ()>,
     next_id: BlockingMutex<RawMutex, Cell<u32>>,
     replacement: BlockingMutex<RawMutex, RefCell<Option<StagedReplacement>>>,
@@ -622,7 +623,7 @@ impl RynkLightingMailbox {
 
     async fn wait_for_reply(&self, id: u32) -> LightingResult<RynkLightingReadback> {
         loop {
-            let response = self.response.wait().await;
+            let response = self.response.wait().await.pop().expect("mailbox reply is present");
             if response.id == id {
                 return response.result;
             }
@@ -634,7 +635,7 @@ impl RynkLightingMailbox {
     }
 
     pub(in crate::host::rynk) fn reply(&self, id: u32, result: LightingResult<RynkLightingReadback>) {
-        self.response.signal(MailboxResponse { id, result });
+        self.response.signal(Vec::from_array([MailboxResponse { id, result }]));
     }
 
     pub(in crate::host::rynk) async fn take_replacement(
@@ -721,7 +722,7 @@ pub(super) enum RynkLightingCommand {
         expected_revision: u32,
         offset: u16,
     },
-    ReadExtendedRuntimeConditionalScenes {
+    ReadAdvancedRuntimeConditionalScenes {
         expected_revision: u32,
         offset: u16,
     },
@@ -734,12 +735,12 @@ pub(super) enum RynkLightingCommand {
         offset: u16,
         cells: Vec<WireConditionalSceneCell, { rmk_types::protocol::rynk::LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE }>,
     },
-    PutExtendedRuntimeConditionalSceneChunk {
+    PutAdvancedRuntimeConditionalSceneChunk {
         transaction_id: u32,
         offset: u16,
         cells: Vec<
-            WireExtendedConditionalSceneCell,
-            { rmk_types::protocol::rynk::LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE },
+            WireAdvancedConditionalSceneCell,
+            { rmk_types::protocol::rynk::LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE },
         >,
     },
     CommitRuntimeConditionalSceneReplace {
@@ -967,6 +968,32 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
     #[cfg(not(feature = "storage"))]
     async fn persist_extension(&self) {}
 
+    #[cfg(feature = "storage")]
+    async fn persist_extension_params(&self, effect: u8, index: u8) {
+        let offset = index / LIGHTING_EXTENSION_PARAM_CHUNK as u8 * LIGHTING_EXTENSION_PARAM_CHUNK as u8;
+        if let Ok(StandardReply::ExtensionParams(page)) = self
+            .request_core(StandardCommand::ReadExtensionParams { effect, offset })
+            .await
+        {
+            let mut record = crate::storage::LightingExtensionParamsRecord {
+                effect,
+                offset,
+                len: 0,
+                values: [0; LIGHTING_EXTENSION_PARAM_CHUNK],
+            };
+            for (value, entry) in record.values.iter_mut().zip(page.items()) {
+                *value = entry.value;
+                record.len += 1;
+            }
+            crate::channel::FLASH_CHANNEL
+                .send(crate::storage::FlashOperationMessage::LightingExtensionParams(record))
+                .await;
+        }
+    }
+
+    #[cfg(not(feature = "storage"))]
+    async fn persist_extension_params(&self, _effect: u8, _index: u8) {}
+
     async fn runtime_conditional_scene_mutation(
         &self,
         command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP>,
@@ -1037,7 +1064,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 return;
             };
             let page_cells = page.cells.as_slice();
-            let cells = &page_cells[..page_cells.len().min(LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE)];
+            let cells = &page_cells[..page_cells.len().min(LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE)];
             if cells.is_empty() {
                 break;
             }
@@ -1083,6 +1110,10 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                         mode: output_mode_from_wire(mode),
                     })
                     .await?;
+                #[cfg(feature = "storage")]
+                crate::channel::FLASH_CHANNEL
+                    .send(crate::storage::FlashOperationMessage::LightingOutputMode(mode))
+                    .await;
                 return Ok(RynkLightingReadback::OutputMode(state));
             }
             RynkLightingCommand::SetWakeLayers {
@@ -1327,13 +1358,14 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 value,
             } => {
                 let state = self
-                    .extension_mutation(StandardCommand::SetExtensionParamIfRevision {
+                    .request_core_state(StandardCommand::SetExtensionParamIfRevision {
                         expected_revision,
                         effect,
                         index,
                         value,
                     })
                     .await?;
+                self.persist_extension_params(effect, index).await;
                 return Ok(RynkLightingReadback::State(state_to_wire(state)));
             }
             RynkLightingCommand::ReadRuntimeConditionalSceneStatus => {
@@ -1377,7 +1409,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     },
                 ));
             }
-            RynkLightingCommand::ReadExtendedRuntimeConditionalScenes {
+            RynkLightingCommand::ReadAdvancedRuntimeConditionalScenes {
                 expected_revision,
                 offset,
             } => {
@@ -1399,7 +1431,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     .cells
                     .as_slice()
                     .iter()
-                    .take(LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE)
+                    .take(LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE)
                 {
                     items
                         .push(
@@ -1408,8 +1440,8 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                         )
                         .map_err(|_| LightingError::InvalidRequest)?;
                 }
-                return Ok(RynkLightingReadback::ExtendedRuntimeConditionalScenesPage(
-                    LightingExtendedRuntimeConditionalScenesPage {
+                return Ok(RynkLightingReadback::AdvancedRuntimeConditionalScenesPage(
+                    LightingAdvancedRuntimeConditionalScenesPage {
                         revision: page.revision,
                         total_count: page.total,
                         items,
@@ -1454,7 +1486,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 .await?;
                 return Ok(RynkLightingReadback::Unit);
             }
-            RynkLightingCommand::PutExtendedRuntimeConditionalSceneChunk {
+            RynkLightingCommand::PutAdvancedRuntimeConditionalSceneChunk {
                 transaction_id,
                 offset,
                 cells,
@@ -1679,16 +1711,18 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         &self,
         cell: WireConditionalSceneCell,
     ) -> LightingResult<RuntimeConditionalSceneCell> {
-        self.runtime_conditional_scene_cell_from_extended_wire(WireExtendedConditionalSceneCell {
+        self.runtime_conditional_scene_cell_from_extended_wire(WireAdvancedConditionalSceneCell {
             cell,
             connection: None,
             effects: None,
+            layers: None,
+            indicators: None,
         })
     }
 
     fn runtime_conditional_scene_cell_from_extended_wire(
         &self,
-        cell: WireExtendedConditionalSceneCell,
+        cell: WireAdvancedConditionalSceneCell,
     ) -> LightingResult<RuntimeConditionalSceneCell> {
         cell.validate()?;
         let slot = self
@@ -1701,6 +1735,15 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         conditions.connection = cell.connection.map(connection_condition_from_wire);
         conditions.effects = cell.effects.map(|effects| crate::lighting::EffectsCondition {
             enabled: effects.enabled,
+        });
+        conditions.layers = cell.layers.map(|layers| crate::lighting::LayersCondition {
+            active: layers.active,
+            inactive: layers.inactive,
+        });
+        conditions.indicators = cell.indicators.map(|indicators| crate::lighting::IndicatorCondition {
+            num_lock: indicators.num_lock,
+            caps_lock: indicators.caps_lock,
+            scroll_lock: indicators.scroll_lock,
         });
         Ok(RuntimeConditionalSceneCell {
             conditions,
@@ -1719,9 +1762,9 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
     fn runtime_conditional_scene_cell_to_extended_wire(
         &self,
         cell: RuntimeConditionalSceneCell,
-    ) -> Option<WireExtendedConditionalSceneCell> {
+    ) -> Option<WireAdvancedConditionalSceneCell> {
         let led = self.topology.led(cell.slot)?;
-        Some(WireExtendedConditionalSceneCell {
+        Some(WireAdvancedConditionalSceneCell {
             cell: WireConditionalSceneCell {
                 conditions: condition_set_to_wire(cell.conditions),
                 led_id: rmk_types::protocol::rynk::LightingLedId(led.id.0),
@@ -1734,6 +1777,20 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 .map(|effects| rmk_types::protocol::rynk::LightingEffectsCondition {
                     enabled: effects.enabled,
                 }),
+            layers: cell
+                .conditions
+                .layers
+                .map(|layers| rmk_types::protocol::rynk::LightingLayersCondition {
+                    active: layers.active,
+                    inactive: layers.inactive,
+                }),
+            indicators: cell.conditions.indicators.map(|indicators| {
+                rmk_types::protocol::rynk::LightingIndicatorCondition {
+                    num_lock: indicators.num_lock,
+                    caps_lock: indicators.caps_lock,
+                    scroll_lock: indicators.scroll_lock,
+                }
+            }),
         })
     }
 }
@@ -1776,7 +1833,7 @@ pub fn install_lighting_runtime_conditional_scenes<
 >(
     engine: &mut StandardLightingEngine<'_, Extension, Status, N, OVERLAY_CAP, SCENE_CAP>,
     topology: &LightingTopology<'_>,
-    cells: &[WireExtendedConditionalSceneCell],
+    cells: &[WireAdvancedConditionalSceneCell],
 ) {
     for cell in cells {
         if cell.validate().is_err() {
@@ -1789,6 +1846,15 @@ pub fn install_lighting_runtime_conditional_scenes<
         conditions.connection = cell.connection.map(connection_condition_from_wire);
         conditions.effects = cell.effects.map(|effects| crate::lighting::EffectsCondition {
             enabled: effects.enabled,
+        });
+        conditions.layers = cell.layers.map(|layers| crate::lighting::LayersCondition {
+            active: layers.active,
+            inactive: layers.inactive,
+        });
+        conditions.indicators = cell.indicators.map(|indicators| crate::lighting::IndicatorCondition {
+            num_lock: indicators.num_lock,
+            caps_lock: indicators.caps_lock,
+            scroll_lock: indicators.scroll_lock,
         });
         let _ = engine.install_runtime_conditional_scene_cell(RuntimeConditionalSceneCell {
             conditions,
@@ -1979,6 +2045,8 @@ fn condition_set_from_wire(
         }),
         connection: None,
         effects: None,
+        layers: None,
+        indicators: None,
         output_mode: conditions.output_mode.map(|mode| match mode {
             rmk_types::protocol::rynk::LightingOutputMode::AlwaysOn => crate::lighting::OutputMode::AlwaysOn,
             rmk_types::protocol::rynk::LightingOutputMode::AlwaysOff => crate::lighting::OutputMode::AlwaysOff,
@@ -2812,12 +2880,13 @@ mod tests {
             },
         );
 
-        // Persisting by readback means the last record is the settled state,
-        // parameters included, no matter which command produced it.
         let mut last = None;
+        let mut last_params = None;
         while let Ok(message) = crate::channel::FLASH_CHANNEL.try_receive() {
-            if let FlashOperationMessage::LightingExtensionState(record) = message {
-                last = Some(record);
+            match message {
+                FlashOperationMessage::LightingExtensionState(record) => last = Some(record),
+                FlashOperationMessage::LightingExtensionParams(record) => last_params = Some(record),
+                _ => {}
             }
         }
         let record = last.expect("extension mutations persist a record");
@@ -2825,7 +2894,64 @@ mod tests {
             (record.effect, record.palette, record.value, record.speed),
             (0, 2, 200, 40)
         );
-        assert_eq!(record.params(), &[3, 77]);
+        assert_eq!(record.params(), &[3, 128]);
+        let params = last_params.expect("parameter mutation persists its own page");
+        assert_eq!((params.effect, params.offset, params.len), (0, 0, 2));
+        assert_eq!(&params.values[..2], &[3, 77]);
+    }
+
+    #[cfg(feature = "storage")]
+    #[test]
+    fn lighting_preferences_persist_inactive_effect_and_output_policy() {
+        use crate::storage::FlashOperationMessage;
+        while crate::channel::FLASH_CHANNEL.try_receive().is_ok() {}
+        run_extension_flow(
+            TestExtensionSource {
+                state: crate::lighting::compositor::ExtensionState {
+                    effect: 1,
+                    palette: 0,
+                    value: 128,
+                    speed: 20,
+                },
+                params: [3, 128],
+            },
+            async |protocol| {
+                let reply = protocol
+                    .request(RynkLightingCommand::SetExtensionParam {
+                        expected_revision: 0,
+                        effect: 0,
+                        index: 1,
+                        value: 77,
+                    })
+                    .await;
+                let revision = match reply {
+                    Ok(RynkLightingReadback::State(state)) => state.revision,
+                    other => panic!("parameter write failed: {other:?}"),
+                };
+                assert!(matches!(
+                    protocol
+                        .request(RynkLightingCommand::SetOutputMode {
+                            expected_revision: revision,
+                            mode: WireLightingOutputMode::PoweredOnly,
+                        })
+                        .await,
+                    Ok(RynkLightingReadback::OutputMode(_))
+                ));
+            },
+        );
+        let mut params = None;
+        let mut mode = None;
+        while let Ok(message) = crate::channel::FLASH_CHANNEL.try_receive() {
+            match message {
+                FlashOperationMessage::LightingExtensionParams(record) => params = Some(record),
+                FlashOperationMessage::LightingOutputMode(value) => mode = Some(value),
+                _ => {}
+            }
+        }
+        let record = params.expect("inactive effect parameters must reach storage");
+        assert_eq!((record.effect, record.offset, record.len), (0, 0, 2));
+        assert_eq!(&record.values[..2], &[3, 77]);
+        assert_eq!(mode, Some(WireLightingOutputMode::PoweredOnly));
     }
 
     #[test]
