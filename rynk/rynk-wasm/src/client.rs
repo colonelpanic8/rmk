@@ -183,4 +183,6 @@ endpoints! {
     switch_ble_profile(slot: u8) -> (),
     clear_ble_profile(slot: u8) -> (),
     disconnect_ble_profile(slot: u8) -> (),
+    get_auto_switch_transport() -> bool,
+    set_auto_switch_transport(enabled: bool) -> (),
 }
