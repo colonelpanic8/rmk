@@ -1,6 +1,5 @@
+use embassy_futures::yield_now;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
-use rmk_types::fork::Fork;
-use rmk_types::morse::Morse;
 use serde::de::{Error as DeError, SeqAccess, Visitor};
 use serde::{Deserializer, Serializer};
 
@@ -70,19 +69,18 @@ pub(crate) mod macro_bytes_serde {
 impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_ENCODER: usize>
     Storage<F, ROW, COL, NUM_LAYER, NUM_ENCODER>
 {
-    pub(crate) async fn read_keymap(
+    pub(crate) async fn read_boot_data(
         &mut self,
         data: &mut crate::keymap::KeymapData<ROW, COL, NUM_LAYER, NUM_ENCODER>,
         behavior: &mut crate::config::BehaviorConfig,
     ) -> Result<(), ()> {
-        // Use fetch_all_items to speed up the keymap reading
         let mut key_iterator = self
             .flash
             .fetch_all_items(&mut self.buffer)
             .await
             .map_err(|e| print_storage_error::<F>(e))?;
 
-        // Read all keymap keys and encoder configs
+        let mut records_read = 0;
         while let Some((key, item)) = key_iterator
             .next::<StorageData>(&mut self.buffer)
             .await
@@ -110,75 +108,47 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     // Restore the VIA/Vial layout options selection
                     data.layout_option = config.layout_option;
                 }
-                _ => continue,
+                (StorageKey::BehaviorConfig, StorageData::BehaviorConfig(config)) => {
+                    behavior.morse.prior_idle_time = embassy_time::Duration::from_millis(config.prior_idle_time as u64);
+                    behavior.morse.default_profile = config.morse_default_profile;
+                    behavior.combo.timeout = embassy_time::Duration::from_millis(config.combo_timeout as u64);
+                    behavior.one_shot.timeout = embassy_time::Duration::from_millis(config.one_shot_timeout as u64);
+                    behavior.tap.tap_interval = config.tap_interval;
+                    behavior.tap.tap_capslock_interval = config.tap_capslock_interval;
+                }
+                (StorageKey::MacroData, StorageData::MacroData(macro_data)) => {
+                    behavior.keyboard_macros.macro_sequences.copy_from_slice(&macro_data);
+                }
+                (StorageKey::Combo(idx), StorageData::Combo(config)) => {
+                    let idx = idx as usize;
+                    if idx < COMBO_MAX_NUM {
+                        debug!("Read combo config: {:?}", config);
+                        behavior.combo.combos[idx] = Some(Combo::new(config));
+                    }
+                }
+                (StorageKey::Fork(idx), StorageData::Fork(fork)) => {
+                    let idx = idx as usize;
+                    if idx < FORK_MAX_NUM
+                        && let Some(item) = behavior.fork.forks.get_mut(idx)
+                    {
+                        *item = fork;
+                    }
+                }
+                (StorageKey::Morse(idx), StorageData::Morse(morse)) => {
+                    let idx = idx as usize;
+                    if idx < MORSE_MAX_NUM
+                        && let Some(item) = behavior.morse.morses.get_mut(idx)
+                    {
+                        *item = morse;
+                    }
+                }
+                _ => {}
             }
-        }
 
-        Ok(())
-    }
-
-    pub(crate) async fn read_macro_cache(&mut self, macro_cache: &mut [u8]) -> Result<(), ()> {
-        let read_data = self
-            .flash
-            .fetch_item(&mut self.buffer, &StorageKey::MacroData)
-            .await
-            .map_err(|e| print_storage_error::<F>(e))?;
-
-        if let Some(StorageData::MacroData(data)) = read_data {
-            macro_cache.copy_from_slice(&data);
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn read_combos(&mut self, combos: &mut [Option<Combo>; COMBO_MAX_NUM]) -> Result<(), ()> {
-        use crate::keyboard::combo::Combo;
-
-        for (i, item) in combos.iter_mut().enumerate() {
-            let key = StorageKey::combo(i as u8);
-            let read_data = self
-                .flash
-                .fetch_item(&mut self.buffer, &key)
-                .await
-                .map_err(|e| print_storage_error::<F>(e))?;
-
-            if let Some(StorageData::Combo(config)) = read_data {
-                debug!("Read combo config: {:?}", config);
-                *item = Some(Combo::new(config));
-            }
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn read_forks(&mut self, forks: &mut heapless::Vec<Fork, FORK_MAX_NUM>) -> Result<(), ()> {
-        for (i, item) in forks.iter_mut().enumerate() {
-            let key = StorageKey::fork(i as u8);
-            let read_data = self
-                .flash
-                .fetch_item(&mut self.buffer, &key)
-                .await
-                .map_err(|e| print_storage_error::<F>(e))?;
-
-            if let Some(StorageData::Fork(fork)) = read_data {
-                *item = fork;
-            }
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn read_morses(&mut self, morses: &mut heapless::Vec<Morse, MORSE_MAX_NUM>) -> Result<(), ()> {
-        for (i, item) in morses.iter_mut().enumerate() {
-            let key = StorageKey::morse(i as u8);
-            let read_data = self
-                .flash
-                .fetch_item(&mut self.buffer, &key)
-                .await
-                .map_err(|e| print_storage_error::<F>(e))?;
-
-            if let Some(StorageData::Morse(morse)) = read_data {
-                *item = morse;
+            records_read += 1;
+            if records_read % 32 == 0 {
+                // Memory-mapped flash can keep every read ready, so let other tasks run.
+                yield_now().await;
             }
         }
 
@@ -190,7 +160,7 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
 mod tests {
     use rmk_types::action::Action;
     use rmk_types::keycode::{HidKeyCode, KeyCode};
-    use rmk_types::morse::{HOLD, MorseMode, MorsePattern, MorseProfile, TAP};
+    use rmk_types::morse::{HOLD, Morse, MorseMode, MorsePattern, MorseProfile, TAP};
     use sequential_storage::map::Value;
 
     use super::*;
