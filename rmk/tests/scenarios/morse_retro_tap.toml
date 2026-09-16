@@ -3,11 +3,13 @@
 #
 # The fixture sits on the shared split board's home row: A@(1,0), MT(B, LShift)@(1,1),
 # LT(1, D)@(1,8), plus the profile-carrying keys MT(B, LShift, p0)@(3,6) and
-# MT(B, LShift, p1)@(3,7). Defaults otherwise apply: Normal mode, 250 ms hold/gap timeouts.
+# MT(B, LShift, p1)@(3,7). Normal mode, because retro tap is about the hold the timeout
+# resolves; 250 ms hold/gap timeouts.
 
 keyboard = "boards/split.toml"
 
 [behavior.morse]
+normal_mode = true
 retro_tap = true
 
 # The hold is reported when the timeout lands and retracted on release, so the host sees
