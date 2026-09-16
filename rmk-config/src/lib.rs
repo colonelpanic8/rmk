@@ -909,7 +909,7 @@ pub(crate) struct MorseProfile {
     pub unilateral_tap: Option<bool>,
 
     /// The decision mode of the morse/tap-hold key (only one of permissive_hold, hold_on_other_press and normal_mode can be true)
-    /// /// if none of them is given, normal mode will be the default
+    /// if none of them is given, permissive hold will be the default
     pub permissive_hold: Option<bool>,
     pub hold_on_other_press: Option<bool>,
     pub normal_mode: Option<bool>,
@@ -1036,7 +1036,7 @@ pub(crate) struct MorsesConfig {
     pub unilateral_tap: Option<bool>,
 
     /// The decision mode of the morse/tap-hold key (only one of permissive_hold, hold_on_other_press and normal_mode can be true)
-    /// if none of them is given, normal mode will be the default
+    /// if none of them is given, permissive hold will be the default
     pub permissive_hold: Option<bool>,
     pub hold_on_other_press: Option<bool>,
     pub normal_mode: Option<bool>,
