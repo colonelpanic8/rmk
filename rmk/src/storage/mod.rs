@@ -157,6 +157,8 @@ pub(crate) enum StorageKey {
     BondInfo(u8),
     /// A slot the board defines, see [`store_user_data`].
     UserData(u8),
+    #[cfg(feature = "_ble")]
+    AutoSwitchTransport,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -211,6 +213,8 @@ pub(crate) enum StorageItem {
         slot: u8,
         data: heapless::Vec<u8, USER_DATA_MAX_SIZE>,
     },
+    #[cfg(feature = "_ble")]
+    AutoSwitchTransport(bool),
 }
 
 impl StorageItem {
@@ -246,6 +250,8 @@ impl StorageItem {
             Self::BondInfo(v) => (StorageKey::BondInfo(v.slot_num), StorageValue::BondInfo(v)),
             #[cfg(feature = "_ble")]
             Self::ActiveBleProfile(v) => (StorageKey::ActiveBleProfile, StorageValue::ActiveBleProfile(v)),
+            #[cfg(feature = "_ble")]
+            Self::AutoSwitchTransport(v) => (StorageKey::AutoSwitchTransport, StorageValue::AutoSwitchTransport(v)),
             Self::UserData { slot, data } => (StorageKey::UserData(slot), StorageValue::UserData(data)),
         }
     }
@@ -296,6 +302,8 @@ pub(crate) enum StorageValue {
     #[cfg(feature = "_ble")]
     ActiveBleProfile(u8),
     UserData(heapless::Vec<u8, USER_DATA_MAX_SIZE>),
+    #[cfg(feature = "_ble")]
+    AutoSwitchTransport(bool),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -1025,6 +1033,9 @@ mod tests {
             StorageKey::ActiveBleProfile,
             #[cfg(feature = "_ble")]
             StorageKey::BondInfo(10),
+            StorageKey::UserData(0),
+            #[cfg(feature = "_ble")]
+            StorageKey::AutoSwitchTransport,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1057,6 +1068,9 @@ mod tests {
             StorageValue::BondInfo(ProfileInfo::default()),
             #[cfg(feature = "_ble")]
             StorageValue::ActiveBleProfile(0),
+            StorageValue::UserData(heapless::Vec::new()),
+            #[cfg(feature = "_ble")]
+            StorageValue::AutoSwitchTransport(false),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {

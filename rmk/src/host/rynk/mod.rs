@@ -48,6 +48,10 @@ impl<'a> RynkService<'a> {
 
     /// Whether `cmd` needs a storage write to persist its effect.
     fn needs_storage_write(cmd: Cmd) -> bool {
+        #[cfg(feature = "_ble")]
+        if cmd == Cmd::SetAutoSwitchTransport {
+            return true;
+        }
         matches!(
             cmd,
             Cmd::SetKeyAction
@@ -130,6 +134,10 @@ impl<'a> RynkService<'a> {
             Cmd::SwitchBleProfile => serve::<command::SwitchBleProfile, _>(self, msg).await,
             #[cfg(feature = "_ble")]
             Cmd::ClearBleProfile => serve::<command::ClearBleProfile, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::GetAutoSwitchTransport => serve::<command::GetAutoSwitchTransport, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::SetAutoSwitchTransport => serve::<command::SetAutoSwitchTransport, _>(self, msg).await,
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,
