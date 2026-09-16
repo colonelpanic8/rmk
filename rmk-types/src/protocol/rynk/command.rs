@@ -435,6 +435,9 @@ endpoints! {
     #[cfg(feature = "split")]
     /// Force the split transport (volatile); echoes the resulting state.
     SetSplitTransportForce = 0x070B: SplitTransportForce => SplitTransportState;
+    #[cfg(feature = "_ble")]
+    /// Forget every host BLE profile while preserving split and dongle bonds.
+    ClearAllBleProfiles = 0x070C: () => ();
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
