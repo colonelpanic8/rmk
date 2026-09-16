@@ -8,6 +8,7 @@ use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer, with_deadline};
 use heapless::Vec;
 use rmk_types::action::{Action, KeyAction, KeyboardAction};
+use rmk_types::connection::ConnectionType;
 use rmk_types::fork::StateBits;
 use rmk_types::keycode::{ConsumerKey, HidKeyCode, KeyCode, SpecialKey, SystemControlKey};
 use rmk_types::led_indicator::LedIndicator;
@@ -1562,6 +1563,16 @@ impl<'a> Keyboard<'a> {
                 // When releasing the key, process the boot action
                 if !event.pressed {
                     boot::reboot_keyboard();
+                }
+            }
+            KeyboardAction::OutputUsb => {
+                if !event.pressed {
+                    crate::state::set_preferred(ConnectionType::Usb).await;
+                }
+            }
+            KeyboardAction::OutputBluetooth => {
+                if !event.pressed {
+                    crate::state::set_preferred(ConnectionType::Ble).await;
                 }
             }
             #[cfg(feature = "storage")]
