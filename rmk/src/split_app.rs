@@ -113,15 +113,54 @@ pub static SPLIT_APP_TX: Channel<RawMutex, SplitAppData, 112> = Channel::new();
 /// central's `SPLIT_APP_TX`; central: from the peripheral's
 /// `SPLIT_APP_PERIPH_TX`). Filled with `try_send` (drop-on-full) by the
 /// split read loops.
-pub static SPLIT_APP_RX: Channel<RawMutex, SplitAppData, 8> = Channel::new();
+// Sized like SPLIT_APP_TX: an application snapshot arrives as one
+// back-to-back burst, and unlike BLE a wired transport delivers it faster
+// than the consumer drains, so the burst must fit or `deliver_received`
+// silently drops the difference.
+pub static SPLIT_APP_RX: Channel<RawMutex, SplitAppData, 112> = Channel::new();
 
 /// Peripheral → central queue, drained by `SplitPeripheral` while the link
 /// is up. Producers MUST use `try_send`. Small: the application announces
 /// tiny, rare state (e.g. its build identity once per link-up).
-pub static SPLIT_APP_PERIPH_TX: Channel<RawMutex, SplitAppData, 2> = Channel::new();
+pub static SPLIT_APP_PERIPH_TX: Channel<RawMutex, SplitAppData, 16> = Channel::new();
+
+/// Deliver a received payload into [`SPLIT_APP_RX`]. Drop-on-full: a slow
+/// application consumer must never stall the split read loops, and the
+/// application resyncs on reconnect anyway.
+pub(crate) fn deliver_received(data: SplitAppData) {
+    if SPLIT_APP_RX.try_send(data).is_err() {
+        warn!("split app message dropped (inbox full)");
+    }
+}
 
 /// Split-link state for the application: on the central, "peripheral link
 /// up"; on the peripheral, "central link up". Written by the split driver at
 /// session start/end; state-based (a late receiver still observes the latest
 /// value), so edges cannot be lost the way pub/sub events can.
 pub static SPLIT_APP_LINK: Watch<RawMutex, bool, 2> = Watch::new();
+
+/// Owns one split session's [`SPLIT_APP_LINK`] state. The down edge comes
+/// from `Drop` because the session future can be cancelled on connection loss.
+pub(crate) struct LinkGuard {
+    up: bool,
+}
+
+impl LinkGuard {
+    pub(crate) fn new() -> Self {
+        Self { up: false }
+    }
+
+    /// Send the link-up edge once.
+    pub(crate) fn mark_up(&mut self) {
+        if !self.up {
+            SPLIT_APP_LINK.sender().send(true);
+            self.up = true;
+        }
+    }
+}
+
+impl Drop for LinkGuard {
+    fn drop(&mut self) {
+        SPLIT_APP_LINK.sender().send(false);
+    }
+}
