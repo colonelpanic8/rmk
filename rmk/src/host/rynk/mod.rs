@@ -169,6 +169,7 @@ impl<'a> RynkService<'a> {
             | Cmd::SetMorse
             | Cmd::SetFork
             | Cmd::SetBehaviorConfig
+            | Cmd::SetPointingConfig
             | Cmd::SetKeymapBulk
             | Cmd::SetComboBulk
             | Cmd::SetMorseBulk
@@ -261,6 +262,10 @@ impl<'a> RynkService<'a> {
 
             Cmd::GetBehaviorConfig => serve::<command::GetBehaviorConfig, _>(self, msg).await,
             Cmd::SetBehaviorConfig => serve::<command::SetBehaviorConfig, _>(self, msg).await,
+
+            Cmd::GetPointingConfig => serve::<command::GetPointingConfig, _>(self, msg).await,
+            Cmd::SetPointingConfig => serve::<command::SetPointingConfig, _>(self, msg).await,
+            Cmd::GetPointingCapabilities => serve::<command::GetPointingCapabilities, _>(self, msg).await,
 
             Cmd::GetConnectionType => serve::<command::GetConnectionType, _>(self, msg).await,
             Cmd::GetConnectionStatus => serve::<command::GetConnectionStatus, _>(self, msg).await,
