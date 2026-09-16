@@ -59,6 +59,8 @@ expect = [["LShift"], []]
 # A profile with no list keeps its ordinary behavior.
 [[test]]
 name = "profile_without_positions_is_unrestricted"
+# Normal mode, so the trace is the unrestricted one and not the default mode's.
+behavior.morse = { normal_mode = true }
 steps = [
   { press = [1, 1] },  # Press MT(B, LShift), no profile -> no position list
   { tap = { pos = [1, 0], duration = 10 } },
