@@ -1,0 +1,24 @@
+# Control/GUI swapping
+
+Bind `CtrlGuiSwapToggle` (alias `CG_TOGG`) to a key or a combo output to swap
+left Control with left GUI and right Control with right GUI across all layers.
+The toggle fires on release. It starts disabled after reboot and is not persisted.
+
+```toml
+[behavior.combo]
+combos = [
+  { actions = ["J", "K"], output = "CtrlGuiSwapToggle" },
+]
+```
+
+The swap applies to the final keyboard report, including hold-tap modifiers,
+one-shot modifiers, modified keys, and macro key actions. Shift and Alt are
+unchanged. Logical keymap actions and fork matching keep their original modifiers.
+Text macros retain their normal capitalization behavior.
+
+If a keyboard chord or one-shot modifier is active, the requested change waits
+until it ends. Toggling twice while waiting cancels the change. This avoids
+changing modifiers halfway through a held shortcut. Layer keys do not prevent
+switching once the keyboard chord is released.
+
+Vial represents this action with QMK's `CG_TOGG` keycode (`0x701D`).
