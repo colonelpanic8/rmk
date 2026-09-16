@@ -351,6 +351,8 @@ impl<'a> KeyboardContext<'a> {
             return false;
         }
         #[cfg(feature = "storage")]
+        let hold_trigger_positions = self.keymap.morse_hold_trigger_positions();
+        #[cfg(feature = "storage")]
         {
             FLASH_CHANNEL
                 .send(FlashOperationMessage::MorseProfile {
@@ -363,6 +365,9 @@ impl<'a> KeyboardContext<'a> {
                     idx,
                     name: MorseProfileName::new(),
                 })
+                .await;
+            FLASH_CHANNEL
+                .send(FlashOperationMessage::MorseHoldTriggerPositions(hold_trigger_positions))
                 .await;
         }
         true
