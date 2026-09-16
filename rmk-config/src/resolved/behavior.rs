@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde::Deserialize;
+
 /// Resolved behavioral configuration.
 pub struct Behavior {
     pub tri_layer: Option<[u8; 3]>,
@@ -11,6 +13,26 @@ pub struct Behavior {
     pub morse: Option<Morse>,
     pub auto_mouse_layer: Vec<AutoMouseLayer>,
     pub mouse_layer_scale: Vec<MouseLayerScale>,
+    pub unicode: Option<Unicode>,
+}
+
+/// Resolved unicode input configuration. `codepoints` is addressed by
+/// `UNICODE(n)` and lands in flash, so its size is 4 bytes per entry.
+pub struct Unicode {
+    pub codepoints: Vec<u32>,
+    pub default_mode: UnicodeMode,
+}
+
+/// The OS input method a codepoint is typed through.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UnicodeMode {
+    #[default]
+    Linux,
+    #[serde(alias = "mac", alias = "macOS")]
+    Macos,
+    #[serde(alias = "win")]
+    Windows,
 }
 
 pub struct AutoMouseLayer {
@@ -285,6 +307,22 @@ impl crate::KeyboardTomlConfig {
             })
             .collect();
 
+        let unicode = toml_behavior
+            .unicode
+            .map(|u| {
+                let codepoints = u
+                    .codepoints
+                    .iter()
+                    .enumerate()
+                    .map(|(i, hex)| resolve_codepoint(i, hex))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok::<_, String>(Unicode {
+                    codepoints,
+                    default_mode: u.default_mode.unwrap_or_default(),
+                })
+            })
+            .transpose()?;
+
         Ok(Behavior {
             tri_layer,
             one_shot_timeout_ms,
@@ -295,8 +333,19 @@ impl crate::KeyboardTomlConfig {
             morse,
             auto_mouse_layer,
             mouse_layer_scale,
+            unicode,
         })
     }
+}
+
+/// `"1F44D"` → `0x1F44D`. The `U+` prefix is rejected rather than accepted
+/// silently, so one list can't mix the two spellings.
+fn resolve_codepoint(index: usize, hex: &str) -> Result<u32, String> {
+    let context = format!("keyboard.toml: [behavior.unicode].codepoints[{index}] = \"{hex}\"");
+    let value = u32::from_str_radix(hex, 16)
+        .map_err(|_| format!("{context} is not hex digits without a `U+` prefix, such as \"1F44D\""))?;
+    char::from_u32(value).ok_or_else(|| format!("{context} is not a unicode codepoint"))?;
+    Ok(value)
 }
 
 fn resolve_macro_operation(op: crate::MacroOperation) -> MacroOperation {
@@ -500,5 +549,62 @@ hold_timeout = "300ms"
             Err(e) => e,
         };
         assert!(err.contains("morse_profile_max_num"), "unexpected error: {err}");
+    }
+
+    fn behavior_from(section: &str) -> Result<super::Behavior, String> {
+        let toml = format!(
+            r#"
+[layout]
+rows = 1
+cols = 1
+map = "(0,0)"
+
+[keymap]
+layers = 1
+
+[[keymap.layer]]
+keys = "UNICODE(0)"
+{section}
+"#
+        );
+
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("rmk-config-unicode-{}-{}.toml", std::process::id(), unique));
+
+        fs::write(&path, toml).unwrap();
+        let config = KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path);
+        let _ = fs::remove_file(&path);
+
+        config.behavior()
+    }
+
+    #[test]
+    fn unicode_codepoints_resolve_from_bare_hex() {
+        let behavior = behavior_from(
+            r#"
+[behavior.unicode]
+default_mode = "macos"
+codepoints = ["00E9", "1f44d", "2014"]
+"#,
+        )
+        .unwrap();
+
+        let unicode = behavior.unicode.unwrap();
+        assert_eq!(unicode.codepoints, vec![0x00E9, 0x1F44D, 0x2014]);
+        assert_eq!(unicode.default_mode, super::UnicodeMode::Macos);
+    }
+
+    #[test]
+    fn unicode_codepoints_reject_the_u_plus_prefix() {
+        let err = match behavior_from(
+            r#"
+[behavior.unicode]
+codepoints = ["U+00E9"]
+"#,
+        ) {
+            Ok(_) => panic!("expected `U+00E9` to be rejected"),
+            Err(e) => e,
+        };
+        assert!(err.contains("codepoints[0]"), "unexpected error: {err}");
     }
 }

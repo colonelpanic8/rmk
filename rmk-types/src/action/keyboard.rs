@@ -29,4 +29,6 @@ pub enum KeyboardAction {
     OutputUsb,
     /// Prefer BLE as the host transport on key release
     OutputBluetooth,
+    /// Cycle the unicode input mode and persist the new one.
+    UnicodeModeCycle,
 }
