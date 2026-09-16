@@ -2,17 +2,16 @@
 
 use rmk_types::constants;
 use rmk_types::protocol::rynk::command::{
-    BootloaderJump, GetBuildInfo, GetCapabilities, GetDeviceInfo, GetLockStatus, GetVersion, Lock,
+    BootloaderJump, GetBuildInfo, GetCapabilities, GetDeviceInfo, GetLockStatus, GetMaintenanceMode, GetVersion, Lock,
     PeripheralBootloaderJump, Reboot, StorageReset, UnlockPoll,
 };
 use rmk_types::protocol::rynk::{
-    BuildInfo, DeviceCapabilities, DeviceInfo, LockStatus, MAX_BULK_ITEMS, MAX_BULK_KEYS, ProtocolVersion,
-    RYNK_MAX_PAYLOAD_SIZE, RynkError, StorageResetMode,
+    BuildInfo, DeviceCapabilities, DeviceInfo, LockStatus, MAX_BULK_ITEMS, MAX_BULK_KEYS, MaintenanceMode,
+    ProtocolVersion, RYNK_MAX_PAYLOAD_SIZE, RynkError, StorageResetMode,
 };
 
 use super::super::{RMK_VERSION, RynkService, truncated};
 use super::Handle;
-use crate::host::lock::HostLock;
 
 impl Handle<GetVersion> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<ProtocolVersion, RynkError> {
@@ -83,6 +82,15 @@ impl Handle<PeripheralBootloaderJump> for RynkService<'_> {
     }
 }
 
+impl Handle<GetMaintenanceMode> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<MaintenanceMode, RynkError> {
+        Ok(MaintenanceMode {
+            enabled: crate::state::maintenance_mode_enabled(),
+            default_enabled: crate::state::maintenance_mode_default(),
+        })
+    }
+}
+
 impl Handle<StorageReset> for RynkService<'_> {
     async fn handle(&self, mode: StorageResetMode) -> Result<(), RynkError> {
         if mode != StorageResetMode::Full {
@@ -94,24 +102,29 @@ impl Handle<StorageReset> for RynkService<'_> {
     }
 }
 
-// Lock endpoints are served by the session's own gate, and stay dispatchable
-// while locked.
-
-impl Handle<GetLockStatus> for HostLock<'_> {
-    async fn handle(&self, _: ()) -> Result<LockStatus, RynkError> {
-        Ok(self.status())
+fn disabled_lock_status() -> LockStatus {
+    LockStatus {
+        locked: false,
+        unlocking: false,
+        remaining_keys: 0,
+        key_positions: heapless::Vec::new(),
     }
 }
 
-impl Handle<UnlockPoll> for HostLock<'_> {
+impl Handle<GetLockStatus> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<LockStatus, RynkError> {
-        Ok(self.poll())
+        Ok(disabled_lock_status())
     }
 }
 
-impl Handle<Lock> for HostLock<'_> {
+impl Handle<UnlockPoll> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<LockStatus, RynkError> {
+        Ok(disabled_lock_status())
+    }
+}
+
+impl Handle<Lock> for RynkService<'_> {
     async fn handle(&self, _: ()) -> Result<(), RynkError> {
-        self.lock();
         Ok(())
     }
 }
