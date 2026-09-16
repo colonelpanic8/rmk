@@ -368,6 +368,16 @@ fn input_step(keymap: &Keymap, value: &Value) -> Result<TokenStream2, String> {
             let ms: u64 = arg(v, op, "milliseconds (integer)")?;
             quote! { .delay(#ms) }
         }
+        // The cable, named by its `UsbState`. Plugging and unplugging are
+        // device state rather than input, so they read as their own step.
+        "usb" => {
+            let state: String = arg(v, op, "a UsbState variant name")?;
+            if !["Disabled", "Enabled", "Configured", "Suspended"].contains(&state.as_str()) {
+                return Err(format!("unknown `usb` state \"{state}\""));
+            }
+            let state = format_ident!("{state}");
+            quote! { .set_usb_state(::rmk::types::connection::UsbState::#state) }
+        }
         // Like `delay`, but the silence is the claim. It belongs among the steps
         // rather than in `expect`, because an expectation deferred to the end of
         // the timeline can no longer say *when* nothing was reported.

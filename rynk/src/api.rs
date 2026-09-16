@@ -393,6 +393,21 @@ impl Client {
         self.require_ble(Cmd::ClearBleProfile)?;
         self.request::<command::ClearBleProfile>(&slot).await
     }
+
+    /// Read whether plugging or unplugging USB retargets the preferred
+    /// transport. Requires [`DeviceCapabilities::ble_enabled`]; nothing is sent
+    /// otherwise.
+    pub async fn get_auto_switch_transport(&self) -> Result<bool, RynkHostError> {
+        self.require_ble(Cmd::GetAutoSwitchTransport)?;
+        self.request::<command::GetAutoSwitchTransport>(&()).await
+    }
+
+    /// Persist whether plugging or unplugging USB retargets the preferred
+    /// transport. Takes effect from the next cable change, not immediately.
+    pub async fn set_auto_switch_transport(&self, enabled: bool) -> Result<(), RynkHostError> {
+        self.require_ble(Cmd::SetAutoSwitchTransport)?;
+        self.request::<command::SetAutoSwitchTransport>(&enabled).await
+    }
 }
 
 #[cfg(feature = "alloc")]

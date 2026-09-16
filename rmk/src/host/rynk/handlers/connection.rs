@@ -5,7 +5,9 @@ use rmk_types::ble::BleStatus;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::protocol::rynk::RynkError;
 #[cfg(feature = "_ble")]
-use rmk_types::protocol::rynk::command::{ClearBleProfile, GetBleStatus, SwitchBleProfile};
+use rmk_types::protocol::rynk::command::{
+    ClearBleProfile, GetAutoSwitchTransport, GetBleStatus, SetAutoSwitchTransport, SwitchBleProfile,
+};
 use rmk_types::protocol::rynk::command::{GetConnectionStatus, GetConnectionType};
 
 use super::super::RynkService;
@@ -55,6 +57,27 @@ impl Handle<ClearBleProfile> for RynkService<'_> {
         crate::channel::BLE_PROFILE_CHANNEL
             .try_send(crate::ble::profile::BleProfileAction::ClearSlot(slot))
             .map_err(|_| RynkError::NotReady)
+    }
+}
+
+/// `Cmd::GetAutoSwitchTransport` — whether the cable drives the preference.
+#[cfg(feature = "_ble")]
+impl Handle<GetAutoSwitchTransport> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<bool, RynkError> {
+        Ok(crate::state::auto_switch_transport())
+    }
+}
+
+/// `Cmd::SetAutoSwitchTransport` — the policy applies from the next plug or
+/// unplug, so the current preference is deliberately left where it is.
+#[cfg(feature = "_ble")]
+impl Handle<SetAutoSwitchTransport> for RynkService<'_> {
+    async fn handle(&self, enabled: bool) -> Result<(), RynkError> {
+        crate::state::set_auto_switch_transport(enabled);
+        crate::channel::FLASH_CHANNEL
+            .send(crate::storage::FlashOperationMessage::AutoSwitchTransport(enabled))
+            .await;
+        Ok(())
     }
 }
 

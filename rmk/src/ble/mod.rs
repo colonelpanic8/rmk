@@ -134,6 +134,7 @@ where
         // Load the preferred connection from storage
         let preferred = crate::state::load_preferred_connection().await;
         crate::state::set_preferred_connection(preferred);
+        crate::state::load_auto_switch_transport().await;
 
         let controller = self.controller.take().expect("BleTransport::run called twice");
         // Exactly one link — the host.
@@ -170,6 +171,7 @@ impl<
         // Load the preferred connection from storage
         let preferred = crate::state::load_preferred_connection().await;
         crate::state::set_preferred_connection(preferred);
+        crate::state::load_auto_switch_transport().await;
 
         let controller = self.controller.take().expect("BleTransport::run called twice");
 
