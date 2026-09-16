@@ -166,6 +166,10 @@ impl<const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_ENCOD
 enum SimStep {
     Event(KeyboardEvent),
     Delay(Duration),
+    /// The USB cable, as the device sees it. Plug and unplug are device state
+    /// rather than input, so they are their own step.
+    #[cfg(feature = "rynk")]
+    SetUsbState(rmk_types::connection::UsbState),
     ExpectReport(Report),
     ExpectNoReport(Duration),
     HostSend(Vec<u8>),
@@ -231,6 +235,13 @@ impl SimKeyboard {
 
     pub fn delay(&mut self, ms: u64) -> &mut Self {
         self.steps.push(SimStep::Delay(Duration::from_millis(ms)));
+        self
+    }
+
+    /// Plug, unplug, suspend, or enumerate the USB cable.
+    #[cfg(feature = "rynk")]
+    pub(crate) fn set_usb_state(&mut self, state: rmk_types::connection::UsbState) -> &mut Self {
+        self.steps.push(SimStep::SetUsbState(state));
         self
     }
 
@@ -434,6 +445,8 @@ async fn run_steps(steps: Vec<SimStep>, to_device: &Link, from_device: &Link) {
                 with_timeout(sender.publish_async(event), &waiting).await;
             }
             SimStep::Delay(duration) => Timer::after(duration).await,
+            #[cfg(feature = "rynk")]
+            SimStep::SetUsbState(state) => rmk::state::set_usb_state(state),
             SimStep::ExpectReport(expected) => {
                 let at = format!("expect[{expects}]");
                 expects += 1;
