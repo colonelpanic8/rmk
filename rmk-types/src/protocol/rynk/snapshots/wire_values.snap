@@ -47,6 +47,7 @@ EncoderAction{Morse(3),No}                   05 03 00
 Fork{Single(A),No,Morse(2)}                  02 01 00 04 00 05 02 01 02 01 00 00 00 02 01
 GetEncoderRequest{1,2}                       01 02
 GetMacroRequest{256}                         80 02
+KeyAction::LayerModTap(1,LAlt,Tab)           06 01 02 2b
 KeyAction::Morse(3)                          05 03
 KeyAction::No                                00
 KeyAction::Single(Action::Key(Hid(A)))       02 01 00 04
@@ -64,6 +65,14 @@ LockStatus{true,false,2,[(1,2),(3,4)]}       01 00 02 02 01 02 03 04
 MacroData{[0x01,0x02,0x03]}                  03 01 02 03
 MatrixState{[0x05,0x00,0x20]}                03 05 00 20
 ModifierCombination(LCtrl|RGui)              81
+ModifierKey::LAlt                            02
+ModifierKey::LCtrl                           00
+ModifierKey::LGui                            03
+ModifierKey::LShift                          01
+ModifierKey::RAlt                            06
+ModifierKey::RCtrl                           04
+ModifierKey::RGui                            07
+ModifierKey::RShift                          05
 MorseProfile(Normal,200,150)                 c8 81 b0 89 0c
 Morse{TAP->Key(A)}                           00 01 02 01 00 04
 MouseButtons(B1|B8)                          81
