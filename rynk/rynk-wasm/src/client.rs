@@ -16,7 +16,7 @@ use embassy_sync::mutex::Mutex;
 use rynk::rmk_types::action::{EncoderAction, KeyAction};
 use rynk::rmk_types::battery::BatteryStatus;
 use rynk::rmk_types::ble::BleStatus;
-use rynk::rmk_types::combo::Combo;
+use rynk::rmk_types::combo::{Combo, ComboDefinition};
 use rynk::rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rynk::rmk_types::fork::Fork;
 use rynk::rmk_types::led_indicator::LedIndicator;
@@ -28,26 +28,26 @@ use rynk::rmk_types::protocol::rynk::{
     BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig,
     BehaviorOptions, BuildInfo, ClearLightingOverlayRequest, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
-    DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, GetMorseProfileBulkResponse,
-    LayerState, LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage,
-    LightingConditionalSceneStatus, LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage,
-    LightingExtension, LightingExtensionLayers, LightingExtensionNamesPage, LightingExtensionNamesRequest,
-    LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingKeysPage, LightingLedsPage,
-    LightingOutputModeState, LightingOutputsPage, LightingOverlayPage, LightingOverlayPageRequest,
-    LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage, LightingRoutesPage,
-    LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
-    LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
-    LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZoneMembershipsPage,
-    LightingZonesPage, LockStatus, MacroData, MatrixState, MorseHoldTriggerPositionState, MorseProfileState,
-    PeripheralStatus, PointingCapabilities, PointingConfig, ProtocolVersion,
-    PutLightingExtendedRuntimeConditionalSceneChunkRequest,
-    PutLightingOverlayChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
-    SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
+    DeviceInfo, GetComboBulkResponse, GetComboDefinitionBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse,
+    GetMorseProfileBulkResponse, LayerState, LightingCapabilities, LightingCompiledSceneStatus,
+    LightingCompiledScenesPage, LightingConditionalSceneStatus, LightingConditionalScenesPage,
+    LightingExtendedRuntimeConditionalScenesPage, LightingExtension, LightingExtensionLayers,
+    LightingExtensionNamesPage, LightingExtensionNamesRequest, LightingExtensionParamsPage,
+    LightingExtensionParamsRequest, LightingKeysPage, LightingLedsPage, LightingOutputModeState, LightingOutputsPage,
+    LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest,
+    LightingPhysicalKeysPage, LightingRoutesPage, LightingRuntimeConditionalScenePageRequest,
+    LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneTransaction,
+    LightingRuntimeConditionalScenesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
+    LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData,
+    MatrixState, MorseHoldTriggerPositionState, MorseProfileState, PeripheralStatus, PointingCapabilities,
+    PointingConfig, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    PutLightingOverlayChunkRequest,
+    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetAutoMouseLayerConfigsRequest,
+    SetComboBulkRequest, SetComboDefinitionBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
     SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
-    SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest,
-    SetMorseProfileEntryRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
-    UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
+    SetMorseBulkRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest, SplitCentralLatencyPolicy,
+    SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -107,7 +107,11 @@ impl RynkClient {
     pub async fn next_topic(&self) -> Result<TopicEvent, JsValue> {
         self.drive(async { Ok(self.client.next_topic().await) }).await
     }
-
+    #[wasm_bindgen(unchecked_return_type = "MorseProfileState")]
+    pub async fn read_morse_profile_state(&self) -> Result<JsValue, JsValue> {
+        let state = self.drive(self.client.read_morse_profile_state()).await?;
+        serde_wasm_bindgen::to_value(&state).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
     #[wasm_bindgen(unchecked_return_type = "MorseProfileState")]
     pub async fn read_morse_profile_state(&self) -> Result<JsValue, JsValue> {
         let state = self.drive(self.client.read_morse_profile_state()).await?;
@@ -191,6 +195,8 @@ endpoints! {
     write_all_keymap(actions: Vec<KeyAction>) -> (),
     read_all_combos() -> Vec<Combo>,
     write_all_combos(configs: Vec<Combo>) -> (),
+    read_all_combo_definitions() -> Vec<ComboDefinition>,
+    write_all_combo_definitions(definitions: Vec<ComboDefinition>) -> (),
     read_all_morses() -> Vec<Morse>,
     write_all_morses(configs: Vec<Morse>) -> (),
     get_layout() -> LayoutInfo,
@@ -199,6 +205,10 @@ endpoints! {
     set_combo(index: u8, config: Combo) -> (),
     get_combo_bulk(start_index: u8) -> GetComboBulkResponse,
     set_combo_bulk(request: SetComboBulkRequest) -> (),
+    get_combo_definition(index: u8) -> ComboDefinition,
+    set_combo_definition(index: u8, definition: ComboDefinition) -> (),
+    get_combo_definition_bulk(start_index: u8) -> GetComboDefinitionBulkResponse,
+    set_combo_definition_bulk(request: SetComboDefinitionBulkRequest) -> (),
     get_fork(index: u8) -> Fork,
     set_fork(index: u8, config: Fork) -> (),
     get_morse(index: u8) -> Morse,
@@ -207,6 +217,12 @@ endpoints! {
     set_morse_bulk(request: SetMorseBulkRequest) -> (),
     get_morse_hold_trigger_positions() -> MorseHoldTriggerPositionState,
     set_morse_hold_trigger_positions(request: SetMorseHoldTriggerPositionsRequest) -> (),
+    get_pointing_capabilities() -> PointingCapabilities,
+    get_pointing_config() -> PointingConfig,
+    set_pointing_config(config: PointingConfig) -> PointingConfig,
+    get_morse_profile_count() -> u8,
+    get_morse_profile_bulk(start_index: u8) -> GetMorseProfileBulkResponse,
+    set_morse_profile_bulk(request: SetMorseProfileBulkRequest) -> (),
     get_morse_profile_count() -> u8,
     get_morse_profile_bulk(start_index: u8) -> GetMorseProfileBulkResponse,
     set_morse_profile_bulk(request: SetMorseProfileBulkRequest) -> (),
@@ -215,19 +231,11 @@ endpoints! {
     delete_morse_profile(index: u8) -> (),
     get_macro(offset: u16) -> MacroData,
     set_macro(offset: u16, data: MacroData) -> (),
-    // pointing
-    get_pointing_capabilities() -> PointingCapabilities,
-    get_pointing_config() -> PointingConfig,
-    set_pointing_config(config: PointingConfig) -> PointingConfig,
     // behavior
     get_behavior() -> BehaviorConfig,
     set_behavior(config: BehaviorConfig) -> (),
     get_split_central_latency() -> SplitCentralLatencyState,
     set_split_central_latency(policy: SplitCentralLatencyPolicy) -> SplitCentralLatencyState,
-    get_behavior_options() -> BehaviorOptions,
-    set_behavior_options(options: BehaviorOptions) -> (),
-    get_auto_mouse_layer_configs() -> AutoMouseLayerConfigState,
-    set_auto_mouse_layer_configs(request: SetAutoMouseLayerConfigsRequest) -> (),
     // status
     get_current_layer() -> u8,
     get_layer_state() -> LayerState,

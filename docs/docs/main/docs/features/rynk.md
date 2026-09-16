@@ -135,6 +135,14 @@ stored macros. Don't put passwords or other secrets in a macro.
 `[host].unlock_keys` and `insecure` still configure Vial's separate lock when
 Vial is enabled; they do not participate in Rynk authorization.
 
+Rynk protocol 0.2 adds `Get/SetComboDefinition` and bulk counterparts. Their
+`ComboDefinition` payload is either `Actions(Combo)` or
+`Positions(PositionCombo)`. The original `Get/SetCombo` commands and their
+bytes are unchanged for older action-based clients. Host tools should use the
+definition endpoints when they need to preserve or edit position combos; the
+legacy getter returns `Invalid` for a position slot because it cannot represent
+that trigger without losing information.
+
 ## Advanced tuning
 
 Rynk's firmware buffers size themselves automatically and rarely need touching.
