@@ -327,6 +327,7 @@ fn expand_rmk_config(host: &Host, layout_blob: &[u8]) -> TokenStream2 {
                 maintenance_mode_default: #maintenance_mode_default,
             },
             layout_blob: #blob,
+            layer_names: &[],
             ..Default::default()
         })
     }
