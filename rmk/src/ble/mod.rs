@@ -18,7 +18,7 @@ use trouble_host::prelude::*;
 
 use crate::ble::adv::{Adv, advertise};
 use crate::ble::battery_service::BleBatteryServer;
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 use crate::ble::battery_service::BlePeripheralBatteryServer;
 use crate::ble::ble_server::{BleHidServer, Server};
 use crate::ble::device_info::{PnPID, VidSource};
@@ -426,7 +426,7 @@ pub(crate) async fn ble_task<C: Controller, P: PacketPool, E: EventHandler>(mut 
 /// This is how we interact with read and write requests.
 async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, DefaultPacketPool>) -> Result<(), Error> {
     let level = server.battery_service.level;
-    #[cfg(feature = "split")]
+    #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
     let peripheral_levels = server.peripheral_battery_services.levels;
     let output_keyboard = server.hid_service.output_keyboard;
     let hid_control_point = server.hid_service.hid_control_point;
@@ -492,10 +492,10 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                             let value = server.get(&level);
                             debug!("Read GATT Event to Level: {:?}", value);
                         } else {
-                            #[cfg(feature = "split")]
+                            #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
                             let peripheral_level =
                                 peripheral_levels.iter().find(|level| event.handle() == level.handle);
-                            #[cfg(not(feature = "split"))]
+                            #[cfg(any(not(feature = "split"), feature = "_no_split_peripheral_battery_service"))]
                             let peripheral_level: Option<&Characteristic<u8>> = None;
                             if let Some(peripheral_level) = peripheral_level {
                                 let value = server.get(peripheral_level);
@@ -543,14 +543,14 @@ async fn gatt_events_task(server: &Server<'_>, conn: &GattConnection<'_, '_, Def
                             || event.handle() == system_control.cccd_handle.expect("No CCCD for system report")
                             || event.handle() == level.cccd_handle.expect("No CCCD for battery level")
                             || {
-                                #[cfg(feature = "split")]
+                                #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
                                 {
                                     peripheral_levels.iter().any(|level| {
                                         event.handle()
                                             == level.cccd_handle.expect("No CCCD for peripheral battery level")
                                     })
                                 }
-                                #[cfg(not(feature = "split"))]
+                                #[cfg(any(not(feature = "split"), feature = "_no_split_peripheral_battery_service"))]
                                 {
                                     false
                                 }
@@ -788,7 +788,7 @@ async fn serve_keyboard_connection<
     let mut ble_hid_server = BleHidServer::new(server, conn);
     let mut ble_led_reader = BleLedReader;
     let mut ble_battery_server = config.enabled.then(|| BleBatteryServer::new(server, conn));
-    #[cfg(feature = "split")]
+    #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
     let mut ble_peripheral_battery_server = crate::SPLIT_BATTERY_PERIPHERAL_IDS
         .first()
         .map(|_| BlePeripheralBatteryServer::new(server, conn));
@@ -818,9 +818,9 @@ async fn serve_keyboard_connection<
     };
     update_ble_phy(stack, conn.raw(), host_phy).await;
 
-    #[cfg(not(feature = "split"))]
+    #[cfg(any(not(feature = "split"), feature = "_no_split_peripheral_battery_service"))]
     let battery_task = ble_battery_server.run();
-    #[cfg(feature = "split")]
+    #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
     let battery_task = embassy_futures::join::join(ble_battery_server.run(), ble_peripheral_battery_server.run());
 
     let communication_task = async {
