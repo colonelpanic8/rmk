@@ -10,7 +10,6 @@ use {super::ble::PeerAddress, crate::channel::FLASH_CHANNEL};
 #[cfg(feature = "_ble")]
 use {
     crate::event::{BatteryStatusEvent, ChargingStateEvent, EventSubscriber},
-    rmk_types::battery::BatteryStatus,
     trouble_host::prelude::*,
 };
 
@@ -118,10 +117,12 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                 crate::select_biased_with_feature! {
                     e = key_sub.next_message_pure().fuse() => SplitMessage::Key(e),
                     with_feature("_ble"): e = charging_state_sub.next_message_pure().fuse() => {
-                        SplitMessage::BatteryStatus(BatteryStatus::Available {
-                            charge_state: e.charging.into(),
-                            level: None,
-                        }.into())
+                        SplitMessage::BatteryStatus(
+                            crate::input_device::battery::with_charge_state(
+                                crate::input_device::battery::current_battery_status(),
+                                e.charging.into(),
+                            ).into()
+                        )
                     },
                     e = pointing_sub.next_message_pure().fuse() => SplitMessage::Pointing(e),
                     with_feature("_ble"): e = battery_sub.next_event().fuse() => SplitMessage::BatteryStatus(e),
