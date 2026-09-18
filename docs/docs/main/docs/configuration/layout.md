@@ -97,7 +97,7 @@ Whitespace and line breaks between items are free to vary, but keeping an arrang
 
 ## Assigning a hand to each key
 
-The optional `hand` marker tags a key as belonging to the left or right hand. It is used only when `unilateral_tap = true` (see [behavior](./behavior#per-key-profiles-for-morse-tapdance-tap-hold-fine-tuning)); otherwise it is ignored.
+The optional `hand` marker tags a key as belonging to the left or right hand. It is used by the `unilateral_tap` and `opposite_hand_hold` tap-hold policies (see [behavior](./behavior#per-key-profiles-for-morse-tapdance-tap-hold-fine-tuning)); otherwise it is ignored.
 
 - `L` (also `LH`, `Left`) — left hand
 - `R` (also `RH`, `Right`) — right hand
