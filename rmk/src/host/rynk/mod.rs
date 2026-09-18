@@ -173,7 +173,11 @@ impl<'a> RynkService<'a> {
             | Cmd::SetKeymapBulk
             | Cmd::SetComboBulk
             | Cmd::SetMorseBulk
-            | Cmd::SetMorseHoldTriggerPositions => self.lock_config.write_requires_unlock,
+            | Cmd::SetMorseHoldTriggerPositions
+            | Cmd::SetMorseProfile
+            | Cmd::SetMorseProfileBulk
+            | Cmd::SetBehaviorOptions
+            | Cmd::SetAutoMouseLayerConfigs => self.lock_config.write_requires_unlock,
             #[cfg(feature = "lighting")]
             Cmd::SetLightingState
             | Cmd::SetLightingOverlay
@@ -256,12 +260,24 @@ impl<'a> RynkService<'a> {
             Cmd::SetMorseBulk => serve_bulk::<command::SetMorseBulk, _>(self, msg).await,
             Cmd::GetMorseHoldTriggerPositions => serve::<command::GetMorseHoldTriggerPositions, _>(self, msg).await,
             Cmd::SetMorseHoldTriggerPositions => serve::<command::SetMorseHoldTriggerPositions, _>(self, msg).await,
+            Cmd::GetMorseProfileCount => serve::<command::GetMorseProfileCount, _>(self, msg).await,
+            Cmd::GetMorseProfile => serve::<command::GetMorseProfile, _>(self, msg).await,
+            Cmd::SetMorseProfile => serve::<command::SetMorseProfile, _>(self, msg).await,
+            Cmd::GetMorseProfileBulk => serve_bulk::<command::GetMorseProfileBulk, _>(self, msg).await,
+            Cmd::SetMorseProfileBulk => serve_bulk::<command::SetMorseProfileBulk, _>(self, msg).await,
+            Cmd::GetMorseProfileState => serve::<command::GetMorseProfileState, _>(self, msg).await,
+            Cmd::SetMorseProfileEntry => serve::<command::SetMorseProfileEntry, _>(self, msg).await,
+            Cmd::DeleteMorseProfile => serve::<command::DeleteMorseProfile, _>(self, msg).await,
 
             Cmd::GetFork => serve::<command::GetFork, _>(self, msg).await,
             Cmd::SetFork => serve::<command::SetFork, _>(self, msg).await,
 
             Cmd::GetBehaviorConfig => serve::<command::GetBehaviorConfig, _>(self, msg).await,
             Cmd::SetBehaviorConfig => serve::<command::SetBehaviorConfig, _>(self, msg).await,
+            Cmd::GetBehaviorOptions => serve::<command::GetBehaviorOptions, _>(self, msg).await,
+            Cmd::SetBehaviorOptions => serve::<command::SetBehaviorOptions, _>(self, msg).await,
+            Cmd::GetAutoMouseLayerConfigs => serve::<command::GetAutoMouseLayerConfigs, _>(self, msg).await,
+            Cmd::SetAutoMouseLayerConfigs => serve::<command::SetAutoMouseLayerConfigs, _>(self, msg).await,
 
             Cmd::GetPointingConfig => serve::<command::GetPointingConfig, _>(self, msg).await,
             Cmd::SetPointingConfig => serve::<command::SetPointingConfig, _>(self, msg).await,
