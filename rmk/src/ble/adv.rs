@@ -1,7 +1,10 @@
 //! Every advertisement RMK sends, in one place.
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_time::{Duration, with_timeout};
+use embassy_time::{Duration, Instant, with_timeout};
+use rmk_types::constants::{
+    BLE_ADVERTISING_FAST_INTERVAL_MS, BLE_ADVERTISING_FAST_TIMEOUT_SECS, BLE_ADVERTISING_SLOW_INTERVAL_MS,
+};
 use trouble_host::prelude::appearance::human_interface_device::KEYBOARD;
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::*;
@@ -92,21 +95,41 @@ impl Adv<'_> {
         }
     }
 
-    /// A host link can afford a slow interval and gains from 2M; every other
-    /// peer is RMK's own hardware, where reaching it fast matters more.
-    fn params(&self) -> AdvertisementParameters {
+    fn phase(
+        &self,
+        elapsed: Duration,
+        timeout: Duration,
+        fast_timeout: Duration,
+    ) -> Option<(AdvertisementParameters, Duration)> {
+        if elapsed >= timeout {
+            return None;
+        }
+        let fast = matches!(self, Self::Host { .. })
+            && BLE_ADVERTISING_FAST_INTERVAL_MS != BLE_ADVERTISING_SLOW_INTERVAL_MS
+            && elapsed < fast_timeout;
+        let phase_end = if fast { fast_timeout.min(timeout) } else { timeout };
         let (phy, interval) = match self {
-            Self::Host { .. } => (PhyKind::Le2M, Duration::from_millis(200)),
+            Self::Host { .. } => (
+                PhyKind::Le2M,
+                Duration::from_millis(u64::from(if fast {
+                    BLE_ADVERTISING_FAST_INTERVAL_MS
+                } else {
+                    BLE_ADVERTISING_SLOW_INTERVAL_MS
+                })),
+            ),
             _ => (PhyKind::Le1M, Duration::from_millis(50)),
         };
-        AdvertisementParameters {
-            primary_phy: phy,
-            secondary_phy: phy,
-            tx_power: TxPower::Plus8dBm,
-            interval_min: interval,
-            interval_max: interval,
-            ..Default::default()
-        }
+        Some((
+            AdvertisementParameters {
+                primary_phy: phy,
+                secondary_phy: phy,
+                tx_power: TxPower::Plus8dBm,
+                interval_min: interval,
+                interval_max: interval,
+                ..Default::default()
+            },
+            phase_end - elapsed,
+        ))
     }
 }
 
@@ -119,16 +142,89 @@ pub(crate) async fn advertise<'a, 'b, C: Controller, const ATT: usize, const CON
     timeout: Duration,
 ) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<C::Error>> {
     let mut buf = [0; 31];
-    let advertiser = peripheral.advertise(&adv.params(), adv.build(&mut buf)?).await?;
-    let conn = with_timeout(timeout, advertiser.accept())
-        .await
-        .map_err(|_| Error::Timeout)??;
-    Ok(conn.with_attribute_server(server)?)
+    let started = Instant::now();
+    let fast_timeout = Duration::from_secs(u64::from(BLE_ADVERTISING_FAST_TIMEOUT_SECS));
+    while let Some((params, remaining)) = adv.phase(started.elapsed(), timeout, fast_timeout) {
+        // Include controller setup in the deadline and drop the advertiser before restarting.
+        let attempt = async {
+            let advertiser = peripheral.advertise(&params, adv.build(&mut buf)?).await?;
+            Ok::<_, BleHostError<C::Error>>(advertiser.accept().await?)
+        };
+        match with_timeout(remaining, attempt).await {
+            Ok(result) => return Ok(result?.with_attribute_server(server)?),
+            Err(_) => continue,
+        }
+    }
+    Err(Error::Timeout.into())
 }
 
 #[cfg(test)]
 mod tests {
+    use embassy_time::Duration;
+    use rmk_types::constants::{BLE_ADVERTISING_FAST_INTERVAL_MS, BLE_ADVERTISING_SLOW_INTERVAL_MS};
+    use trouble_host::prelude::Address;
+
     use super::Adv;
+
+    #[test]
+    fn host_backs_off_without_extending_the_deadline() {
+        let host = Adv::Host { name: "RMK" };
+        let total = Duration::from_secs(300);
+        let fast = Duration::from_secs(5);
+        let (params, remaining) = host.phase(Duration::from_secs(2), total, fast).unwrap();
+        assert_eq!(
+            params.interval_min,
+            Duration::from_millis(BLE_ADVERTISING_FAST_INTERVAL_MS.into())
+        );
+        assert_eq!(params.interval_max, params.interval_min);
+        assert_eq!(remaining, Duration::from_secs(3));
+        let (params, remaining) = host.phase(fast, total, fast).unwrap();
+        assert_eq!(
+            params.interval_min,
+            Duration::from_millis(BLE_ADVERTISING_SLOW_INTERVAL_MS.into())
+        );
+        assert_eq!(remaining, Duration::from_secs(295));
+        assert!(host.phase(total, total, fast).is_none());
+        assert!(host.phase(total + fast, total, fast).is_none());
+    }
+
+    #[test]
+    fn short_deadlines_and_disabled_fast_window() {
+        let host = Adv::Host { name: "RMK" };
+        let total = Duration::from_secs(2);
+        let (_, remaining) = host
+            .phase(Duration::from_secs(1), total, Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(remaining, Duration::from_secs(1));
+        let (params, remaining) = host
+            .phase(Duration::from_secs(0), total, Duration::from_secs(0))
+            .unwrap();
+        assert_eq!(
+            params.interval_min,
+            Duration::from_millis(BLE_ADVERTISING_SLOW_INTERVAL_MS.into())
+        );
+        assert_eq!(remaining, total);
+        assert!(
+            host.phase(Duration::from_secs(0), Duration::from_secs(0), Duration::from_secs(5))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn split_and_dongle_do_not_back_off() {
+        for adv in [
+            Adv::SplitPeripheral { id: 0 },
+            Adv::DongleSeeking,
+            Adv::Directed(Address::random([1; 6])),
+        ] {
+            for elapsed in [Duration::from_secs(0), Duration::from_secs(5)] {
+                let total = Duration::from_secs(30);
+                let (params, remaining) = adv.phase(elapsed, total, Duration::from_secs(5)).unwrap();
+                assert_eq!(params.interval_min, Duration::from_millis(50));
+                assert_eq!(remaining, total - elapsed);
+            }
+        }
+    }
 
     /// Overrunning the 31-byte legacy advertisement only fails at runtime.
     fn fits(adv: Adv<'_>) -> bool {
