@@ -583,14 +583,12 @@ vial_enabled = true
 # Rynk and Vial are mutually exclusive and must match Cargo features.
 rynk_enabled = false
 # The unlock keys are the combo of the row 0, col 0 key and
-# the row 0, col 1 key. Shared by the Vial lock and the Rynk lock gate.
+# the row 0, col 1 key. Used by Vial's lock.
 unlock_keys = [[0, 0], [0, 1]]
 # Start (and stay) unlocked. Renamed from `vial_insecure` (still parses).
 insecure = false
-# Rynk only: move config writes into the locked tier (default: false).
-write_requires_unlock = false
-# Require physical unlock before central or split-peripheral bootloader entry.
-bootloader_requires_unlock = true
+# Rynk only: start with the keyboard-controlled maintenance lock engaged.
+maintenance_lock_default = false
 
 # Chip-specific configuration
 # To use the default configuration, ignore this section completely
