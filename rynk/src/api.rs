@@ -1391,22 +1391,34 @@ impl Client {
         })
     }
 
-    /// Write the whole keymap with concurrent paged writes, each page filled up to the
-    /// device's payload limit. A failure leaves the earlier pages applied.
+    /// Write the whole keymap with concurrent paged writes. A failure leaves the
+    /// earlier pages applied.
+    ///
+    /// Pages hold at most [`KEYMAP_WRITE_PAGE_KEYS`] cells rather than filling the
+    /// payload: every cell is one flash item, and the firmware only accepts a page
+    /// it can queue for flash whole (answering `Busy` otherwise), so a page longer
+    /// than its flash queue would fall back to streaming through it and stall the
+    /// session for the length of a storage page migration.
     pub async fn write_all_keymap(&self, actions: Vec<KeyAction>) -> Result<(), RynkHostError> {
         let caps = self.capabilities;
         let (rows, cols) = (caps.num_rows as u16, caps.num_cols as u16);
         // 3 fixed bytes before the items: layer, start_row, start_col.
-        self.write_all(Cmd::SetKeymapBulk, 3, actions, async |c, start, actions| {
-            let (layer, row, col) = keymap_pos(start, rows, cols);
-            c.set_keymap_bulk(SetKeymapBulkRequest {
-                layer,
-                start_row: row,
-                start_col: col,
-                actions,
-            })
-            .await
-        })
+        self.write_pages(
+            Cmd::SetKeymapBulk,
+            3,
+            KEYMAP_WRITE_PAGE_KEYS,
+            actions,
+            async |c, start, actions| {
+                let (layer, row, col) = keymap_pos(start, rows, cols);
+                c.set_keymap_bulk(SetKeymapBulkRequest {
+                    layer,
+                    start_row: row,
+                    start_col: col,
+                    actions,
+                })
+                .await
+            },
+        )
         .await
     }
 
@@ -2135,21 +2147,48 @@ impl Client {
 
     /// Write a whole resource as non-overlapping pages, up to [`MAX_IN_FLIGHT`] in flight.
     /// `fixed` is the request bytes before the item list; a failed lane stops, others go on.
-    async fn write_all<Item: Serialize>(
+    async fn write_all<Item: Serialize + Clone>(
         &self,
         cmd: Cmd,
         fixed: usize,
         items: Vec<Item>,
         store: impl AsyncFn(&Self, u16, Vec<Item>) -> Result<(), RynkHostError>,
     ) -> Result<(), RynkHostError> {
-        let mut pages = split_pages(cmd, fixed, self.capabilities.max_payload_size as usize, items)?;
+        self.write_pages(cmd, fixed, usize::MAX, items, store).await
+    }
+
+    /// [`write_all`](Self::write_all) with pages capped at `max_items` below what the
+    /// payload fits. A page the device answers with `Busy` is sent again: the firmware
+    /// bounds how long it waits for flash-queue room before saying so, which paces the
+    /// retries.
+    async fn write_pages<Item: Serialize + Clone>(
+        &self,
+        cmd: Cmd,
+        fixed: usize,
+        max_items: usize,
+        items: Vec<Item>,
+        store: impl AsyncFn(&Self, u16, Vec<Item>) -> Result<(), RynkHostError>,
+    ) -> Result<(), RynkHostError> {
+        let mut pages = split_pages(
+            cmd,
+            fixed,
+            self.capabilities.max_payload_size as usize,
+            max_items,
+            items,
+        )?;
         // One round trip per page however full, so an even static split balances the lanes.
         let chunk = pages.len().div_ceil(MAX_IN_FLIGHT);
         let lanes: [Vec<_>; MAX_IN_FLIGHT] = core::array::from_fn(|_| pages.drain(..chunk.min(pages.len())).collect());
         let store = &store; // the lanes move their own pages in, so `store` is shared by reference
         join_array(lanes.map(|pages| async move {
             for (start, page) in pages {
-                store(self, start, page).await?;
+                let mut retries = 0;
+                loop {
+                    match store(self, start, page.clone()).await {
+                        Err(RynkHostError::Rejected(RynkError::Busy)) if retries < WRITE_BUSY_RETRIES => retries += 1,
+                        result => break result?,
+                    }
+                }
             }
             Ok(())
         }))
@@ -2159,14 +2198,29 @@ impl Client {
     }
 }
 
+/// Cells per keymap write page. RMK's default flash queue (`flash_channel_size`)
+/// is four deep, and a page must fit the queue whole to be accepted without
+/// streaming; each cell costs a flash write anyway, so shorter pages lose no
+/// throughput.
+#[cfg(feature = "alloc")]
+pub const KEYMAP_WRITE_PAGE_KEYS: usize = 4;
+
+/// `Busy` answers a page may draw before the write fails. The firmware waits about
+/// half a second for flash-queue room before answering, so this spans a migration
+/// of a couple of minutes.
+#[cfg(feature = "alloc")]
+const WRITE_BUSY_RETRIES: usize = 240;
+
 /// Split `items` into write pages tagged with their first item's index. Sizing by real
 /// encoded size fits several times more per frame than the advertised count, which must
-/// assume worst-case items; an item too big alone returns [`RynkHostError::Encode`].
+/// assume worst-case items; `max_items` caps a page below that. An item too big alone
+/// returns [`RynkHostError::Encode`].
 #[cfg(feature = "alloc")]
 fn split_pages<Item: Serialize>(
     cmd: Cmd,
     fixed: usize,
     budget: usize,
+    max_items: usize,
     items: Vec<Item>,
 ) -> Result<Vec<(u16, Vec<Item>)>, RynkHostError> {
     let mut pages = Vec::new();
@@ -2180,7 +2234,7 @@ fn split_pages<Item: Serialize>(
         }
         // postcard's count varint widens as the page fills; a scalar measures the same.
         let count_bytes = serialized_size(&(page.len() + 1)).map_err(|_| RynkHostError::Encode(cmd))?;
-        if fixed + count_bytes + used + size > budget {
+        if page.len() == max_items || fixed + count_bytes + used + size > budget {
             pages.push((start as u16, core::mem::take(&mut page)));
             (start, used) = (i, 0);
         }
@@ -2213,7 +2267,7 @@ mod tests {
     /// with no gaps, none is empty, and each page's payload fits `budget`.
     /// Returns the page count.
     fn assert_packed<Item: Serialize + Clone>(fixed: usize, budget: usize, items: &[Item]) -> usize {
-        let pages = split_pages(Cmd::SetComboBulk, fixed, budget, items.to_vec()).unwrap();
+        let pages = split_pages(Cmd::SetComboBulk, fixed, budget, usize::MAX, items.to_vec()).unwrap();
         let mut expected_start = 0;
         for (start, page) in &pages {
             assert_eq!(*start as usize, expected_start);
@@ -2248,20 +2302,37 @@ mod tests {
     fn one_oversized_item_is_an_encode_error() {
         let items = vec![vec![0u8; 500]];
         assert!(matches!(
-            split_pages(Cmd::SetComboBulk, 1, 482, items),
+            split_pages(Cmd::SetComboBulk, 1, 482, usize::MAX, items),
             Err(RynkHostError::Encode(_))
         ));
         // Also when it is not the first item of its page.
         let items = vec![vec![0u8; 100], vec![0u8; 500]];
         assert!(matches!(
-            split_pages(Cmd::SetComboBulk, 1, 482, items),
+            split_pages(Cmd::SetComboBulk, 1, 482, usize::MAX, items),
             Err(RynkHostError::Encode(_))
         ));
     }
 
     #[test]
     fn empty_items_pack_to_no_pages() {
-        assert!(split_pages::<u8>(Cmd::SetComboBulk, 1, 482, vec![]).unwrap().is_empty());
+        assert!(
+            split_pages::<u8>(Cmd::SetComboBulk, 1, 482, usize::MAX, vec![])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn max_items_caps_a_page_below_the_budget() {
+        // 1-byte items and a budget that would take all ten in one page.
+        let pages = split_pages(Cmd::SetKeymapBulk, 3, 482, 4, vec![0u8; 10]).unwrap();
+        assert_eq!(
+            pages
+                .iter()
+                .map(|(start, page)| (*start, page.len()))
+                .collect::<Vec<_>>(),
+            vec![(0, 4), (4, 4), (8, 2)]
+        );
     }
 
     /// The `fixed` argument each `write_all_*` passes is hand-counted from its
