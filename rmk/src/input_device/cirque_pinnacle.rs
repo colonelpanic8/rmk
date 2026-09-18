@@ -157,19 +157,22 @@ pub enum PinnacleError {
 
 /// Decode a 3-byte relative-mode packet into (dx, dy, buttons).
 ///
-/// Deltas are 9-bit two's complement: the magnitude byte plus a sign bit in
-/// packet 0. Buttons are the low three bits of packet 0, already in HID
-/// order (bit 0 primary), asserted by tap gestures in relative mode.
+/// Each delta is a single 8-bit two's complement byte, so -1 arrives as 255
+/// and the range is -128..=127. The sign bits in packet 0 only restate bit 7
+/// of their byte; Cirque's own sample code ignores them entirely. Buttons are
+/// the low three bits of packet 0, already in HID order (bit 0 primary),
+/// asserted by tap gestures in relative mode.
 fn decode_relative_packet(packet: [u8; 3]) -> (i16, i16, u8) {
-    let mut dx = packet[1] as i16;
-    if packet[0] & PACKET0_X_SIGN != 0 {
-        dx -= 256;
-    }
-    let mut dy = packet[2] as i16;
-    if packet[0] & PACKET0_Y_SIGN != 0 {
-        dy -= 256;
-    }
+    let dx = decode_delta(packet[1], packet[0] & PACKET0_X_SIGN != 0);
+    let dy = decode_delta(packet[2], packet[0] & PACKET0_Y_SIGN != 0);
     (dx, dy, packet[0] & PACKET0_BTN_MASK)
+}
+
+/// One axis of a relative packet. A sign bit that disagrees with its delta
+/// byte cannot be a real motion, so the axis reports none.
+fn decode_delta(byte: u8, negative: bool) -> i16 {
+    let value = byte as i8;
+    if negative == (value < 0) { value as i16 } else { 0 }
 }
 
 /// Cirque Pinnacle touchpad as an RMK input device.
@@ -572,15 +575,30 @@ mod tests {
     }
 
     #[test]
-    fn decode_sign_extends_nine_bit_deltas_and_extracts_buttons() {
+    fn decode_reads_eight_bit_deltas_and_extracts_buttons() {
         assert_eq!(decode_relative_packet([0x00, 0x7F, 0x02]), (127, 2, 0));
         assert_eq!(decode_relative_packet([PACKET0_X_SIGN, 0xFF, 0x00]), (-1, 0, 0));
         assert_eq!(decode_relative_packet([PACKET0_Y_SIGN, 0x00, 0x80]), (0, -128, 0));
-        assert_eq!(
-            decode_relative_packet([PACKET0_X_SIGN | PACKET0_Y_SIGN, 0x01, 0x01]),
-            (-255, -255, 0)
-        );
+        // The datasheet's worked example: a delta walking down through zero
+        // into negative territory sets the sign bit and wraps the byte.
+        assert_eq!(decode_relative_packet([PACKET0_X_SIGN, 0xFE, 0x00]), (-2, 0, 0));
         assert_eq!(decode_relative_packet([0x03, 0x00, 0x00]), (0, 0, 0x03));
+    }
+
+    /// A sign bit set over a zero or positive byte is the shape a pad emits
+    /// as a finger leaves. Read as a magnitude it would become a near
+    /// full-scale delta and throw the pointer across the screen, so it has to
+    /// decode as no motion — which also lets the liftoff register.
+    #[test]
+    fn a_sign_bit_contradicting_its_delta_byte_is_no_motion() {
+        assert_eq!(
+            decode_relative_packet([PACKET0_X_SIGN | PACKET0_Y_SIGN, 0x00, 0x00]),
+            (0, 0, 0)
+        );
+        assert_eq!(
+            decode_relative_packet([PACKET0_X_SIGN | PACKET0_Y_SIGN, 0x01, 0x7F]),
+            (0, 0, 0)
+        );
     }
 
     #[test]
