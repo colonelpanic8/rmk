@@ -4,6 +4,7 @@ use embassy_time::Duration;
 use rmk_types::action::{EncoderAction, KeyAction};
 use rmk_types::fork::Fork;
 use rmk_types::morse::{Morse, MorseProfile};
+use rmk_types::unicode::UnicodeMode;
 #[cfg(all(feature = "storage", feature = "host"))]
 use {
     crate::{boot::reboot_keyboard, storage::Storage},
@@ -652,6 +653,27 @@ impl<'a> KeyMap<'a> {
         }
 
         restricted.then_some(false)
+    }
+
+    pub(crate) fn unicode_codepoint(&self, idx: u16) -> Option<u32> {
+        self.inner
+            .borrow()
+            .behavior
+            .unicode
+            .codepoints
+            .get(idx as usize)
+            .copied()
+    }
+
+    pub(crate) fn unicode_mode(&self) -> UnicodeMode {
+        self.inner.borrow().behavior.unicode.mode
+    }
+
+    /// Advance the unicode input mode and report the mode now in effect.
+    pub(crate) fn cycle_unicode_mode(&self) -> UnicodeMode {
+        let mut inner = self.inner.borrow_mut();
+        inner.behavior.unicode.mode = inner.behavior.unicode.mode.next();
+        inner.behavior.unicode.mode
     }
 
     pub(crate) fn mouse_key_config(&self) -> MouseKeyConfig {

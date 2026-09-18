@@ -591,6 +591,17 @@ macro_rules! macros {
     };
 }
 
+/// Create a key that types a codepoint from the configured codepoint table.
+///
+/// # Parameters
+/// - `$index`: Index into [`UnicodeConfig::codepoints`](crate::config::UnicodeConfig::codepoints)
+#[macro_export]
+macro_rules! unicode {
+    ($index: literal) => {
+        $crate::types::action::KeyAction::Single($crate::types::action::Action::Unicode($index))
+    };
+}
+
 /// Create a user key action with given index.
 ///
 /// # Parameters
