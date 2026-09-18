@@ -28,7 +28,7 @@ use rynk::{Client, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 /// single legal frame fits without the writer blocking on an un-polled reader.
 type Link = Pipe<NoopRawMutex, RYNK_BUFFER_SIZE>;
 
-static MAINTENANCE_STATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static MAINTENANCE_STATE_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The host side of the two pipes as a device — reads device→host, writes
 /// host→device — so the test connects through [`RynkDevice::connect`]. `&Pipe`
@@ -63,9 +63,7 @@ async fn with_session(device: DuplexDevice<'_>, script: impl AsyncFnOnce(&Client
 
 #[tokio::test(flavor = "current_thread")]
 async fn client_against_run_session() {
-    let _state_guard = MAINTENANCE_STATE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _state_guard = MAINTENANCE_STATE_TEST_LOCK.lock().await;
     // Firmware side.
     let mut behavior = BehaviorConfig::default();
     let positional: PositionalConfig<2, 2> = PositionalConfig::default();
@@ -219,9 +217,7 @@ async fn client_against_run_session() {
 /// reports the live/default state, and leaves the legacy lock endpoints inert.
 #[tokio::test(flavor = "current_thread")]
 async fn maintenance_gate_rejects_and_reports() {
-    let _state_guard = MAINTENANCE_STATE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _state_guard = MAINTENANCE_STATE_TEST_LOCK.lock().await;
     let mut behavior = BehaviorConfig::default();
     let positional: PositionalConfig<2, 2> = PositionalConfig::default();
     let mut data: KeymapData<2, 2, 1, 0> = KeymapData::new([[[KeyAction::No; 2]; 2]; 1]);
