@@ -1703,6 +1703,12 @@ impl<'a> Keyboard<'a> {
                     boot::jump_to_bootloader();
                 }
             }
+            KeyboardAction::MaintenanceModeToggle => {
+                if !event.pressed {
+                    let enabled = crate::state::toggle_maintenance_mode();
+                    info!("Maintenance mode: {}", enabled);
+                }
+            }
             KeyboardAction::Reboot => {
                 // When releasing the key, process the boot action
                 if !event.pressed {
