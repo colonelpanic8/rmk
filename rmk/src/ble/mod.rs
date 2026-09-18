@@ -56,6 +56,37 @@ pub(crate) mod profile;
 pub(crate) mod scan;
 pub(crate) mod sleep;
 
+/// Number of host BLE profiles configured for this firmware build.
+pub const fn profile_count() -> u8 {
+    crate::NUM_BLE_PROFILE as u8
+}
+
+/// Forget the bond in the active BLE host profile.
+pub async fn clear_active_profile() {
+    crate::channel::BLE_PROFILE_CHANNEL
+        .send(profile::BleProfileAction::ClearBond)
+        .await;
+}
+
+/// Forget the bond in one BLE host profile without changing the active slot.
+/// Returns `false` without touching non-host bond slots when `slot` is invalid.
+pub async fn clear_profile(slot: u8) -> bool {
+    if slot >= profile_count() {
+        return false;
+    }
+    crate::channel::BLE_PROFILE_CHANNEL
+        .send(profile::BleProfileAction::ClearSlot(slot))
+        .await;
+    true
+}
+
+/// Forget the bonds in every BLE host profile, preserving split and dongle bonds.
+pub async fn clear_all_profiles() {
+    crate::channel::BLE_PROFILE_CHANNEL
+        .send(profile::BleProfileAction::ClearAllBonds)
+        .await;
+}
+
 #[cfg(all(feature = "subrating", feature = "_no_subrating"))]
 compile_error!("You may not enable feature `subrating` on unsupported platforms!");
 
