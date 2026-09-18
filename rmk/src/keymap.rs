@@ -431,7 +431,12 @@ impl<'a> KeyMap<'a> {
 
         // Read from storage BEFORE flattening (storage expects typed arrays).
         if let Some(storage) = storage
-            && storage.read_boot_data(data, behavior).await.is_err()
+            && {
+                #[cfg(feature = "rynk")]
+                crate::input_device::pointing_config::init(storage.read_pointing_config().await).await;
+                storage.read_boot_data(data, behavior).await
+            }
+            .is_err()
         {
             error!("Failed to read from storage, clearing...");
             storage.flash.erase_all().await.ok();

@@ -20,9 +20,9 @@ use usbd_hid::descriptor::{MediaKeyboardReport, SystemControlReport};
 
 #[cfg(feature = "_ble")]
 use crate::ble::sleep::report_activity;
-use crate::channel::send_hid_report;
+use crate::channel::{VirtualKeyEvent, send_hid_report};
 use crate::core_traits::Runnable;
-use crate::event::{ActionEvent, KeyboardEvent, KeyboardEventPos, SubscribableEvent, publish_event_async};
+use crate::event::{ActionEvent, KeyPos, KeyboardEvent, KeyboardEventPos, SubscribableEvent, publish_event_async};
 #[cfg(all(feature = "split", feature = "_ble"))]
 use crate::event::{ClearPeerEvent, publish_event};
 use crate::hid::{KeyboardReport, Report};
@@ -191,9 +191,9 @@ impl Runnable for Keyboard<'_> {
                     .into_iter()
                     .flatten()
                     .min();
-                let event = if let Some(deadline) = deadline {
-                    match with_deadline(deadline, self.keyboard_event_subscriber.next_message_pure()).await {
-                        Ok(event) => event,
+                let input = if let Some(deadline) = deadline {
+                    match with_deadline(deadline, self.next_input()).await {
+                        Ok(input) => input,
                         Err(_) => {
                             // Deadline expired: fire pending one-shot expiry and/or mouse repeat
                             self.fire_oneshot_timeout().await;
@@ -205,9 +205,12 @@ impl Runnable for Keyboard<'_> {
                     }
                 } else {
                     // No repeat pending, wait indefinitely
-                    self.keyboard_event_subscriber.next_message_pure().await
+                    self.next_input().await
                 };
-                self.process_inner(event).await
+                match input {
+                    Input::Key(event) => self.process_inner(event).await,
+                    Input::Virtual(event) => self.process_virtual_key(event).await,
+                }
             };
 
             // Run any macros triggered while handling the event.
@@ -216,6 +219,12 @@ impl Runnable for Keyboard<'_> {
             }
         }
     }
+}
+
+/// What the keyboard loop waits on: a physical event or a virtual key.
+enum Input {
+    Key(KeyboardEvent),
+    Virtual(VirtualKeyEvent),
 }
 
 pub struct Keyboard<'a> {
@@ -402,6 +411,35 @@ impl<'a> Keyboard<'a> {
             }
             _ => (),
         }
+    }
+
+    async fn next_input(&mut self) -> Input {
+        use embassy_futures::select::{Either, select};
+        match select(
+            self.keyboard_event_subscriber.next_message_pure(),
+            crate::channel::VIRTUAL_KEY_CHANNEL.receive(),
+        )
+        .await
+        {
+            Either::First(event) => Input::Key(event),
+            Either::Second(event) => Input::Virtual(event),
+        }
+    }
+
+    /// A key pressed by a pointing device: no position, no layer lookup, no
+    /// buffering, just the report state every other key shares.
+    async fn process_virtual_key(&mut self, VirtualKeyEvent { key, pressed }: VirtualKeyEvent) {
+        #[cfg(feature = "_ble")]
+        report_activity();
+        let event = KeyboardEvent {
+            pos: KeyboardEventPos::Key(KeyPos {
+                row: u8::MAX,
+                col: u8::MAX,
+            }),
+            pressed,
+        };
+        self.process_key_action_normal(Action::Key(KeyCode::Hid(key)), event)
+            .await;
     }
 
     /// Process key changes at (row, col)
@@ -1804,8 +1842,9 @@ impl<'a> Keyboard<'a> {
 
         if let Some(report) = report {
             let scale = self.keymap.mouse_layer_scale();
-            let report = self.mouse.scale_report(report, scale);
+            let mut report = self.mouse.scale_report(report, scale);
             self.keymap.set_mouse_buttons(self.mouse.report.buttons);
+            report.buttons |= crate::input_device::pointing::device_held_buttons();
             self.send_report(Report::MouseReport(report)).await;
             yield_now().await;
         }
@@ -2153,7 +2192,8 @@ impl<'a> Keyboard<'a> {
     pub(crate) async fn send_mouse_report(&mut self) {
         let report = self.mouse.get_report();
         let scale = self.keymap.mouse_layer_scale();
-        let report = self.mouse.scale_report(report, scale);
+        let mut report = self.mouse.scale_report(report, scale);
+        report.buttons |= crate::input_device::pointing::device_held_buttons();
         self.send_report(Report::MouseReport(report)).await;
         yield_now().await;
     }
@@ -2381,6 +2421,35 @@ mod test {
             assert_eq!(keyboard.held_keycodes[0], HidKeyCode::A);
         };
         block_on(main);
+    }
+
+    #[test]
+    fn virtual_keys_compose_with_held_keys() {
+        block_on(async {
+            let mut keyboard = create_test_keyboard();
+            keyboard.process_inner(KeyboardEvent::key(0, 0, true)).await;
+            keyboard.register_modifier_key(HidKeyCode::LShift);
+            keyboard
+                .process_virtual_key(VirtualKeyEvent {
+                    key: HidKeyCode::Right,
+                    pressed: true,
+                })
+                .await;
+            let report = keyboard.build_keyboard_report(true);
+            assert_eq!(report.modifier, HidKeyCode::LShift.to_hid_modifiers().into_bits());
+            assert!(report.keycodes.contains(&(HidKeyCode::Grave as u8)));
+            assert!(report.keycodes.contains(&(HidKeyCode::Right as u8)));
+            keyboard
+                .process_virtual_key(VirtualKeyEvent {
+                    key: HidKeyCode::Right,
+                    pressed: false,
+                })
+                .await;
+            let report = keyboard.build_keyboard_report(false);
+            assert_eq!(report.modifier, HidKeyCode::LShift.to_hid_modifiers().into_bits());
+            assert!(report.keycodes.contains(&(HidKeyCode::Grave as u8)));
+            assert!(!report.keycodes.contains(&(HidKeyCode::Right as u8)));
+        });
     }
 
     #[test]
