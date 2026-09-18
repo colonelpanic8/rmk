@@ -8,7 +8,8 @@ use rmk_types::protocol::rynk::BleName;
 use rmk_types::protocol::rynk::RynkError;
 #[cfg(feature = "_ble")]
 use rmk_types::protocol::rynk::command::{
-    ClearAllBleProfiles, ClearBleProfile, GetBleName, GetBleStatus, SetBleName, SwitchBleProfile,
+    ClearAllBleProfiles, ClearBleProfile, GetAutoSwitchTransport, GetBleName, GetBleStatus, SetAutoSwitchTransport,
+    SetBleName, SwitchBleProfile,
 };
 use rmk_types::protocol::rynk::command::{GetConnectionStatus, GetConnectionType};
 #[cfg(all(feature = "_ble", feature = "split"))]
@@ -142,6 +143,27 @@ impl Handle<SetBleName> for RynkService<'_> {
         crate::ble::name::set(value.clone()).map_err(|_| RynkError::Invalid)?;
         crate::channel::FLASH_CHANNEL
             .send(crate::storage::FlashOperationMessage::BleName(value))
+            .await;
+        Ok(())
+    }
+}
+
+/// `Cmd::GetAutoSwitchTransport` — whether the cable drives the preference.
+#[cfg(feature = "_ble")]
+impl Handle<GetAutoSwitchTransport> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<bool, RynkError> {
+        Ok(crate::state::auto_switch_transport())
+    }
+}
+
+/// `Cmd::SetAutoSwitchTransport` — the policy applies from the next plug or
+/// unplug, so the current preference is deliberately left where it is.
+#[cfg(feature = "_ble")]
+impl Handle<SetAutoSwitchTransport> for RynkService<'_> {
+    async fn handle(&self, enabled: bool) -> Result<(), RynkError> {
+        crate::state::set_auto_switch_transport(enabled);
+        crate::channel::FLASH_CHANNEL
+            .send(crate::storage::FlashOperationMessage::AutoSwitchTransport(enabled))
             .await;
         Ok(())
     }

@@ -82,6 +82,8 @@ static LAYER_METADATA_RESPONSE: Signal<crate::RawMutex, (u8, Option<LayerMetadat
 // One reply slot: readers take turns for the whole request/response exchange.
 #[cfg(all(feature = "host", feature = "rynk"))]
 static LAYER_METADATA_READ: Mutex<crate::RawMutex, ()> = Mutex::new(());
+#[cfg(feature = "_ble")]
+static AUTO_SWITCH_TRANSPORT_RESPONSE: Signal<crate::RawMutex, Option<bool>> = Signal::new();
 
 #[cfg(feature = "_ble")]
 async fn request_read<T: Send>(msg: FlashOperationMessage, response: &Signal<crate::RawMutex, T>) -> T {
@@ -132,6 +134,15 @@ pub(crate) async fn read_layer_metadata(layer: u8) -> Option<LayerMetadata> {
             return metadata;
         }
     }
+}
+
+#[cfg(feature = "_ble")]
+pub(crate) async fn read_auto_switch_transport() -> Option<bool> {
+    request_read(
+        FlashOperationMessage::ReadAutoSwitchTransport,
+        &AUTO_SWITCH_TRANSPORT_RESPONSE,
+    )
+    .await
 }
 
 /// Persist a peer address and wait for it to land.
@@ -307,6 +318,12 @@ pub(crate) enum FlashOperationMessage {
     LightingOutputMode(rmk_types::protocol::rynk::LightingOutputMode),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingExtensionParams(LightingExtensionParamsRecord),
+    #[cfg(feature = "_ble")]
+    // Read the persisted auto-switch policy; storage task replies via `AUTO_SWITCH_TRANSPORT_RESPONSE`.
+    ReadAutoSwitchTransport,
+    #[cfg(feature = "_ble")]
+    // Persist the auto-switch policy.
+    AutoSwitchTransport(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -404,6 +421,8 @@ pub(crate) enum StorageKey {
     LightingRuleShardV4(u8),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuleShardV4B(u8),
+    #[cfg(feature = "_ble")]
+    AutoSwitchTransport,
 }
 
 impl StorageKey {
@@ -555,6 +574,9 @@ pub(crate) enum StorageData {
     LightingExtensionParams(LightingExtensionParamsRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuleShardV4(heapless::Vec<u8, LIGHTING_RULE_SHARD_BYTES>),
+    // New variants go last, matching `StorageKey`.
+    #[cfg(feature = "_ble")]
+    AutoSwitchTransport(bool),
 }
 
 impl<'a> PostcardValue<'a> for StorageData {}
@@ -1818,6 +1840,15 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     continue;
                 }
                 #[cfg(feature = "_ble")]
+                FlashOperationMessage::ReadAutoSwitchTransport => {
+                    let resp = match self.fetch_data(StorageKey::AutoSwitchTransport).await {
+                        Some(StorageData::AutoSwitchTransport(v)) => Some(v),
+                        _ => None,
+                    };
+                    AUTO_SWITCH_TRANSPORT_RESPONSE.signal(resp);
+                    continue;
+                }
+                #[cfg(feature = "_ble")]
                 FlashOperationMessage::ReadActiveBleProfile => {
                     let resp = match self.fetch_data(StorageKey::ActiveBleProfile).await {
                         Some(StorageData::ActiveBleProfile(v)) => Some(v),
@@ -1928,6 +1959,14 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 FlashOperationMessage::ConnectionType(ty) => {
                     self.store_data(StorageKey::ConnectionType, &StorageData::ConnectionType(ty))
                         .await
+                }
+                #[cfg(feature = "_ble")]
+                FlashOperationMessage::AutoSwitchTransport(enabled) => {
+                    self.store_data(
+                        StorageKey::AutoSwitchTransport,
+                        &StorageData::AutoSwitchTransport(enabled),
+                    )
+                    .await
                 }
                 #[cfg(all(feature = "_ble", feature = "split"))]
                 FlashOperationMessage::PeerAddress(peer) => {
@@ -2370,6 +2409,8 @@ mod tests {
             StorageKey::LightingRuleShardV4(0),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageKey::LightingRuleShardV4B(0),
+            #[cfg(feature = "_ble")]
+            StorageKey::AutoSwitchTransport,
         ];
 
         let mut buffer = [0u8; 64];
