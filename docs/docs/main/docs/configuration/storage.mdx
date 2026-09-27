@@ -64,6 +64,6 @@ If you change the storage size in rmk-boot's `build.rs`, rebuild the bootloader 
 
 ::: info Storage is re-initialized when the firmware changes
 
-Every firmware build embeds a unique build hash, and on boot RMK compares it with the hash saved in Flash. If they differ (for example after flashing a new build), the whole storage area is erased and re-initialized with the firmware's defaults, so saved keymap changes and BLE bonds don't survive a firmware update.
+Every firmware build embeds a unique build hash, and on boot RMK compares it with the hash saved in Flash. Reproducible build systems can set `RMK_BUILD_HASH_SEED` to generate the same hash from the same non-empty seed. If the running and stored hashes differ (for example after flashing a new build), the whole storage area is erased and re-initialized with the firmware's defaults, so saved keymap changes and BLE bonds don't survive a firmware update.
 
 :::
