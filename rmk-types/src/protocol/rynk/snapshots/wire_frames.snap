@@ -89,7 +89,7 @@ GetPointingCapabilities reply Ok(PointingCapabilities{Keypad})                  
 GetPointingCapabilities request ()                                              04 03 0a 01 00
 GetSleepState reply Ok(true)                                                    04 06 08 01 02 01 00
 GetSleepState request ()                                                        04 06 08 01 00
-GetVersion reply Ok(CURRENT)                                                    02 01 02 01 01 02 02 00
+GetVersion reply Ok(CURRENT)                                                    02 01 02 01 01 02 03 00
 GetVersion request ()                                                           02 01 02 01 00
 GetWpm reply Ok(42)                                                             04 05 08 01 02 2a 00
 GetWpm request ()                                                               04 05 08 01 00
