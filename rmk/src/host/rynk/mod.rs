@@ -240,7 +240,7 @@ impl<'a> RynkService<'a> {
             | Cmd::BeginLightingRuleReplace
             | Cmd::PutLightingRuleChunk
             | Cmd::CommitLightingRuleReplace
-            | Cmd::AbortLightingRuleReplace => self.lock_config.write_requires_unlock,
+            | Cmd::AbortLightingRuleReplace => Some(true),
             #[cfg(feature = "lighting")]
             Cmd::BeginLightingRuntimeConditionalSceneReplace
             | Cmd::PutLightingRuntimeConditionalSceneChunk
@@ -322,15 +322,18 @@ impl<'a> RynkService<'a> {
             | Cmd::GetLightingOutputMode
             | Cmd::GetLightingExtension
             | Cmd::GetLightingExtensionNames
-            | Cmd::GetLightingRuntimeConditionalSceneStatus
-            | Cmd::GetLightingRuntimeConditionalScenes
             | Cmd::GetLightingExtensionParams
             | Cmd::GetLightingExtensionLayers
+            | Cmd::GetLightingRuleStatus
+            | Cmd::GetLightingRules
+            | Cmd::GetLightingReplicaStatus => Some(false),
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingRuntimeConditionalSceneStatus
+            | Cmd::GetLightingRuntimeConditionalScenes
             | Cmd::GetLightingExtendedRuntimeConditionalSceneStatus
             | Cmd::GetLightingExtendedRuntimeConditionalScenes
             | Cmd::GetLightingAdvancedRuntimeConditionalSceneStatus
-            | Cmd::GetLightingAdvancedRuntimeConditionalScenes
-            | Cmd::GetLightingReplicaStatus => Some(false),
+            | Cmd::GetLightingAdvancedRuntimeConditionalScenes => Some(false),
             _ => None,
         }
     }
