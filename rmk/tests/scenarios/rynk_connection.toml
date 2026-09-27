@@ -1,0 +1,59 @@
+# Connection-domain endpoints: the auto-switch policy that decides whether the
+# USB cable retargets the preferred transport. Column 1 holds `User6`, the key
+# a keymap binds to switch the preferred transport by hand.
+features = ["rynk", "_ble"]
+
+[layout]
+rows = 1
+cols = 2
+map = """
+(0,0)  (0,1)
+"""
+
+[[keymap.layer]]
+keys = "A  User6"
+
+[[test]]
+name = "auto_switch_is_off_until_a_host_turns_it_on"
+steps = [
+  { rynk = { cmd = "GetAutoSwitchTransport", reply = false } },
+  { rynk = { cmd = "SetAutoSwitchTransport", payload = true } },
+  { rynk = { cmd = "GetAutoSwitchTransport", reply = true } },
+]
+
+# Unplugging releases the USB report channel, which queues the all-up report
+# each of the cases below expects.
+[[test]]
+name = "the_cable_retargets_the_preference_while_auto_switch_is_on"
+steps = [
+  { rynk = { cmd = "SetAutoSwitchTransport", payload = true } },
+  { usb = "Disabled" },
+  { rynk = { cmd = "GetConnectionType", reply = "Ble" } },
+  { usb = "Configured" },
+  { rynk = { cmd = "GetConnectionType", reply = "Usb" } },
+]
+expect = [[]]
+
+[[test]]
+name = "the_cable_is_ignored_while_auto_switch_is_off"
+steps = [
+  { tap = { pos = [0, 1], duration = 10 } },
+  { rynk = { cmd = "GetConnectionType", reply = "Ble" } },
+  { usb = "Disabled" },
+  { rynk = { cmd = "GetConnectionType", reply = "Ble" } },
+  { usb = "Configured" },
+  { rynk = { cmd = "GetConnectionType", reply = "Ble" } },
+]
+expect = [[]]
+
+[[test]]
+name = "a_manual_switch_holds_until_the_cable_next_moves"
+steps = [
+  { rynk = { cmd = "SetAutoSwitchTransport", payload = true } },
+  { tap = { pos = [0, 1], duration = 10 } },
+  { rynk = { cmd = "GetConnectionType", reply = "Ble" } },
+  { usb = "Disabled" },
+  { usb = "Configured" },
+  { rynk = { cmd = "GetConnectionType", reply = "Usb" } },
+]
+expect = [[]]

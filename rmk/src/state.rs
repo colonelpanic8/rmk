@@ -134,6 +134,23 @@ pub(crate) fn set_sleeping(sleeping: bool) {
     }
 }
 
+/// Whether plugging or unplugging USB retargets the preferred transport.
+/// Off by default, so a keymap that only ever picks its transport by key
+/// behaves exactly as it did before this policy existed.
+static AUTO_SWITCH_TRANSPORT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Whether the cable currently drives the preferred transport.
+pub fn auto_switch_transport() -> bool {
+    AUTO_SWITCH_TRANSPORT.load(core::sync::atomic::Ordering::Acquire)
+}
+
+/// Persistence is the caller's responsibility — enqueue
+/// `FlashOperationMessage::AutoSwitchTransport` on `FLASH_CHANNEL`.
+#[cfg(feature = "_ble")]
+pub(crate) fn set_auto_switch_transport(enabled: bool) {
+    AUTO_SWITCH_TRANSPORT.store(enabled, core::sync::atomic::Ordering::Release);
+}
+
 /// Single source of truth for transport state and routing. All writes go
 /// through the mutator helpers below so the active-output cascade runs and
 /// change events fire on every transition.
@@ -182,6 +199,17 @@ pub(crate) fn update_status(f: impl FnOnce(&mut ConnectionStatus)) {
         let prev = c.get();
         let mut new = prev;
         f(&mut new);
+        // The cable changing hands outranks whatever set the preference last:
+        // plugging in takes typing back to USB, unplugging hands it to BLE.
+        // Only the transition does this, so a key press still sticks until the
+        // cable next moves.
+        if auto_switch_transport() && prev.usb_ready() != new.usb_ready() {
+            new.preferred = if new.usb_ready() {
+                ConnectionType::Usb
+            } else {
+                ConnectionType::Ble
+            };
+        }
         if prev == new {
             return None;
         }
@@ -264,6 +292,30 @@ pub(crate) async fn load_preferred_connection() -> ConnectionType {
         None => ConnectionType::Ble,
         #[cfg(not(feature = "_no_usb"))]
         None => ConnectionType::Usb,
+    }
+}
+
+/// Restore the persisted auto-switch policy at startup.
+///
+/// Turning it on also aligns the preference with the cable as it is right now:
+/// USB may have enumerated before storage became readable, so the plug
+/// transition that would have set the preference has already gone by.
+#[cfg(feature = "_ble")]
+pub(crate) async fn load_auto_switch_transport() {
+    #[cfg(feature = "storage")]
+    let enabled = crate::storage::read_auto_switch_transport().await.unwrap_or(false);
+    #[cfg(not(feature = "storage"))]
+    let enabled = false;
+
+    set_auto_switch_transport(enabled);
+    if enabled {
+        update_status(|c| {
+            c.preferred = if c.usb_ready() {
+                ConnectionType::Usb
+            } else {
+                ConnectionType::Ble
+            };
+        });
     }
 }
 
