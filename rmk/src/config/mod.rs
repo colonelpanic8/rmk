@@ -9,10 +9,9 @@ mod storage;
 mod vial;
 
 pub use behavior::{
-    AutoMouseLayerConfig, BehaviorConfig, CombosConfig, ForksConfig, HOLD_TRIGGER_DEFAULT_PROFILE, HoldTriggerPositions,
-    KeyboardMacrosConfig, MorsesConfig, MouseKeyConfig, MouseLayerScaleConfig, OneShotConfig, OneShotModifiersConfig,
-    TapConfig,
-    UnicodeConfig,
+    AutoMouseLayerConfig, BehaviorConfig, CombosConfig, ForksConfig, HOLD_TRIGGER_DEFAULT_PROFILE,
+    HoldTriggerPositions, KeyboardMacrosConfig, MorsesConfig, MouseKeyConfig, MouseLayerScaleConfig, OneShotConfig,
+    OneShotModifiersConfig, TapConfig, UnicodeConfig,
 };
 #[cfg(feature = "_ble")]
 pub use ble_battery::BleBatteryConfig;
