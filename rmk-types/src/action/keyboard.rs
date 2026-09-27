@@ -31,4 +31,6 @@ pub enum KeyboardAction {
     OutputBluetooth,
     /// Cycle the unicode input mode and persist the new one.
     UnicodeModeCycle,
+    /// Toggle whether the host may run maintenance operations.
+    MaintenanceModeToggle,
 }

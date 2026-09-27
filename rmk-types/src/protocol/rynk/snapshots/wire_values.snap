@@ -10,6 +10,7 @@ Action::DefaultLayer(5)                                 08 05
 Action::Key(Hid(A))                                     01 00 04
 Action::KeyWithModifier(A,LShift)                       03 04 02
 Action::KeyboardControl(Bootloader)                     11 00
+Action::KeyboardControl(MaintenanceModeToggle)          11 0c
 Action::LayerOff(3)                                     06 03
 Action::LayerOn(1)                                      04 01
 Action::LayerOnWithModifier(2,LCtrl)                    05 02 01
