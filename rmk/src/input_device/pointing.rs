@@ -222,6 +222,13 @@ impl<S: PointingDriver> PointingDevice<S> {
         }
 
         loop {
+            // A sensor that used up its init retries never reports again, and an
+            // unpopulated motion pin can sit low, so `wait_for_low` would return
+            // at once and spin this loop; park instead.
+            if self.init_state == InitState::Failed {
+                pending::<()>().await;
+            }
+
             let poll_wait = async {
                 if let Some(gpio) = self.sensor.motion_gpio() {
                     let _ = gpio.wait_for_low().await;
@@ -395,8 +402,15 @@ impl Default for PointingProcessorConfig {
 }
 
 /// PointingProcessor that converts motion events to mouse reports
-#[cfg_attr(feature = "rynk", processor(subscribe = [PointingConfigChangeEvent, LayerChangeEvent, PointingProcessorEvent, PointingEvent]))]
-#[cfg_attr(not(feature = "rynk"), processor(subscribe = [PointingEvent, PointingProcessorEvent]))]
+///
+/// `PointingProcessorEvent` is listed first because `#[processor]` dispatches
+/// subscriptions with `select_biased!`, in declaration order. Motion can
+/// arrive faster than the report channel drains, and a mode change queued
+/// behind that backlog would not apply until the finger stopped — exactly
+/// when a layer-driven mode is no longer wanted. Mode changes are rare, so
+/// giving them the first arm cannot starve motion.
+#[cfg_attr(feature = "rynk", processor(subscribe = [PointingProcessorEvent, PointingConfigChangeEvent, LayerChangeEvent, PointingEvent]))]
+#[cfg_attr(not(feature = "rynk"), processor(subscribe = [PointingProcessorEvent, PointingEvent]))]
 pub struct PointingProcessor<'a> {
     /// Reference to the keymap (used for mouse_buttons)
     keymap: &'a KeyMap<'a>,
@@ -885,6 +899,7 @@ mod tests {
     use embedded_hal_async::digital::Wait;
 
     use super::*;
+    use crate::event::{EventSubscriber, publish_event};
     use crate::input_device::InputDevice;
     use crate::test_support::test_block_on as block_on;
 
@@ -1864,6 +1879,32 @@ mod tests {
     }
 
     // === Integration tests for PointingProcessor ===
+
+    #[test]
+    fn test_pending_mode_change_is_dispatched_before_queued_motion() {
+        let mut sub = PointingProcessorProcessorEventSubscriber::new();
+
+        // Motion first, so only the subscription order can put the mode
+        // change ahead of it.
+        let axis = |axis| AxisEvent {
+            axis,
+            typ: AxisValType::Rel,
+            value: 5,
+        };
+        publish_event(PointingEvent {
+            device_id: 0,
+            axes: [axis(Axis::X), axis(Axis::Y), axis(Axis::Z)],
+        });
+        publish_event(PointingProcessorEvent {
+            device_id: 0,
+            mode: PointingMode::Scroll(ScrollConfig::default()),
+        });
+
+        assert!(matches!(
+            block_on(sub.next_event()),
+            PointingProcessorProcessorEventEnum::PointingProcessor(_)
+        ));
+    }
 
     #[test]
     fn test_pointing_processor_mode_selection() {
