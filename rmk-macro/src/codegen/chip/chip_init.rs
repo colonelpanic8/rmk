@@ -149,9 +149,20 @@ pub(crate) fn chip_init_default(hardware: &Hardware, peripheral_id: Option<usize
                 },
                 _ => quote! {},
             };
+            // MPSL reserves interrupt priorities P0 (RADIO/RTC0/TIMER0) and
+            // P4; embassy-nrf's defaults put GPIOTE and the time driver at
+            // P0, where they delay MPSL's radio and timeslot signals.
+            let interrupt_priority_config = match &communication {
+                CommunicationConfig::Ble(_) | CommunicationConfig::Both(_, _) => quote! {
+                    config.gpiote_interrupt_priority = ::embassy_nrf::interrupt::Priority::P2;
+                    config.time_interrupt_priority = ::embassy_nrf::interrupt::Priority::P2;
+                },
+                _ => quote! {},
+            };
             quote! {
                 use embassy_nrf::interrupt::InterruptExt;
                 let mut config = ::embassy_nrf::config::Config::default();
+                #interrupt_priority_config
                 #dcdc_config
                 let p = ::embassy_nrf::init(config);
                 #ble_init
