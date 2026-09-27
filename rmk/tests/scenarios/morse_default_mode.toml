@@ -1,0 +1,31 @@
+# The resolution mode a keyboard gets when it configures none: PermissiveHold.
+#
+# Deliberately has no `[behavior.morse]` at all — the mode is what this file is
+# about, so setting anything would hide the thing under test. Same fixture and
+# timelines as `morse_permissive_hold.toml`: MT(B, LShift)@(1,1) and A@(1,0) on
+# the shared split board's home row.
+#
+# `mt_1` separates the default from Normal (which resolves only on the hold
+# timeout) and `mt_2` separates it from HoldOnOtherPress (which resolves on the
+# other key's press rather than its release).
+
+keyboard = "boards/split.toml"
+
+[[test]]
+name = "mt_1"
+steps = [
+  { press = [1, 1] },  # Press MT(B, LShift)
+  { tap = { pos = [1, 0], duration = 10 } },
+  { release = [1, 1] },
+]
+expect = [["LShift"], ["LShift", "A"], ["LShift"], []]
+
+[[test]]
+name = "mt_2"
+steps = [
+  { press = [1, 1] },    # Press MT(B, LShift)
+  { press = [1, 0] },    # Press A
+  { release = [1, 1] },  # Release MT first -> tap
+  { release = [1, 0] },
+]
+expect = [["B"], ["B", "A"], ["A"], []]
