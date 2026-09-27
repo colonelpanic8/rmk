@@ -1716,7 +1716,8 @@ fn lighting_wire_frames_locked() {
                 | LightingFeatureFlags::COMPILED_LAYER_SCENES
                 | LightingFeatureFlags::OUTPUT_MODE
                 | LightingFeatureFlags::RUNTIME_CONDITIONAL_SCENES
-                | LightingFeatureFlags::RUNTIME_CONNECTION_CONDITIONS,
+                | LightingFeatureFlags::RUNTIME_CONNECTION_CONDITIONS
+                | LightingFeatureFlags::RULES,
         ),
         effects: LightingEffectFlags(
             LightingEffectFlags::SOLID | LightingEffectFlags::BLINK | LightingEffectFlags::BREATHE,
@@ -2045,6 +2046,82 @@ fn lighting_wire_frames_locked() {
         offset: 0,
         cells: one(extended_conditional_cell),
     };
+    let all_but_split_rule = LightingRule::from_predicates(
+        led.id,
+        LightingEffect::Blink {
+            color: LightingRgb8 { r: 10, g: 20, b: 30 },
+            period_ms: 1000,
+            phase_ms: 250,
+            duty: 50,
+        },
+        &[
+            LightingRulePredicate::Layer(LightingLayerCondition { layer: 2, active: true }),
+            LightingRulePredicate::Battery(LightingBatteryCondition {
+                node: LightingNodeId(1),
+                min_level: Some(20),
+                max_level: Some(80),
+                charge: LightingChargeCondition::Discharging,
+            }),
+            LightingRulePredicate::OutputMode(LightingOutputMode::PoweredOnly),
+            LightingRulePredicate::Connection(LightingConnectionCondition {
+                transport: Some(LightingActiveTransport::Ble),
+                profile: Some(3),
+                ble_state: Some(BleState::Connected),
+                bonded: Some(LightingBondedSlotCondition { slot: 2, bonded: true }),
+                usb_connected: Some(true),
+            }),
+            LightingRulePredicate::Effects(LightingEffectsCondition { enabled: true }),
+            LightingRulePredicate::Layers(LightingLayersCondition {
+                active: 1 << 2 | 1 << 5,
+                inactive: 1 << 3,
+            }),
+            LightingRulePredicate::Indicators(LightingIndicatorCondition {
+                num_lock: Some(true),
+                caps_lock: None,
+                scroll_lock: Some(false),
+            }),
+            LightingRulePredicate::Maintenance(LightingMaintenanceCondition { unlocked: true }),
+        ],
+    )
+    .unwrap();
+    let split_rule = LightingRule::from_predicates(
+        LightingLedId(43),
+        LightingEffect::Solid {
+            color: LightingRgb8 { r: 40, g: 50, b: 60 },
+        },
+        &[LightingRulePredicate::SplitTransport(LightingSplitTransportCondition {
+            link: Some(LightingSplitLink::Wired),
+            force: Some(LightingSplitForce::Auto),
+        })],
+    )
+    .unwrap();
+    let mut rule_bytes = heapless::Vec::new();
+    let mut encoded = [0; LightingRule::POSTCARD_MAX_SIZE];
+    for rule in [&all_but_split_rule, &split_rule] {
+        let bytes = postcard::to_slice(rule, &mut encoded).unwrap();
+        rule_bytes.extend_from_slice(bytes).unwrap();
+    }
+    let rule_status = LightingRuleStatus {
+        revision: state.revision,
+        capacity: 64,
+        rule_len: 2,
+        page_bytes: LIGHTING_RULE_PAGE_BYTES as u16,
+        max_predicates: LIGHTING_RULE_MAX_PREDICATES as u8,
+        predicates: LIGHTING_RULE_PREDICATES,
+    };
+    let rules_page = LightingRulesPage {
+        revision: state.revision,
+        total_count: 2,
+        offset: 0,
+        count: 2,
+        rules: rule_bytes.clone(),
+    };
+    let rule_put = PutLightingRuleChunkRequest {
+        transaction_id: runtime_conditional_transaction.id,
+        offset: 0,
+        count: 2,
+        rules: rule_bytes,
+    };
     let frame_request = LightingFrameRequest {
         node: LightingNodeId(1),
         offset: 24,
@@ -2352,6 +2429,78 @@ fn lighting_wire_frames_locked() {
             "AbortLightingAdvancedRuntimeConditionalSceneReplace reply",
             encode_frame(
                 Cmd::AbortLightingAdvancedRuntimeConditionalSceneReplace,
+                SEQ,
+                &Ok::<LightingUnitResult, RynkError>(Ok(()))
+            )
+        ),
+        (
+            "GetLightingRuleStatus request",
+            encode_frame(Cmd::GetLightingRuleStatus, SEQ, &())
+        ),
+        (
+            "GetLightingRuleStatus reply",
+            encode_frame(
+                Cmd::GetLightingRuleStatus,
+                SEQ,
+                &Ok::<LightingRuleStatusResult, RynkError>(Ok(rule_status))
+            )
+        ),
+        (
+            "GetLightingRules request",
+            encode_frame(Cmd::GetLightingRules, SEQ, &runtime_conditional_page_request)
+        ),
+        (
+            "GetLightingRules reply every predicate tag",
+            encode_frame(
+                Cmd::GetLightingRules,
+                SEQ,
+                &Ok::<LightingRulesPageResult, RynkError>(Ok(rules_page))
+            )
+        ),
+        (
+            "BeginLightingRuleReplace request",
+            encode_frame(Cmd::BeginLightingRuleReplace, SEQ, &runtime_conditional_begin)
+        ),
+        (
+            "BeginLightingRuleReplace reply",
+            encode_frame(
+                Cmd::BeginLightingRuleReplace,
+                SEQ,
+                &Ok::<LightingRuntimeConditionalSceneTransactionResult, RynkError>(Ok(runtime_conditional_transaction))
+            )
+        ),
+        (
+            "PutLightingRuleChunk request every predicate tag",
+            encode_frame(Cmd::PutLightingRuleChunk, SEQ, &rule_put)
+        ),
+        (
+            "PutLightingRuleChunk reply",
+            encode_frame(
+                Cmd::PutLightingRuleChunk,
+                SEQ,
+                &Ok::<LightingUnitResult, RynkError>(Ok(()))
+            )
+        ),
+        (
+            "CommitLightingRuleReplace request",
+            encode_frame(Cmd::CommitLightingRuleReplace, SEQ, &runtime_conditional_commit)
+        ),
+        (
+            "CommitLightingRuleReplace reply",
+            encode_frame(
+                Cmd::CommitLightingRuleReplace,
+                SEQ,
+                &Ok::<LightingStateResult, RynkError>(Ok(state))
+            )
+        ),
+        (
+            "AbortLightingRuleReplace request",
+            encode_frame(Cmd::AbortLightingRuleReplace, SEQ, &runtime_conditional_abort)
+        ),
+        (
+            "AbortLightingRuleReplace reply",
+            encode_frame(
+                Cmd::AbortLightingRuleReplace,
                 SEQ,
                 &Ok::<LightingUnitResult, RynkError>(Ok(()))
             )
@@ -3075,6 +3224,12 @@ mod protocol_reference {
              The lock is per session and starts locked; `Lock` or the end of the session (unplug, BLE disconnect) relocks it. To unlock, a host polls `UnlockPoll` while the user holds the challenge keys that `LockStatus.key_positions` reports (`[host].unlock_keys`); the session is unlocked once `locked` clears. With no `unlock_keys` configured the challenge is empty and the gated commands can never be unlocked; a firmware built with `[host] insecure = true` starts unlocked and ignores `Lock`. See [Rynk](../features/rynk#locking-dangerous-operations) for the user-facing side.\n\n\
              ## Endpoints\n\n\
              {endpoints}\n\
+             ## Lighting rules\n\n\
+             Firmware advertising `LightingFeatureFlags::RULES` serves a single ordered table of self-describing `LightingRule` values through commands `0x0950..=0x0955`. Each predicate is a tag plus a length-delimited postcard body. Known tags are `1` layer, `2` battery, `3` output mode, `4` connection, `5` effects, `6` layer masks, `7` indicators, `8` maintenance, and `9` split transport. `LightingRuleStatus.predicates` is the authoritative parser capability mask: bit N means tag N can be decoded by that firmware.\n\n\
+             Tags in a rule are canonical only when strictly increasing and nonzero. Writers reject duplicates, descending tags, malformed bodies, trailing body bytes, and unsupported tags. Readers preserve unknown tags and bodies verbatim so newer rules can be inspected without lossy decoding; attempting to install one on firmware whose predicate mask lacks that tag answers `UnknownPredicate`. An empty predicate list is unconditional.\n\n\
+             Rule pages and chunks contain `count` concatenated whole postcard-encoded rules in at most `page_bytes` bytes. Paging is by rule index: advance `offset` by the returned `count` until it equals `total_count`. Replacement uses begin, one or more chunks, and commit; abort discards the staging table. Reads stay pinned to the requested revision.\n\n\
+             The `maintenance` predicate compares its `unlocked` field with the live maintenance-mode state. The `split_transport` predicate may constrain the selected link (`wired` or `ble`) and/or the volatile force (`auto`, `wired`, or `ble`); it never matches on a board without automatic split selection. All predicates in a rule must match. Rules retain file order, and later matching rules win when multiple rules address the same lighting slot.\n\n\
+             During the compatibility release, the three older runtime-conditional endpoint families read from the same table. A legacy page answers `LightingError::Unsupported` if any rule on that page uses a predicate that generation cannot express.\n\n\
              ## Topics\n\n\
              Topics are best-effort pushes; the `Get*` endpoints above mirror their payloads so a host can recover a missed push.\n\n\
              {topics}\n\

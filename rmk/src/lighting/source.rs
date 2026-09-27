@@ -2,7 +2,7 @@ use rmk_types::ble::BleState;
 use rmk_types::connection::ConnectionType;
 
 use super::compositor::{Contribution, LightingSource, RenderInput};
-use super::context::{IndicatorState, LightingContext, LightingContextProvider};
+use super::context::{IndicatorState, LightingContext, LightingContextProvider, SplitForce};
 use super::effect::{BuiltinEffect, EffectSample, LightingEffect};
 use super::topology::LedSlot;
 use crate::types::battery::{BatteryStatus, ChargeState};
@@ -256,6 +256,23 @@ impl IndicatorCondition {
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct MaintenanceCondition {
+    pub unlocked: bool,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum SplitLink {
+    Wired,
+    Ble,
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct SplitTransportCondition {
+    pub link: Option<SplitLink>,
+    pub force: Option<SplitForce>,
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConditionSet {
     pub layer: Option<LayerCondition>,
     pub battery: Option<BatteryCondition>,
@@ -274,6 +291,10 @@ pub struct ConditionSet {
     pub layers: Option<LayersCondition>,
     /// Satisfied when the host's lock indicators match every named one.
     pub indicators: Option<IndicatorCondition>,
+    /// Satisfied when the maintenance gate has the requested lock state.
+    pub maintenance: Option<MaintenanceCondition>,
+    /// Satisfied by an automatic split-link selector in the requested state.
+    pub split_transport: Option<SplitTransportCondition>,
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -380,6 +401,22 @@ impl ConditionSet {
             && !condition.matches(context.lighting_context().indicators)
         {
             return false;
+        }
+        if let Some(condition) = self.maintenance
+            && context.lighting_context().maintenance_unlocked != condition.unlocked
+        {
+            return false;
+        }
+        if let Some(condition) = self.split_transport {
+            let state = context.lighting_context().split_transport;
+            if !state.auto
+                || condition.force.is_some_and(|force| force != state.force)
+                || condition
+                    .link
+                    .is_some_and(|link| matches!(link, SplitLink::Wired) != state.wired)
+            {
+                return false;
+            }
         }
         if let Some(condition) = self.connection {
             let connection = context.lighting_context().connection;
@@ -1076,6 +1113,8 @@ mod tests {
             local_powered: false,
             connection: Default::default(),
             bonded_slots: 0,
+            maintenance_unlocked: false,
+            split_transport: Default::default(),
         };
         let compositor = Compositor::<Rgb8, 2>::new(Rgb8::BLACK);
         let mut frame = LogicalFrame::new(Rgb8::BLACK);
@@ -1171,6 +1210,8 @@ mod tests {
                     effects: None,
                     layers: None,
                     indicators: None,
+                    maintenance: None,
+                    split_transport: None,
                 },
                 slot: LedSlot(0),
                 effect: BuiltinEffect::solid(GREEN),
@@ -1189,6 +1230,8 @@ mod tests {
                     effects: None,
                     layers: None,
                     indicators: None,
+                    maintenance: None,
+                    split_transport: None,
                 },
                 slot: LedSlot(1),
                 effect: BuiltinEffect::solid(BLUE),
@@ -1208,6 +1251,8 @@ mod tests {
                     effects: None,
                     layers: None,
                     indicators: None,
+                    maintenance: None,
+                    split_transport: None,
                 },
                 slot: LedSlot(0),
                 effect: BuiltinEffect::solid(RED),
@@ -1222,6 +1267,8 @@ mod tests {
             local_powered: false,
             connection: Default::default(),
             bonded_slots: 0,
+            maintenance_unlocked: false,
+            split_transport: Default::default(),
         };
         let compositor = Compositor::<Rgb8, 2>::new(Rgb8::BLACK);
         let mut frame = LogicalFrame::new(Rgb8::BLACK);
@@ -1268,5 +1315,43 @@ mod tests {
         tx.apply(0, &mut source).unwrap();
         tx.finish();
         assert_eq!(frame.as_slice(), &[RED]);
+    }
+
+    #[test]
+    fn maintenance_and_split_transport_conditions_match_context() {
+        struct NoBatteries;
+        impl BatteryStatusProvider for NoBatteries {
+            fn battery_status(&self, _: u8) -> BatteryStatus {
+                BatteryStatus::Unavailable
+            }
+        }
+
+        let mut context = LightingContext {
+            maintenance_unlocked: true,
+            split_transport: super::super::SplitTransportState {
+                auto: true,
+                force: SplitForce::Auto,
+                wired: true,
+            },
+            ..LightingContext::default()
+        };
+        let condition = ConditionSet {
+            maintenance: Some(MaintenanceCondition { unlocked: true }),
+            split_transport: Some(SplitTransportCondition {
+                link: Some(SplitLink::Wired),
+                force: Some(SplitForce::Auto),
+            }),
+            ..ConditionSet::default()
+        };
+        assert!(condition.matches(&context, &NoBatteries, None, None));
+
+        context.maintenance_unlocked = false;
+        assert!(!condition.matches(&context, &NoBatteries, None, None));
+        context.maintenance_unlocked = true;
+        context.split_transport.wired = false;
+        assert!(!condition.matches(&context, &NoBatteries, None, None));
+        context.split_transport.wired = true;
+        context.split_transport.auto = false;
+        assert!(!condition.matches(&context, &NoBatteries, None, None));
     }
 }

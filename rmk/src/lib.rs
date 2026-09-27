@@ -99,6 +99,12 @@ pub mod helper_macro;
 pub mod hid;
 #[cfg(feature = "host")]
 pub mod host;
+// A dongle relaying Rynk needs only the HID transport adapters' error type,
+// not the host service stack.
+#[cfg(all(feature = "dongle", not(feature = "host")))]
+pub(crate) mod host {
+    pub(crate) mod transport;
+}
 pub mod input_device;
 pub mod keyboard;
 pub mod keyboard_macros;
