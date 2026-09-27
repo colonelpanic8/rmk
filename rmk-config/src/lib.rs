@@ -995,6 +995,8 @@ pub(crate) struct DfuTomlConfig {
 #[serde(deny_unknown_fields)]
 pub struct BleConfig {
     pub enabled: bool,
+    /// BLE advertising-name template. `{slot}` expands to the one-based profile number.
+    pub name: Option<String>,
     pub battery_adc_pin: Option<String>,
     /// User-facing description for the Battery Level characteristic.
     pub battery_user_description: Option<String>,
