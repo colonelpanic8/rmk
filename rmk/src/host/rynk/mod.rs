@@ -176,6 +176,7 @@ impl<'a> RynkService<'a> {
             | Cmd::SetEncoderAction
             | Cmd::SetMacro
             | Cmd::SetCombo
+            | Cmd::SetComboDefinition
             | Cmd::SetMorse
             | Cmd::SetFork
             | Cmd::SetBehaviorConfig
@@ -189,7 +190,9 @@ impl<'a> RynkService<'a> {
             | Cmd::DeleteMorseProfile
             | Cmd::SetBehaviorOptions
             | Cmd::SetAutoMouseLayerConfigs
-            | Cmd::SetPointingConfig => Some(true),
+            | Cmd::SetPointingConfig
+            | Cmd::SetComboDefinition
+            | Cmd::SetComboDefinitionBulk => Some(true),
             #[cfg(feature = "lighting")]
             Cmd::SetLightingState
             | Cmd::SetLightingOverlay
@@ -235,6 +238,8 @@ impl<'a> RynkService<'a> {
             | Cmd::GetMacro
             | Cmd::GetCombo
             | Cmd::GetComboBulk
+            | Cmd::GetComboDefinition
+            | Cmd::GetComboDefinitionBulk
             | Cmd::GetMorse
             | Cmd::GetMorseBulk
             | Cmd::GetMorseHoldTriggerPositions
@@ -336,6 +341,10 @@ impl<'a> RynkService<'a> {
             Cmd::SetCombo => serve::<command::SetCombo, _>(self, msg).await,
             Cmd::GetComboBulk => serve_bulk::<command::GetComboBulk, _>(self, msg).await,
             Cmd::SetComboBulk => serve_bulk::<command::SetComboBulk, _>(self, msg).await,
+            Cmd::GetComboDefinition => serve::<command::GetComboDefinition, _>(self, msg).await,
+            Cmd::SetComboDefinition => serve::<command::SetComboDefinition, _>(self, msg).await,
+            Cmd::GetComboDefinitionBulk => serve_bulk::<command::GetComboDefinitionBulk, _>(self, msg).await,
+            Cmd::SetComboDefinitionBulk => serve_bulk::<command::SetComboDefinitionBulk, _>(self, msg).await,
             Cmd::GetMorse => serve::<command::GetMorse, _>(self, msg).await,
             Cmd::SetMorse => serve::<command::SetMorse, _>(self, msg).await,
             Cmd::GetMorseBulk => serve_bulk::<command::GetMorseBulk, _>(self, msg).await,

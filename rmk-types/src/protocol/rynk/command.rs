@@ -17,21 +17,22 @@ use super::BleName;
 use super::message::{RynkHeader, encode_frame};
 use super::{
     AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, BuildInfo, DeviceCapabilities, DeviceInfo,
-    GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse,
-    GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest,
+    GetComboBulkRequest, GetComboBulkResponse, GetComboDefinitionBulkResponse, GetEncoderRequest, GetKeymapBulkRequest,
+    GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest,
     GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerState, LayoutChunk, LockStatus,
     MacroData, MaintenanceMode, MatrixState, MorseHoldTriggerPositionState, MorseProfileState, PointingCapabilities,
-    PointingConfig, ProtocolVersion, RynkError, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetComboRequest,
-    SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
-    SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
-    SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
+    PointingConfig, ProtocolVersion, RynkError, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest,
+    SetComboDefinitionBulkRequest,
+    SetComboDefinitionRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
+    SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest,
+    SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
 use crate::battery::BatteryStatus;
 #[cfg(feature = "_ble")]
 use crate::ble::BleStatus;
-use crate::combo::Combo;
+use crate::combo::{Combo, ComboDefinition};
 use crate::connection::{ConnectionStatus, ConnectionType};
 use crate::fork::Fork;
 use crate::led_indicator::LedIndicator;
@@ -307,9 +308,8 @@ endpoints! {
     BootloaderJump = 0x0004: () => ();
     StorageReset = 0x0005: StorageResetMode => ();
 
-    // Legacy physical-lock protocol retained for host compatibility. These
-    // endpoints do not authorize maintenance commands.
-    /// Pure read of the legacy lock state — no side effects.
+    // Lock gate. All three stay dispatchable while locked.
+    /// Pure read of the current lock state — no side effects.
     GetLockStatus = 0x0006: () => LockStatus;
     /// Arms/refreshes the unlock attempt and samples the held challenge keys.
     UnlockPoll = 0x0007: () => LockStatus;
@@ -319,12 +319,12 @@ endpoints! {
     GetLayout = 0x0009: u32 => LayoutChunk;
     /// Identity strings and USB ids; feature gating stays in `GetCapabilities`.
     GetDeviceInfo = 0x000A: () => DeviceInfo;
+    /// Read the live maintenance-mode gate.
+    GetMaintenanceMode = 0x000D: () => MaintenanceMode;
     /// Application-defined diagnostic build label; never used for compatibility.
     GetBuildInfo = 0x000B: () => BuildInfo;
     /// Ask the application to route a bootloader jump to one split peripheral.
     PeripheralBootloaderJump = 0x000C: u8 => ();
-    /// Read the live gate for host maintenance operations.
-    GetMaintenanceMode = 0x000D: () => MaintenanceMode;
 
     // Keymap (0x01xx) — includes encoder.
     GetKeyAction = 0x0101: KeyPosition => KeyAction;
@@ -345,6 +345,12 @@ endpoints! {
     SetCombo = 0x0302: SetComboRequest => ();
     GetComboBulk = 0x0303: GetComboBulkRequest => GetComboBulkResponse;
     SetComboBulk = 0x0304: SetComboBulkRequest => ();
+    /// Read either an action- or position-triggered combo without changing the
+    /// original `GetCombo` wire representation.
+    GetComboDefinition = 0x0305: u8 => ComboDefinition;
+    SetComboDefinition = 0x0306: SetComboDefinitionRequest => ();
+    GetComboDefinitionBulk = 0x0307: GetComboBulkRequest => GetComboDefinitionBulkResponse;
+    SetComboDefinitionBulk = 0x0308: SetComboDefinitionBulkRequest => ();
 
     // Morse (0x04xx).
     GetMorse = 0x0401: u8 => Morse;
