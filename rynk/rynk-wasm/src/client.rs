@@ -24,27 +24,29 @@ use rynk::rmk_types::modifier::ModifierCombination;
 use rynk::rmk_types::morse::Morse;
 use rynk::rmk_types::protocol::rynk::{
     AbortLightingOverlayReplaceRequest, AbortLightingRuntimeConditionalSceneReplaceRequest,
-    AbortLightingSceneReplaceRequest, BeginLightingOverlayReplaceRequest,
-    BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig, BuildInfo,
-    ClearLightingOverlayRequest, CommitLightingOverlayReplaceRequest,
+    AbortLightingSceneReplaceRequest, AutoMouseLayerConfigState, BeginLightingOverlayReplaceRequest,
+    BeginLightingRuntimeConditionalSceneReplaceRequest, BeginLightingSceneReplaceRequest, BehaviorConfig,
+    BehaviorOptions, BuildInfo, ClearLightingOverlayRequest, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
-    DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, LayerState, LightingCapabilities,
-    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
-    LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage, LightingExtension,
-    LightingExtensionLayers, LightingExtensionNamesPage, LightingExtensionNamesRequest, LightingExtensionParamsPage,
-    LightingExtensionParamsRequest, LightingKeysPage, LightingLedsPage, LightingOutputModeState, LightingOutputsPage,
-    LightingOverlayPage, LightingOverlayPageRequest, LightingOverlayTransaction, LightingPageRequest,
-    LightingPhysicalKeysPage, LightingRoutesPage, LightingRuntimeConditionalScenePageRequest,
-    LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneTransaction,
-    LightingRuntimeConditionalScenesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
-    LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData,
-    MatrixState, MorseHoldTriggerPositionState, PeripheralStatus, PointingCapabilities, PointingConfig,
-    ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
-    PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest,
-    SetKeymapBulkRequest, SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest,
-    SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest, SetLightingOutputModeRequest,
-    SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest, SetMorseBulkRequest,
-    SetMorseHoldTriggerPositionsRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
+    DeviceInfo, GetComboBulkResponse, GetKeymapBulkResponse, GetMorseBulkResponse, GetMorseProfileBulkResponse,
+    LayerState, LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage,
+    LightingConditionalSceneStatus, LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage,
+    LightingExtension, LightingExtensionLayers, LightingExtensionNamesPage, LightingExtensionNamesRequest,
+    LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingKeysPage, LightingLedsPage,
+    LightingOutputModeState, LightingOutputsPage, LightingOverlayPage, LightingOverlayPageRequest,
+    LightingOverlayTransaction, LightingPageRequest, LightingPhysicalKeysPage, LightingRoutesPage,
+    LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
+    LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
+    LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZoneMembershipsPage,
+    LightingZonesPage, LockStatus, MacroData, MatrixState, MorseHoldTriggerPositionState, MorseProfileState,
+    PeripheralStatus, PointingCapabilities, PointingConfig, ProtocolVersion,
+    PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    PutLightingOverlayChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
+    SetAutoMouseLayerConfigsRequest, SetComboBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
+    SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
+    SetLightingOutputModeRequest, SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest,
+    SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest,
+    SetMorseProfileEntryRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
     UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
@@ -104,6 +106,42 @@ impl RynkClient {
     /// runs concurrently with the request methods.
     pub async fn next_topic(&self) -> Result<TopicEvent, JsValue> {
         self.drive(async { Ok(self.client.next_topic().await) }).await
+    }
+
+    #[wasm_bindgen(unchecked_return_type = "MorseProfileState")]
+    pub async fn read_morse_profile_state(&self) -> Result<JsValue, JsValue> {
+        let state = self.drive(self.client.read_morse_profile_state()).await?;
+        serde_wasm_bindgen::to_value(&state).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[wasm_bindgen(unchecked_return_type = "MorseProfile[]")]
+    pub async fn read_all_morse_profiles(&self) -> Result<JsValue, JsValue> {
+        let profiles = self.drive(self.client.read_all_morse_profiles()).await?;
+        serde_wasm_bindgen::to_value(&profiles).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    pub async fn write_all_morse_profiles(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "MorseProfile[]")] profiles: JsValue,
+    ) -> Result<(), JsValue> {
+        let profiles =
+            serde_wasm_bindgen::from_value(profiles).map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.drive(self.client.write_all_morse_profiles(profiles)).await
+    }
+
+    #[wasm_bindgen(unchecked_return_type = "MorseProfile")]
+    pub async fn get_morse_profile(&self, index: u8) -> Result<JsValue, JsValue> {
+        let profile = self.drive(self.client.get_morse_profile(index)).await?;
+        serde_wasm_bindgen::to_value(&profile).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    pub async fn set_morse_profile(
+        &self,
+        index: u8,
+        #[wasm_bindgen(unchecked_param_type = "MorseProfile")] profile: JsValue,
+    ) -> Result<(), JsValue> {
+        let profile = serde_wasm_bindgen::from_value(profile).map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.drive(self.client.set_morse_profile(index, profile)).await
     }
 }
 
@@ -169,6 +207,12 @@ endpoints! {
     set_morse_bulk(request: SetMorseBulkRequest) -> (),
     get_morse_hold_trigger_positions() -> MorseHoldTriggerPositionState,
     set_morse_hold_trigger_positions(request: SetMorseHoldTriggerPositionsRequest) -> (),
+    get_morse_profile_count() -> u8,
+    get_morse_profile_bulk(start_index: u8) -> GetMorseProfileBulkResponse,
+    set_morse_profile_bulk(request: SetMorseProfileBulkRequest) -> (),
+    get_morse_profile_state(offset: u8) -> MorseProfileState,
+    set_morse_profile_entry(request: SetMorseProfileEntryRequest) -> (),
+    delete_morse_profile(index: u8) -> (),
     get_macro(offset: u16) -> MacroData,
     set_macro(offset: u16, data: MacroData) -> (),
     // pointing
@@ -180,6 +224,10 @@ endpoints! {
     set_behavior(config: BehaviorConfig) -> (),
     get_split_central_latency() -> SplitCentralLatencyState,
     set_split_central_latency(policy: SplitCentralLatencyPolicy) -> SplitCentralLatencyState,
+    get_behavior_options() -> BehaviorOptions,
+    set_behavior_options(options: BehaviorOptions) -> (),
+    get_auto_mouse_layer_configs() -> AutoMouseLayerConfigState,
+    set_auto_mouse_layer_configs(request: SetAutoMouseLayerConfigsRequest) -> (),
     // status
     get_current_layer() -> u8,
     get_layer_state() -> LayerState,
