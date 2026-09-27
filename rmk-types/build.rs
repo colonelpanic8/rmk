@@ -119,6 +119,10 @@ fn generate_constants(bc: &BuildConstants, config: &KeyboardTomlConfig) -> Strin
         bc.auto_mouse_layer_max_num
     ));
     lines.push(format!(
+        "pub const MOUSE_LAYER_SCALE_MAX_NUM: usize = {};",
+        bc.mouse_layer_scale_max_num
+    ));
+    lines.push(format!(
         "pub const MAX_PATTERNS_PER_KEY: usize = {};",
         bc.max_patterns_per_key
     ));
