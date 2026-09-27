@@ -171,7 +171,8 @@ impl<'a> RynkService<'a> {
             | Cmd::SetBehaviorConfig
             | Cmd::SetKeymapBulk
             | Cmd::SetComboBulk
-            | Cmd::SetMorseBulk => self.lock_config.write_requires_unlock,
+            | Cmd::SetMorseBulk
+            | Cmd::SetMorseHoldTriggerPositions => self.lock_config.write_requires_unlock,
             #[cfg(feature = "lighting")]
             Cmd::SetLightingState
             | Cmd::SetLightingOverlay
@@ -252,6 +253,8 @@ impl<'a> RynkService<'a> {
             Cmd::SetMorse => serve::<command::SetMorse, _>(self, msg).await,
             Cmd::GetMorseBulk => serve_bulk::<command::GetMorseBulk, _>(self, msg).await,
             Cmd::SetMorseBulk => serve_bulk::<command::SetMorseBulk, _>(self, msg).await,
+            Cmd::GetMorseHoldTriggerPositions => serve::<command::GetMorseHoldTriggerPositions, _>(self, msg).await,
+            Cmd::SetMorseHoldTriggerPositions => serve::<command::SetMorseHoldTriggerPositions, _>(self, msg).await,
 
             Cmd::GetFork => serve::<command::GetFork, _>(self, msg).await,
             Cmd::SetFork => serve::<command::SetFork, _>(self, msg).await,

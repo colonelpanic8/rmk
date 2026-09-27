@@ -38,13 +38,14 @@ use rynk::rmk_types::protocol::rynk::{
     LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneTransaction,
     LightingRuntimeConditionalScenesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
     LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData,
-    MatrixState, PeripheralStatus, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    MatrixState, MorseHoldTriggerPositionState, PeripheralStatus, ProtocolVersion,
+    PutLightingExtendedRuntimeConditionalSceneChunkRequest,
     PutLightingOverlayChunkRequest, PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest,
     SetComboBulkRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest,
     SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest, SetLightingOutputModeRequest,
     SetLightingOverlayRequest, SetLightingSceneCellRequest, SetLightingStateRequest, SetMorseBulkRequest,
-    SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode, UnsetLightingOverlayRequest,
-    UnsetLightingSceneCellRequest,
+    SetMorseHoldTriggerPositionsRequest, SplitCentralLatencyPolicy, SplitCentralLatencyState, StorageResetMode,
+    UnsetLightingOverlayRequest, UnsetLightingSceneCellRequest,
 };
 use rynk::{Client, Driver, LayoutInfo, RynkDevice, RynkHostError, TopicEvent};
 use wasm_bindgen::prelude::*;
@@ -166,6 +167,8 @@ endpoints! {
     set_morse(index: u8, config: Morse) -> (),
     get_morse_bulk(start_index: u8) -> GetMorseBulkResponse,
     set_morse_bulk(request: SetMorseBulkRequest) -> (),
+    get_morse_hold_trigger_positions() -> MorseHoldTriggerPositionState,
+    set_morse_hold_trigger_positions(request: SetMorseHoldTriggerPositionsRequest) -> (),
     get_macro(offset: u16) -> MacroData,
     set_macro(offset: u16, data: MacroData) -> (),
     // behavior

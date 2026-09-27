@@ -18,7 +18,7 @@ use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
 #[cfg(feature = "host")]
 use {
-    crate::{MACRO_SPACE_SIZE, keyboard::combo::ComboConfig},
+    crate::{MACRO_SPACE_SIZE, config::HoldTriggerPositions, keyboard::combo::ComboConfig},
     rmk_types::action::{EncoderAction, KeyAction},
     rmk_types::fork::Fork,
     rmk_types::morse::Morse,
@@ -150,6 +150,8 @@ pub(crate) enum FlashOperationMessage {
         idx: u8,
         morse: Morse,
     },
+    #[cfg(feature = "host")]
+    MorseHoldTriggerPositions(HoldTriggerPositions),
     // Current saved connection type
     ConnectionType(ConnectionType),
     // Timeout time for combos
@@ -260,6 +262,10 @@ pub(crate) enum StorageKey {
     LightingRuntimeConditionalSceneTableV2,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuntimeConditionalSceneShardV2(u8),
+    // Append-only: postcard encodes enum variants by ordinal, so placing new
+    // persistent keys before existing variants would orphan old records.
+    #[cfg(feature = "host")]
+    MorseHoldTriggerPositions,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingSceneCommit,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -369,6 +375,10 @@ pub(crate) enum StorageData {
     LightingRuntimeConditionalSceneShardV2(
         heapless::Vec<LightingExtendedConditionalSceneCell, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE>,
     ),
+    // Append-only for the same persisted-enum compatibility reason as
+    // StorageKey::MorseHoldTriggerPositions.
+    #[cfg(feature = "host")]
+    MorseHoldTriggerPositions(HoldTriggerPositions),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingSceneCommit(LightingSceneCommitRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -1178,6 +1188,14 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             .map_err(|e| print_storage_error::<F>(e))?;
 
         #[cfg(feature = "host")]
+        self.store_data(
+            StorageKey::MorseHoldTriggerPositions,
+            &StorageData::MorseHoldTriggerPositions(behavior.morse.hold_trigger_positions.clone()),
+        )
+        .await
+        .map_err(|e| print_storage_error::<F>(e))?;
+
+        #[cfg(feature = "host")]
         for (layer, layer_data) in keymap.iter().enumerate() {
             for (row, row_data) in layer_data.iter().enumerate() {
                 for (col, action) in row_data.iter().enumerate() {
@@ -1226,6 +1244,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         .await?;
         self.store_data(StorageKey::BehaviorConfig, &StorageData::from(behavior))
             .await?;
+        self.store_data(
+            StorageKey::MorseHoldTriggerPositions,
+            &StorageData::MorseHoldTriggerPositions(behavior.morse.hold_trigger_positions.clone()),
+        )
+        .await?;
 
         // TODO: Generic reset for vial and other hosts
         for (layer, layer_data) in keymap.iter().enumerate() {
@@ -1371,6 +1394,14 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 FlashOperationMessage::Morse { idx, morse } => {
                     self.store_data(StorageKey::morse(idx), &StorageData::Morse(morse))
                         .await
+                }
+                #[cfg(feature = "host")]
+                FlashOperationMessage::MorseHoldTriggerPositions(positions) => {
+                    self.store_data(
+                        StorageKey::MorseHoldTriggerPositions,
+                        &StorageData::MorseHoldTriggerPositions(positions),
+                    )
+                    .await
                 }
                 FlashOperationMessage::ConnectionType(ty) => {
                     self.store_data(StorageKey::ConnectionType, &StorageData::ConnectionType(ty))
@@ -1526,6 +1557,14 @@ const fn get_buffer_size() -> usize {
         } else {
             crate::MACRO_SPACE_SIZE + 8
         };
+        // The hold-trigger table scales with its own capacity: three bytes per
+        // position plus key, tag, and length prefix.
+        let hold_trigger_size = crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM * 3 + 16;
+        let buffer_size = if hold_trigger_size > buffer_size {
+            hold_trigger_size
+        } else {
+            buffer_size
+        };
 
         // Efficiently round up to the nearest multiple of 32 using bit manipulation.
         (buffer_size + 31) & !31
@@ -1549,6 +1588,33 @@ mod tests {
     use sequential_storage::map::{MapConfig, MapStorage};
 
     use super::*;
+
+    #[cfg(feature = "host")]
+    #[test]
+    fn full_hold_trigger_table_fits_flash_buffer() {
+        block_on(async {
+            type Flash = TestFlash<16_384, 4_096, 1>;
+            let mut storage = Storage::<Flash, 1, 1, 1, 0> {
+                flash: MapStorage::new(Flash::new(), MapConfig::new(8192..16_384), Cache::new_uncached()),
+                buffer: [0; get_buffer_size()],
+            };
+            let mut positions = HoldTriggerPositions::new();
+            for i in 0..crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM {
+                positions.push(((i / 40) as u8, 0, (i % 40) as u8)).unwrap();
+            }
+            storage
+                .store_data(
+                    StorageKey::MorseHoldTriggerPositions,
+                    &StorageData::MorseHoldTriggerPositions(positions.clone()),
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                storage.fetch_data(StorageKey::MorseHoldTriggerPositions).await,
+                Some(StorageData::MorseHoldTriggerPositions(stored)) if stored == positions
+            ));
+        });
+    }
     use crate::config::{BehaviorConfig as RuntimeBehaviorConfig, StorageConfig as RuntimeStorageConfig};
     use crate::test_support::test_block_on as block_on;
     #[cfg(feature = "host")]
