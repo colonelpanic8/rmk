@@ -242,7 +242,11 @@ impl<'a> RynkService<'a> {
             | Cmd::BeginLightingExtendedRuntimeConditionalSceneReplace
             | Cmd::PutLightingExtendedRuntimeConditionalSceneChunk
             | Cmd::CommitLightingExtendedRuntimeConditionalSceneReplace
-            | Cmd::AbortLightingExtendedRuntimeConditionalSceneReplace => Some(true),
+            | Cmd::AbortLightingExtendedRuntimeConditionalSceneReplace
+            | Cmd::BeginLightingAdvancedRuntimeConditionalSceneReplace
+            | Cmd::PutLightingAdvancedRuntimeConditionalSceneChunk
+            | Cmd::CommitLightingAdvancedRuntimeConditionalSceneReplace
+            | Cmd::AbortLightingAdvancedRuntimeConditionalSceneReplace => Some(true),
             Cmd::GetVersion
             | Cmd::GetCapabilities
             | Cmd::GetLockStatus
@@ -317,6 +321,8 @@ impl<'a> RynkService<'a> {
             | Cmd::GetLightingExtensionLayers
             | Cmd::GetLightingExtendedRuntimeConditionalSceneStatus
             | Cmd::GetLightingExtendedRuntimeConditionalScenes
+            | Cmd::GetLightingAdvancedRuntimeConditionalSceneStatus
+            | Cmd::GetLightingAdvancedRuntimeConditionalScenes
             | Cmd::GetLightingReplicaStatus => Some(false),
             _ => None,
         }
