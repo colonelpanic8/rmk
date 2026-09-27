@@ -79,6 +79,9 @@ pub enum Action {
     ///
     /// Runtime behavior matches [`Action::DefaultLayer`]; additionally persisted to flash.
     PersistentDefaultLayer(u8),
+    /// Type the codepoint at this index of the configured codepoint table,
+    /// using the input method named by the active [`crate::unicode::UnicodeMode`].
+    Unicode(u16),
     /// A Plover HID stenography key. Press/release of this key updates the
     /// in-progress steno chord; on first release the accumulated chord is
     /// sent to the host as a vendor HID report.
