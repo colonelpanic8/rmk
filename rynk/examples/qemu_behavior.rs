@@ -290,6 +290,7 @@ async fn script(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
     expect_unsupported("get_ble_status", client.get_ble_status().await);
     expect_unsupported("switch_ble_profile", client.switch_ble_profile(0).await);
     expect_unsupported("clear_ble_profile", client.clear_ble_profile(0).await);
+    expect_unsupported("clear_all_ble_profiles", client.clear_all_ble_profiles().await);
     expect_unsupported("get_battery_status", client.get_battery_status().await);
     expect_unsupported("get_peripheral_status", client.get_peripheral_status(0).await);
     expect_unsupported(

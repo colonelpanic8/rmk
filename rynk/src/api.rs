@@ -1350,6 +1350,13 @@ impl Client {
         self.request::<command::ClearBleProfile>(&slot).await
     }
 
+    /// Clear every BLE host profile while preserving split and dongle bonds.
+    /// Requires [`DeviceCapabilities::ble_enabled`]; nothing is sent otherwise.
+    pub async fn clear_all_ble_profiles(&self) -> Result<(), RynkHostError> {
+        self.require_ble(Cmd::ClearAllBleProfiles)?;
+        self.request::<command::ClearAllBleProfiles>(&()).await
+    }
+
     /// Read the persistent BLE advertising-name template.
     pub async fn get_ble_name(&self) -> Result<BleName, RynkHostError> {
         self.require_ble(Cmd::GetBleName)?;

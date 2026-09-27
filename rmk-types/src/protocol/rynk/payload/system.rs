@@ -114,7 +114,7 @@ impl ProtocolVersion {
     /// domain capability endpoints (e.g. `GetLightingCapabilities` /
     /// `GetLightingSceneStatus`), and per-command probing — firmware answers
     /// `UnknownCmd` for any command it does not implement.
-    pub const CURRENT: Self = Self { major: 0, minor: 2 };
+    pub const CURRENT: Self = Self { major: 0, minor: 3 };
 }
 
 /// Human-readable identity of the firmware build.
