@@ -352,7 +352,10 @@ fn expand_split_peripheral(
 
     let imports = expand_custom_imports(&item_mod);
     let mut chip_init = expand_chip_init(hardware, Some(id), &item_mod);
-    if split_config.connection == SplitConnection::Ble {
+    if matches!(
+        split_config.connection,
+        SplitConnection::Ble | SplitConnection::Auto
+    ) {
         // Add storage when using BLE split
         let flash_init = expand_flash_init(hardware);
         chip_init.extend(quote! {
@@ -543,7 +546,10 @@ fn expand_split_peripheral_entry(
     // Add matrix to devices, and run all devices
     let mut devs = devices.clone();
     devs.push(quote! {matrix});
-    if split_config.connection == SplitConnection::Ble {
+    if matches!(
+        split_config.connection,
+        SplitConnection::Ble | SplitConnection::Auto
+    ) {
         devs.push(quote! {storage});
     }
     let device_task = quote! {
@@ -613,8 +619,14 @@ fn expand_split_peripheral_entry(
                     .instance
                     .to_lowercase()
             );
-            let peripheral_run = quote! {
-                ::rmk::split::peripheral::run_rmk_split_peripheral(#uart_instance)
+            let peripheral_run = if peripheral_config.serial.as_ref().unwrap()[0].half_duplex {
+                quote! {
+                    ::rmk::split::peripheral::run_rmk_split_peripheral_half_duplex(#uart_instance)
+                }
+            } else {
+                quote! {
+                    ::rmk::split::peripheral::run_rmk_split_peripheral_serial(#uart_instance)
+                }
             };
             let mut tasks = vec![device_task, peripheral_run];
             tasks.extend(registered_processors);
@@ -629,6 +641,68 @@ fn expand_split_peripheral_entry(
             let run_rmk_peripheral = join_all_tasks(tasks);
             quote! {
                 #serial_init
+                #run_rmk_peripheral
+            }
+        }
+        SplitConnection::Auto => {
+            let peripheral_serial = peripheral_config
+                .serial
+                .clone()
+                .expect("Missing peripheral serial config");
+            if peripheral_serial.len() != 1 || !peripheral_serial[0].half_duplex {
+                panic!("Automatic split currently requires one half-duplex serial port");
+            }
+            let serial_init = expand_serial_init(chip, peripheral_serial);
+            let uart_instance = format_ident!(
+                "{}",
+                peripheral_config.serial.as_ref().unwrap()[0]
+                    .instance
+                    .to_lowercase()
+            );
+            let detect_pin = format_ident!(
+                "{}",
+                peripheral_config
+                    .detect_pin
+                    .as_ref()
+                    .expect("peripheral.detect_pin is required for automatic split")
+            );
+            let active_low = peripheral_config.detect_active_low;
+
+            let mut tasks = vec![
+                device_task,
+                quote! {
+                    ::rmk::split::peripheral::run_rmk_split_peripheral(
+                        #id,
+                        ble_controller,
+                        ble_addr,
+                    )
+                },
+                quote! {
+                    ::rmk::split::peripheral::run_rmk_split_peripheral_auto_half_duplex(#uart_instance)
+                },
+                quote! {
+                    ::rmk::split::nrf::run_wired_detect(wired_detect, #active_low)
+                },
+            ];
+            if !processors.is_empty() {
+                tasks.push(processor_task);
+            }
+            tasks.extend(registered_processors);
+            if let Some(t) = &watchdog_task {
+                tasks.push(t.clone());
+            }
+            if let Some(t) = &usb_task_future {
+                tasks.push(t.clone());
+            }
+
+            let run_rmk_peripheral = join_all_tasks(tasks);
+            quote! {
+                #serial_init
+                let wired_detect = ::embassy_nrf::gpio::Input::new(
+                    p.#detect_pin,
+                    ::embassy_nrf::gpio::Pull::None,
+                );
+                ::rmk::split::selector::initialize(wired_detect.is_high() != #active_low);
                 #run_rmk_peripheral
             }
         }

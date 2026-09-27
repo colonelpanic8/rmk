@@ -105,7 +105,12 @@ pub(crate) fn rmk_entry_select(
     let communication = &hardware.communication;
     // A BLE split central's transport takes one matrix region per peripheral.
     let split_peripheral_matrices = match board {
-        BoardConfig::Split(split) if matches!(split.connection, SplitConnection::Ble) => {
+        BoardConfig::Split(split)
+            if matches!(
+                split.connection,
+                SplitConnection::Ble | SplitConnection::Auto
+            ) =>
+        {
             let peripheral_matrices = split.peripheral.iter().map(|p| {
                 let rows = p.rows as u8;
                 let cols = p.cols as u8;
@@ -120,9 +125,10 @@ pub(crate) fn rmk_entry_select(
                     }
                 }
             });
-            quote! { , [#(#peripheral_matrices),*] }
+            quote! { , Some([#(#peripheral_matrices),*]) }
         }
-        _ => quote! {},
+        BoardConfig::Split(_) => quote! { , None },
+        BoardConfig::UniBody(_) => quote! {},
     };
     let (transport_prelude, transport_tasks) =
         transport_setup(host, communication, split_peripheral_matrices);
@@ -150,7 +156,8 @@ pub(crate) fn rmk_entry_select(
                         #joined
                     }
                 }
-                SplitConnection::Serial => {
+                SplitConnection::Serial | SplitConnection::Auto => {
+                    let automatic = split_config.connection == SplitConnection::Auto;
                     if !processors.is_empty() {
                         tasks.push(processors_task);
                     };
@@ -189,10 +196,22 @@ pub(crate) fn rmk_entry_select(
                             } else {
                                 quote! {}
                             };
+                            let baud = match central_serials[idx].baudrate {
+                                Some(baud) => quote! { #baud, },
+                                None => quote! { ::rmk::split::serial::HALF_DUPLEX_DEFAULT_BAUD, },
+                            };
+                            let (manager, baud) = if automatic {
+                                (quote! { ::rmk::split::central::run_auto_half_duplex_peripheral_manager }, baud)
+                            } else if central_serials[idx].half_duplex {
+                                (quote! { ::rmk::split::central::run_half_duplex_peripheral_manager }, baud)
+                            } else {
+                                (quote! { ::rmk::split::central::run_peripheral_manager }, quote! {})
+                            };
                             tasks.push(quote! {
-                                ::rmk::split::central::run_peripheral_manager(
+                                #manager(
                                     #idx,
                                     #uart_instance,
+                                    #baud
                                     ::rmk::split::PeripheralMatrixConfig {
                                         rows: #row,
                                         cols: #col,
@@ -204,10 +223,35 @@ pub(crate) fn rmk_entry_select(
                             });
                         });
 
+                    let selector_prelude = if automatic {
+                        let detect_pin = format_ident!(
+                            "{}",
+                            split_config
+                                .central
+                                .detect_pin
+                                .as_ref()
+                                .expect("central.detect_pin is required for automatic split")
+                        );
+                        let active_low = split_config.central.detect_active_low;
+                        tasks.push(quote! {
+                            ::rmk::split::nrf::run_wired_detect(wired_detect, #active_low)
+                        });
+                        quote! {
+                            let wired_detect = ::embassy_nrf::gpio::Input::new(
+                                p.#detect_pin,
+                                ::embassy_nrf::gpio::Pull::None,
+                            );
+                            ::rmk::split::selector::initialize(wired_detect.is_high() != #active_low);
+                        }
+                    } else {
+                        quote! {}
+                    };
+
                     let joined = join_all_tasks(tasks);
                     quote! {
                         #transport_prelude
                         #auto_mouse_layer_prelude
+                        #selector_prelude
                         #joined
                     }
                 }
@@ -322,6 +366,9 @@ fn transport_setup(
 pub(crate) fn expand_tasks(tasks: Vec<TokenStream2>) -> TokenStream2 {
     let mut current_joined = quote! {};
     tasks.iter().enumerate().for_each(|(id, task)| {
+        // Each arm polls through its own never-inlined function: flattening
+        // every task into one giant poll has miscompiled on thumbv7em.
+        let task = quote! { ::rmk::core_traits::NoInline(#task) };
         if id == 0 {
             current_joined = quote! {#task};
         } else {
