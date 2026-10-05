@@ -5,6 +5,7 @@
 //! no allocation, I/O, sleeping, or protocol handling.
 
 use embassy_sync::channel::Channel;
+use embassy_sync::signal::Signal;
 use rmk_types::action::LightAction;
 
 use crate::RawMutex;
@@ -69,4 +70,17 @@ pub async fn send_light_action(action: LightAction) {
 
 async fn next_light_action() -> LightAction {
     LIGHT_ACTIONS.receive().await
+}
+
+/// Raised after the processor applies a key-originated lighting action, so
+/// the persistence owner can save state that did not arrive through a host.
+static LIGHT_ACTION_APPLIED: Signal<RawMutex, ()> = Signal::new();
+
+pub(crate) fn light_action_applied() {
+    LIGHT_ACTION_APPLIED.signal(());
+}
+
+#[cfg(all(feature = "rynk", feature = "storage"))]
+pub(crate) async fn wait_light_action_applied() {
+    LIGHT_ACTION_APPLIED.wait().await
 }
