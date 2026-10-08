@@ -133,3 +133,45 @@ impl Drop for LinkGuard {
         SPLIT_APP_LINK.sender().send(false);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payload_bound_and_wire_round_trip() {
+        for payload in [&[][..], &[7; SPLIT_APP_MSG_MAX][..]] {
+            let data = SplitAppData::new(payload).unwrap();
+            let mut bytes = [0; SPLIT_APP_MSG_MAX + 1];
+            let encoded = postcard::to_slice(&data, &mut bytes).unwrap();
+            let decoded: SplitAppData = postcard::from_bytes(encoded).unwrap();
+            assert_eq!(decoded.payload(), payload);
+        }
+        assert!(SplitAppData::new(&[0; SPLIT_APP_MSG_MAX + 1]).is_none());
+        let mut oversized = [0; SPLIT_APP_MSG_MAX + 2];
+        oversized[0] = (SPLIT_APP_MSG_MAX + 1) as u8;
+        assert!(postcard::from_bytes::<SplitAppData>(&oversized).is_err());
+    }
+
+    #[test]
+    fn inbox_overflow_preserves_queued_messages() {
+        for value in 0..112 {
+            deliver_received(SplitAppData::new(&[value]).unwrap());
+        }
+        deliver_received(SplitAppData::new(&[255]).unwrap());
+        for value in 0..112 {
+            assert_eq!(SPLIT_APP_RX.try_receive().unwrap().payload(), &[value]);
+        }
+        assert!(SPLIT_APP_RX.try_receive().is_err());
+    }
+
+    #[test]
+    fn dropping_a_session_publishes_link_down() {
+        let mut guard = LinkGuard::new();
+        guard.mark_up();
+        guard.mark_up();
+        assert_eq!(SPLIT_APP_LINK.try_get(), Some(true));
+        drop(guard);
+        assert_eq!(SPLIT_APP_LINK.try_get(), Some(false));
+    }
+}
