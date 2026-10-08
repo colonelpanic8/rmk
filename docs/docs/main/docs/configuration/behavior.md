@@ -248,6 +248,9 @@ A profile contains the following fields:
 - `quick_tap_timeout`: If the same morse/tap-hold key is pressed again within this window after its last release, the tap action fires immediately on press and stays held while the key is held. This lets the OS auto-repeat the tap action instead of triggering the hold action. Disabled by default. Maximum 8191ms (13-bit field).
   - Setting `quick_tap_timeout = "0ms"` explicitly disables quick-tap for that profile, even if a non-zero global default is configured. This lets you opt out on a per-profile basis. Omitting the field entirely causes the profile to inherit the global default.
   - A re-press within the window resolves as a tap even if a `double_tap` action is configured, so double-tapping faster than `quick_tap_timeout` produces two taps instead of the `double_tap` action.
+- `retro_tap`: If a tap-hold key is held past `hold_timeout` but released without any other key having been pressed, release the hold action and send the tap action instead. Same as QMK's retro tapping and ZMK's `retro-tap`. Defaults to `false`.
+  - The hold action is still reported when the timeout lands, so the host sees the modifier or layer briefly before it is retracted.
+  - Only a plain tap-hold can retro tap. A morse key whose hold continues into a longer pattern has no single tap action to fall back to, so `retro_tap` does not apply to it.
 
 #### Default profile for Morse/TapDance/TapHold
 
