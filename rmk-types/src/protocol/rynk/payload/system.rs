@@ -22,6 +22,77 @@ pub const DEVICE_INFO_STRING_SIZE: usize = 32;
 /// Maximum byte length of the application-defined build label.
 pub const BUILD_INFO_STRING_SIZE: usize = 128;
 
+/// Maximum byte lengths for board-defined device-data identifiers and text.
+pub const DEVICE_DATA_NAMESPACE_SIZE: usize = 48;
+pub const DEVICE_DATA_KEY_SIZE: usize = 48;
+pub const DEVICE_DATA_TEXT_SIZE: usize = 64;
+
+/// Whether a board-defined value is fixed for the firmware build or sampled
+/// when the host asks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum DeviceDataVolatility {
+    Static,
+    Live,
+}
+
+/// A bounded, self-describing value in a board-defined device-data schema.
+///
+/// Hosts can project this enum to JSON without knowing the board at compile
+/// time. Stable meanings belong to the descriptor's namespace and schema
+/// version, rather than to RMK's core protocol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum DeviceDataValue {
+    Bool(bool),
+    Unsigned(u64),
+    Signed(i64),
+    Text(String<DEVICE_DATA_TEXT_SIZE>),
+}
+
+impl MaxSize for DeviceDataValue {
+    const POSTCARD_MAX_SIZE: usize = u8::POSTCARD_MAX_SIZE
+        + bool::POSTCARD_MAX_SIZE
+        + u64::POSTCARD_MAX_SIZE
+        + i64::POSTCARD_MAX_SIZE
+        + crate::heapless_vec_max_size::<u8, DEVICE_DATA_TEXT_SIZE>();
+}
+
+/// Description of the single board-defined data namespace exposed by a
+/// firmware build. Reverse-domain namespaces are recommended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct DeviceDataDescriptor {
+    pub namespace: String<DEVICE_DATA_NAMESPACE_SIZE>,
+    pub schema_version: u16,
+    pub record_count: u8,
+}
+
+impl MaxSize for DeviceDataDescriptor {
+    const POSTCARD_MAX_SIZE: usize = crate::heapless_vec_max_size::<u8, DEVICE_DATA_NAMESPACE_SIZE>()
+        + u16::POSTCARD_MAX_SIZE
+        + u8::POSTCARD_MAX_SIZE;
+}
+
+/// One typed record in a board-defined device-data namespace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct DeviceDataRecord {
+    pub key: String<DEVICE_DATA_KEY_SIZE>,
+    pub volatility: DeviceDataVolatility,
+    pub value: DeviceDataValue,
+}
+
+impl MaxSize for DeviceDataRecord {
+    const POSTCARD_MAX_SIZE: usize = crate::heapless_vec_max_size::<u8, DEVICE_DATA_KEY_SIZE>()
+        + DeviceDataVolatility::POSTCARD_MAX_SIZE
+        + DeviceDataValue::POSTCARD_MAX_SIZE;
+}
+
 /// Protocol version advertised during the connection handshake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, MaxSize)]
 #[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
