@@ -1,5 +1,6 @@
 use embassy_futures::yield_now;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
+use rmk_types::action::KeyAction;
 use rmk_types::morse::{MorseProfile, MorseProfileName};
 use serde::de::{Error as DeError, SeqAccess, Visitor};
 use serde::{Deserializer, Serializer};
@@ -126,7 +127,16 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     let idx = idx as usize;
                     if idx < COMBO_MAX_NUM {
                         debug!("Read combo config: {:?}", config);
-                        behavior.combo.combos[idx] = Some(Combo::new(config));
+                        behavior.combo.combos[idx] =
+                            (!config.actions.is_empty() || config.output != KeyAction::No).then(|| Combo::new(config));
+                    }
+                }
+                (StorageKey::Combo(idx), StorageData::PositionCombo(config)) => {
+                    let idx = idx as usize;
+                    if idx < COMBO_MAX_NUM {
+                        debug!("Read position combo config: {:?}", config);
+                        behavior.combo.combos[idx] = (!config.positions.is_empty() || config.output != KeyAction::No)
+                            .then(|| Combo::new_positions(config));
                     }
                 }
                 (StorageKey::Fork(idx), StorageData::Fork(fork)) => {
