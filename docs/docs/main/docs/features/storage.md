@@ -41,7 +41,7 @@ Ensure you allocate sufficient storage space for your keymap and bonding informa
 
 ## Storage Is Cleared When RMK Is Rebuilt
 
-The firmware embeds a build hash computed by the `rmk` crate's build script from the git commit and build time. The hash is written to storage when storage is first initialized, and checked on every boot: if the stored hash doesn't match the running firmware's hash, RMK erases the storage and re-initializes it from the firmware's defaults.
+Every firmware build embeds a unique build hash (computed in `rmk`'s build script from the git commit and build time). Reproducible build systems can instead set `RMK_BUILD_HASH_SEED`; identical non-empty seed values produce identical hashes. The hash is written to storage when storage is first initialized, and checked on every boot: if the stored hash doesn't match the running firmware's hash, RMK erases the storage and re-initializes it from the firmware's defaults.
 
 The hash only changes when the `rmk` build script re-runs: after `cargo clean`, or when you change the `rmk` version, its Cargo features, or the build profile. Rebuilding your own crate — for example after editing the keymap or `keyboard.toml` — reuses the same hash, so the stored keymap, keymap edits made via Vial/Rynk and BLE bonds survive that flash, and your keymap edits in source do **not** replace the stored keymap. To force a reset in that case, set `clear_layout = true` (keymap only) or `clear_storage = true` (everything, including BLE bonds) in the `[storage]` section of `keyboard.toml`, or the same fields of `StorageConfig`, flash once, then set them back to `false`.
 
