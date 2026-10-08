@@ -1,0 +1,24 @@
+[layout]
+rows = 1
+cols = 4
+map = "(0,0) (0,1) (0,2) (0,3)"
+[[keymap.layer]]
+keys = "No UNICODE(0) LCtrl A"
+[behavior.unicode]
+codepoints = ["00E9"]
+default_mode = "linux"
+[[test]]
+name = "unicode_does_not_release_physically_held_ctrl"
+steps = [{ press = [0, 2] }, { tap = { pos = [0, 1], duration = 100 } }, { tap = { pos = [0, 3], duration = 20 } }, { release = [0, 2] }]
+expect = [["LCtrl"], ["LCtrl", "LShift", "U"], [], ["Kc0"], [], ["Kc0"], [], ["E"], [], ["Kc9"], [], ["Enter"], ["LCtrl"], ["LCtrl", "A"], ["LCtrl"], []]
+
+[[test]]
+name = "macos_sequence_ignores_and_restores_physical_ctrl"
+behavior.unicode = { default_mode = "macos" }
+steps = [{ press = [0, 2] }, { tap = { pos = [0, 1], duration = 100 } }, { release = [0, 2] }]
+expect = [["LCtrl"], ["LAlt"], ["LAlt", "Kc0"], ["LAlt"], ["LAlt", "Kc0"], ["LAlt"], ["LAlt", "E"], ["LAlt"], ["LAlt", "Kc9"], ["LAlt"], ["LCtrl"], []]
+
+[[test]]
+name = "unicode_temporarily_excludes_physical_character_keys"
+steps = [{ press = [0, 3] }, { tap = { pos = [0, 1], duration = 100 } }, { release = [0, 3] }]
+expect = [["A"], ["LCtrl", "LShift", "U"], [], ["Kc0"], [], ["Kc0"], [], ["E"], [], ["Kc9"], [], ["Enter"], ["A"], []]
