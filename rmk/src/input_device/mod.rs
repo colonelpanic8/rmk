@@ -14,6 +14,8 @@ pub mod joystick;
 pub mod pmw33xx;
 pub mod pmw3610;
 pub mod pointing;
+#[cfg(feature = "rynk")]
+pub mod pointing_config;
 pub mod rotary_encoder;
 
 /// The trait for input devices.

@@ -7,6 +7,7 @@ use embassy_sync::channel::{Channel, TrySendError};
 use embassy_sync::signal::Signal;
 pub use embassy_sync::{blocking_mutex, channel, pubsub, zerocopy_channel};
 use rmk_types::connection::ConnectionType;
+use rmk_types::keycode::HidKeyCode;
 #[cfg(feature = "_ble")]
 use {crate::ble::profile::BleProfileAction, rmk_types::led_indicator::LedIndicator};
 
@@ -120,3 +121,15 @@ pub(crate) static RYNK_BLE_RX_PIPE: embassy_sync::pipe::Pipe<RawMutex, 512> = em
 /// (`execute_macro` dispatches a macro's ops back through the action path).
 /// Producer: the `TriggerMacro` action. Consumer: the keyboard loop.
 pub(crate) static MACRO_TRIGGER_CHANNEL: Channel<RawMutex, (u8, KeyboardEvent), 4> = Channel::new();
+
+/// A key a pointing device presses on the keyboard's behalf (caret and keypad
+/// modes). Consumer: the keyboard loop, which folds it into the same report
+/// state as physical keys so held keys, modifiers, and remapping survive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub(crate) struct VirtualKeyEvent {
+    pub key: HidKeyCode,
+    pub pressed: bool,
+}
+
+pub(crate) static VIRTUAL_KEY_CHANNEL: Channel<RawMutex, VirtualKeyEvent, 8> = Channel::new();
