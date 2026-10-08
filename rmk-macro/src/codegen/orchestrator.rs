@@ -23,6 +23,7 @@ use super::keyboard_config::{
 };
 use super::keymap::expand_default_keymap;
 use super::matrix::{expand_bootmagic_check, expand_matrix_config};
+use super::override_helper::{Overwritten, find_overwritten};
 use super::registered_processor::expand_registered_processor_init;
 use super::split::central::expand_split_central_config;
 use super::watchdog::expand_watchdog_init;
@@ -292,8 +293,26 @@ fn expand_main(
     };
 
     let host_service_init = if host.rynk_enabled || host.vial_enabled {
-        quote! {
-            let host_service = ::rmk::host::HostService::new(&keymap, &rmk_config);
+        let host_service_override = item_mod.content.as_ref().and_then(|(_, items)| {
+            items.iter().find_map(|item| match item {
+                syn::Item::Fn(item_fn)
+                    if matches!(
+                        find_overwritten(item_fn),
+                        Some(Ok(Overwritten::HostService))
+                    ) =>
+                {
+                    Some(&item_fn.block)
+                }
+                _ => None,
+            })
+        });
+        match host_service_override {
+            Some(body) => quote! {
+                let host_service = #body;
+            },
+            None => quote! {
+                let host_service = ::rmk::host::HostService::new(&keymap, &rmk_config);
+            },
         }
     } else {
         quote! {}
