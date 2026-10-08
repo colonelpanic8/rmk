@@ -489,11 +489,15 @@ fn wire_values_locked() {
         powered: true,
         effective: 2,
     };
+    let ble_name = BleName {
+        template: heapless::String::try_from("Glove80 {slot}").unwrap(),
+    };
 
     let entries: alloc::vec::Vec<(&str, alloc::vec::Vec<u8>)> = alloc::vec![
         // --- Response envelope + connection ---
         ("ConnectionType::Ble", encode(&ConnectionType::Ble)),
         ("ConnectionType::Usb", encode(&ConnectionType::Usb)),
+        ("BleName{Glove80 {slot}}", encode(&ble_name)),
         (
             "Result<(),RynkError>::Err(StorageFault)",
             encode::<Result<(), RynkError>>(&Err(RynkError::StorageFault)),

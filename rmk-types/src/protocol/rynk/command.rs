@@ -12,6 +12,8 @@ use postcard::experimental::max_size::MaxSize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+#[cfg(feature = "_ble")]
+use super::BleName;
 use super::message::{RynkHeader, encode_frame};
 use super::{
     AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, BuildInfo, DeviceCapabilities, DeviceInfo,
@@ -400,6 +402,12 @@ endpoints! {
     #[cfg(all(feature = "_ble", feature = "split"))]
     /// Replace the volatile policy. Each connection-event count must be `0..=499`.
     SetSplitCentralLatency = 0x0707: SplitCentralLatencyPolicy => SplitCentralLatencyState;
+    #[cfg(feature = "_ble")]
+    /// Read the persistent BLE advertising-name template.
+    GetBleName = 0x0708: () => BleName;
+    #[cfg(feature = "_ble")]
+    /// Replace the persistent BLE advertising-name template.
+    SetBleName = 0x0709: BleName => ();
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
