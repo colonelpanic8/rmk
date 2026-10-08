@@ -561,6 +561,10 @@ fn wire_values_locked() {
         ),
         // --- Action: every feature-independent variant tag (positional) ---
         ("Action::No", encode(&Action::No)),
+        (
+            "KeyboardAction::CtrlGuiSwapToggle",
+            encode(&KeyboardAction::CtrlGuiSwapToggle),
+        ),
         ("Action::Key(Hid(A))", encode(&Action::Key(KeyCode::Hid(HidKeyCode::A)))),
         (
             "Action::Modifier(LCtrl)",
