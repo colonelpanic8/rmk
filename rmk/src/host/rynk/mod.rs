@@ -175,7 +175,6 @@ impl<'a> RynkService<'a> {
             | Cmd::SetMorse
             | Cmd::SetFork
             | Cmd::SetBehaviorConfig
-            | Cmd::SetPointingConfig
             | Cmd::SetKeymapBulk
             | Cmd::SetComboBulk
             | Cmd::SetMorseBulk
