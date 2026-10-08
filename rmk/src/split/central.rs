@@ -32,7 +32,7 @@ pub async fn run_half_duplex_peripheral_manager<S: Read + Write>(
     serial: S,
     baud: u32,
     matrix_config: crate::split::PeripheralMatrixConfig,
-    #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
+    #[cfg(feature = "dfu_split")] policy: crate::split::dfu::UpdatePolicy,
 ) {
     crate::split::serial::run_half_duplex_peripheral_manager(
         id,
@@ -51,7 +51,7 @@ pub async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
     serial: S,
     baud: u32,
     matrix_config: crate::split::PeripheralMatrixConfig,
-    #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
+    #[cfg(feature = "dfu_split")] policy: crate::split::dfu::UpdatePolicy,
 ) {
     crate::split::serial::run_auto_half_duplex_peripheral_manager(
         id,

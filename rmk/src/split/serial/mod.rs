@@ -92,7 +92,7 @@ pub(crate) async fn run_half_duplex_peripheral_manager<S: Read + Write>(
     serial: S,
     baud: u32,
     matrix_config: crate::split::PeripheralMatrixConfig,
-    #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
+    #[cfg(feature = "dfu_split")] policy: crate::split::dfu::UpdatePolicy,
 ) {
     let driver = HalfDuplexCentralDriver::new(serial, id, HalfDuplexTiming::from_baud(baud));
     let mut peripheral_manager = PeripheralManager::new(
@@ -112,7 +112,7 @@ pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
     serial: S,
     baud: u32,
     matrix_config: crate::split::PeripheralMatrixConfig,
-    #[cfg(feature = "dfu_split")] policy: crate::split::driver::UpdatePolicy,
+    #[cfg(feature = "dfu_split")] policy: crate::split::dfu::UpdatePolicy,
 ) {
     let driver = HalfDuplexCentralDriver::new(serial, id, HalfDuplexTiming::from_baud(baud));
     let mut peripheral_manager = PeripheralManager::new(

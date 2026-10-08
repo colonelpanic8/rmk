@@ -89,6 +89,10 @@ SetForkRequest{2,fork}                           02 02 01 00 04 00 05 02 01 02 0
 SetKeyRequest{{0,5,13},Morse(7)}                 00 05 0d 05 07
 SetMacroRequest{2,macro}                         02 04 00 01 00 04 03 ac 02 04 61 05
 SetMorseRequest{0,morse}                         00 00 01 02 01 00 04
+SplitTransportForce::Auto                        00
+SplitTransportForce::Ble                         02
+SplitTransportForce::Wired                       01
+SplitTransportState{true,Ble,true,false}         01 02 01 00
 StateBits{LCtrl,Caps,B1}                         01 02 01
 StorageResetMode::Full                           00
 StorageResetMode::LayoutOnly                     01
