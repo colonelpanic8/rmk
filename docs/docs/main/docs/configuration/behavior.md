@@ -231,7 +231,7 @@ The `profile` of a morse key contains all tunable configurations of this morse k
 ::: tip
 
 - `enable_flow_tap`: Enables HRM (Home Row Mod) mode. When enabled, the global `prior_idle_time` setting becomes functional. Defaults to `false`. Profiles may set this to override the global `[behavior.morse]` value; omitting it inherits the global value.
-- `prior_idle_time`: _(global only)_ If the previous non-modifier key was pressed within this period before pressing the current tap-hold key, the tap action for the tap-hold behavior will be triggered. This parameter lives in `[behavior.morse]` (not in a per-key profile) and is effective only when `enable_flow_tap` is enabled for the key. Defaults to 120ms.
+- `prior_idle_time`: If the previous non-modifier key was pressed within this period before pressing the current tap-hold key, the tap action for the tap-hold behavior will be triggered. Effective only when `enable_flow_tap` is enabled for the key. Defaults to 120ms. Profiles may set this to override the global `[behavior.morse]` value; omitting it inherits the global value.
   :::
 
 A profile contains the following fields:
@@ -251,6 +251,7 @@ A profile contains the following fields:
 - `retro_tap`: If a tap-hold key is held past `hold_timeout` but released without any other key having been pressed, release the hold action and send the tap action instead. Same as QMK's retro tapping and ZMK's `retro-tap`. Defaults to `false`.
   - The hold action is still reported when the timeout lands, so the host sees the modifier or layer briefly before it is retracted.
   - Only a plain tap-hold can retro tap. A morse key whose hold continues into a longer pattern has no single tap action to fall back to, so `retro_tap` does not apply to it.
+- `prior_idle_time`: Overrides the global flow-tap idle window for keys using this profile, so home row mods and thumb keys can run different windows. Omitting it inherits the global value. Maximum 8191ms (13-bit field).
 
 #### Default profile for Morse/TapDance/TapHold
 
