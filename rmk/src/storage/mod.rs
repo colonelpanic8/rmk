@@ -24,7 +24,11 @@ use sequential_storage::cache::{Cache, Uncached};
 use sequential_storage::map::{Key, MapConfig, MapStorage, PostcardValue, SerializationError};
 #[cfg(feature = "host")]
 use {
-    crate::{MACRO_SPACE_SIZE, config::HoldTriggerPositions, keyboard::combo::ComboConfig},
+    crate::{
+        MACRO_SPACE_SIZE,
+        config::HoldTriggerPositions,
+        keyboard::combo::{ComboConfig, PositionComboConfig},
+    },
     rmk_types::action::{EncoderAction, KeyAction},
     rmk_types::fork::Fork,
     rmk_types::morse::Morse,
@@ -152,6 +156,11 @@ pub(crate) enum FlashOperationMessage {
     Combo {
         idx: u8,
         config: ComboConfig,
+    },
+    #[cfg(feature = "host")]
+    PositionCombo {
+        idx: u8,
+        config: PositionComboConfig,
     },
     #[cfg(feature = "host")]
     Fork {
@@ -457,6 +466,8 @@ pub(crate) enum StorageData {
     MorseProfileName(MorseProfileName),
     #[cfg(feature = "_ble")]
     BleName(BleName),
+    #[cfg(feature = "host")]
+    PositionCombo(PositionComboConfig),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingSceneCommit(LightingSceneCommitRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -1565,6 +1576,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         .await
                 }
                 #[cfg(feature = "host")]
+                FlashOperationMessage::PositionCombo { idx, config } => {
+                    self.store_data(StorageKey::combo(idx), &StorageData::PositionCombo(config))
+                        .await
+                }
+                #[cfg(feature = "host")]
                 FlashOperationMessage::Fork { idx, fork } => {
                     self.store_data(StorageKey::fork(idx), &StorageData::Fork(fork)).await
                 }
@@ -2529,6 +2545,35 @@ mod tests {
                     build_hash: BUILD_HASH,
                 })
             ));
+        });
+    }
+
+    #[cfg(feature = "host")]
+    #[test]
+    fn empty_combo_records_restore_as_vacant_slots() {
+        block_on(async {
+            type Flash = TestFlash<16_384, 4_096, 1>;
+            let mut storage = Storage::<Flash, 1, 1, 1, 0> {
+                flash: MapStorage::new(Flash::new(), MapConfig::new(8192..16_384), Cache::new_uncached()),
+                buffer: [0; get_buffer_size()],
+            };
+
+            storage
+                .store_data(StorageKey::combo(0), &StorageData::Combo(ComboConfig::empty()))
+                .await
+                .unwrap();
+            storage
+                .store_data(
+                    StorageKey::combo(1),
+                    &StorageData::PositionCombo(PositionComboConfig::empty()),
+                )
+                .await
+                .unwrap();
+
+            let mut combos = core::array::from_fn(|_| None);
+            storage.read_combos(&mut combos).await.unwrap();
+            assert!(combos[0].is_none());
+            assert!(combos[1].is_none());
         });
     }
 
