@@ -194,6 +194,8 @@ impl<'a> RynkService<'a> {
             Cmd::SetSplitTransportForce => Some(true),
             #[cfg(feature = "_ble")]
             Cmd::SetBleName => Some(true),
+            #[cfg(feature = "_ble")]
+            Cmd::SetAutoSwitchTransport => Some(true),
             Cmd::SetKeyAction
             | Cmd::SetDefaultLayer
             | Cmd::SetEncoderAction
@@ -440,6 +442,10 @@ impl<'a> RynkService<'a> {
             Cmd::GetSplitTransport => serve::<command::GetSplitTransport, _>(self, msg).await,
             #[cfg(feature = "split")]
             Cmd::SetSplitTransportForce => serve::<command::SetSplitTransportForce, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::GetAutoSwitchTransport => serve::<command::GetAutoSwitchTransport, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::SetAutoSwitchTransport => serve::<command::SetAutoSwitchTransport, _>(self, msg).await,
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,

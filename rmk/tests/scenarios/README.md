@@ -79,6 +79,7 @@ already covers under another mode.
 | `{ tap = { pos = [row, col], duration = ms } }` | Press, wait `ms`, then release |
 | `{ rotary_cw = id }` / `{ rotary_ccw = id }` | Encoder detent |
 | `{ delay = ms }` | Advance virtual time |
+| `{ usb = "Configured" }` | Set the USB cable state (any `UsbState` variant) |
 | `{ no_report = ms }` | Advance virtual time, failing if anything reaches the host |
 | `{ passkey = "begin" }` / `{ passkey = "end" }` | Bound BLE passkey entry |
 | `{ rynk = { cmd = "...", payload = ..., reply = ... } }` | One Rynk request and the reply it must draw |
