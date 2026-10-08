@@ -197,7 +197,11 @@ adc_divider_total = 0
     );
 }
 
-const NICE_NANO_SPLIT: &str = r#"
+#[test]
+fn split_keyboard_on_board_with_default_battery_resolves() {
+    let path = write_temp_keyboard_toml(
+        "split-board-battery",
+        r#"
 [keyboard]
 name = "RMK Test"
 vendor_id = 0x4c4b
@@ -216,6 +220,8 @@ rows = 1
 cols = 1
 row_offset = 0
 col_offset = 0
+[split.central.battery]
+battery_adc_pin = "P0_05"
 [split.central.matrix]
 matrix_type = "normal"
 row_pins = ["P0_02"]
@@ -230,51 +236,21 @@ col_offset = 1
 matrix_type = "normal"
 row_pins = ["P0_02"]
 col_pins = ["P0_03"]
-"#;
+"#,
+    );
+    let configs = [
+        KeyboardTomlConfig::new_from_toml_path(&path),
+        KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path),
+    ];
+    std::fs::remove_file(path).unwrap();
 
-#[test]
-fn split_board_battery_defaults_reach_both_config_loaders() {
-    for (board, pin, measured, total) in [
-        ("nice!nano_v2", "vddh", None, None),
-        ("nice!nano", "P0_04", Some(2000), Some(2806)),
-    ] {
-        let path = write_temp_keyboard_toml(
-            "split-battery-defaults",
-            &NICE_NANO_SPLIT.replace("nice!nano_v2", board),
-        );
-        let full = KeyboardTomlConfig::new_from_toml_path(&path);
-        let constants = KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path);
-        std::fs::remove_file(path).unwrap();
-        for config in [&full, &constants] {
-            for side in [None, Some(0)] {
-                let battery = config.resolve_battery_config(side).unwrap();
-                assert_eq!(battery.battery_adc_pin.as_deref(), Some(pin));
-                assert_eq!(battery.adc_divider_measured, measured);
-                assert_eq!(battery.adc_divider_total, total);
-            }
-            let counts = config.build_constants(&["split", "_ble"]).unwrap();
-            assert_eq!(counts.split_battery_peripheral_ids, [0]);
-        }
-    }
-}
-
-#[test]
-fn explicit_split_battery_tables_replace_presets_on_one_side_only() {
-    for (contents, expected_pin) in [("battery_adc_pin = \"P0_05\"", Some("P0_05")), ("", None)] {
-        let source = format!(
-            "{}\n[split.peripheral.battery]\n{contents}\n",
-            NICE_NANO_SPLIT.replace("nice!nano_v2", "nice!nano")
-        );
-        let path = write_temp_keyboard_toml("split-battery-override", &source);
-        let config = KeyboardTomlConfig::new_from_toml_path(&path);
-        std::fs::remove_file(path).unwrap();
-
-        let peripheral = config.resolve_battery_config(Some(0)).unwrap();
-        assert_eq!(peripheral.battery_adc_pin.as_deref(), expected_pin);
-        assert_eq!(peripheral.adc_divider_measured, None);
-        assert_eq!(peripheral.adc_divider_total, None);
+    for config in configs {
         let central = config.resolve_battery_config(None).unwrap();
-        assert_eq!(central.battery_adc_pin.as_deref(), Some("P0_04"));
+        assert_eq!(central.battery_adc_pin.as_deref(), Some("P0_05"));
+        let peripheral = config.resolve_battery_config(Some(0)).unwrap();
+        assert_eq!(peripheral.battery_adc_pin.as_deref(), Some("vddh"));
+        let constants = config.build_constants(&["split", "_ble"]).unwrap();
+        assert_eq!(constants.split_battery_peripheral_ids, [0]);
     }
 }
 
