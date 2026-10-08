@@ -153,6 +153,7 @@ impl<S: PointingDriver> PointingDevice<S> {
 
         Some(PointingEvent {
             device_id: self.id,
+            buttons: 0,
             axes: [
                 AxisEvent {
                     typ: AxisValType::Rel,
@@ -510,6 +511,8 @@ pub struct PointingProcessor<'a> {
     accumulator: MotionAccumulator,
     /// current active mode
     current_mode: PointingMode,
+    /// Device-originated button state from the last processed event
+    device_buttons: u8,
 }
 
 impl<'a> PointingProcessor<'a> {
@@ -520,6 +523,7 @@ impl<'a> PointingProcessor<'a> {
             config,
             accumulator: MotionAccumulator::default(),
             current_mode: PointingMode::default(),
+            device_buttons: 0,
         }
     }
 
@@ -561,7 +565,9 @@ impl<'a> PointingProcessor<'a> {
             (x, y) = (y, x);
         }
 
-        let buttons = self.keymap.mouse_buttons();
+        let device_buttons_changed = event.buttons != self.device_buttons;
+        self.device_buttons = event.buttons;
+        let buttons = self.keymap.mouse_buttons() | event.buttons;
         match self.current_mode {
             PointingMode::Cursor(_) | PointingMode::Scroll(_) | PointingMode::Sniper(_) => {
                 // modes that generate mouse reports
@@ -586,7 +592,7 @@ impl<'a> PointingProcessor<'a> {
                             (scroll_config.multiplier_x, scroll_config.divisor_x),
                             (scroll_config.multiplier_y, scroll_config.divisor_y),
                         );
-                        if sx == 0 && sy == 0 {
+                        if sx == 0 && sy == 0 && !device_buttons_changed {
                             return;
                         }
                         // Sensor X → pan, sensor Y → wheel.
@@ -609,7 +615,7 @@ impl<'a> PointingProcessor<'a> {
                             (sniper_config.multiplier, sniper_config.divisor),
                             (sniper_config.multiplier, sniper_config.divisor),
                         );
-                        if sx == 0 && sy == 0 {
+                        if sx == 0 && sy == 0 && !device_buttons_changed {
                             return;
                         }
                         let out_x = if sniper_config.invert_x { -sx } else { sx };
