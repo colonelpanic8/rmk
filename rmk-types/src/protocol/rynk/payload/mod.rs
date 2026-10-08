@@ -12,6 +12,7 @@ mod lighting;
 mod macro_data;
 mod morse;
 mod pointing;
+mod split;
 mod status;
 mod system;
 
@@ -27,5 +28,6 @@ pub use self::lighting::*;
 pub use self::macro_data::*;
 pub use self::morse::*;
 pub use self::pointing::*;
+pub use self::split::*;
 pub use self::status::*;
 pub use self::system::*;
