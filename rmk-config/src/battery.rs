@@ -20,7 +20,7 @@ impl KeyboardTomlConfig {
         if self.split.is_some() && self.battery.is_some() {
             return Err("Use [split.central.battery] and [split.peripheral.battery] for split keyboards".into());
         }
-        let config = match (&self.split, peripheral) {
+        let configured = match (&self.split, peripheral) {
             (Some(split), Some(id)) => split
                 .peripheral
                 .get(id)
@@ -30,9 +30,21 @@ impl KeyboardTomlConfig {
             (Some(split), None) => split.central.battery.as_ref(),
             (None, Some(_)) => return Err("Unibody keyboard has no peripherals".into()),
             (None, None) => self.battery.as_ref(),
+        };
+        let mut config = configured.cloned().unwrap_or_default();
+        if configured.is_none()
+            && self.split.is_some()
+            && let Some(keyboard) = &self.keyboard
+            && (keyboard.board.is_some() || keyboard.chip.is_some())
+        {
+            let preset = self.get_chip_model()?.get_default_config_str()?;
+            let mut preset: toml::Table = toml::from_str(preset).map_err(|e| format!("Invalid board preset: {e}"))?;
+            if let Some(battery) = preset.remove("battery") {
+                config = battery
+                    .try_into()
+                    .map_err(|e| format!("Invalid board battery preset: {e}"))?;
+            }
         }
-        .cloned()
-        .unwrap_or_default();
         if config.battery_adc_pin.is_none()
             && (config.adc_divider_measured.is_some() || config.adc_divider_total.is_some())
         {

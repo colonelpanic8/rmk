@@ -197,11 +197,7 @@ adc_divider_total = 0
     );
 }
 
-#[test]
-fn split_keyboard_on_board_with_default_battery_resolves() {
-    let path = write_temp_keyboard_toml(
-        "split-board-battery",
-        r#"
+const NICE_NANO_SPLIT: &str = r#"
 [keyboard]
 name = "RMK Test"
 vendor_id = 0x4c4b
@@ -220,8 +216,6 @@ rows = 1
 cols = 1
 row_offset = 0
 col_offset = 0
-[split.central.battery]
-battery_adc_pin = "vddh"
 [split.central.matrix]
 matrix_type = "normal"
 row_pins = ["P0_02"]
@@ -236,15 +230,129 @@ col_offset = 1
 matrix_type = "normal"
 row_pins = ["P0_02"]
 col_pins = ["P0_03"]
-"#,
-    );
-    let config = KeyboardTomlConfig::new_from_toml_path(&path);
-    std::fs::remove_file(path).ok();
+"#;
 
-    let central = config.resolve_battery_config(None).unwrap();
-    assert_eq!(central.battery_adc_pin.as_deref(), Some("vddh"));
-    let peripheral = config.resolve_battery_config(Some(0)).unwrap();
-    assert!(peripheral.battery_adc_pin.is_none());
+#[test]
+fn split_board_battery_defaults_reach_both_config_loaders() {
+    for (board, pin, measured, total) in [
+        ("nice!nano_v2", "vddh", None, None),
+        ("nice!nano", "P0_04", Some(2000), Some(2806)),
+    ] {
+        let path = write_temp_keyboard_toml(
+            "split-battery-defaults",
+            &NICE_NANO_SPLIT.replace("nice!nano_v2", board),
+        );
+        let full = KeyboardTomlConfig::new_from_toml_path(&path);
+        let constants = KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path);
+        std::fs::remove_file(path).unwrap();
+        assert!(full.hardware().unwrap().peripheral_batteries[0].adc.is_some());
+        for config in [&full, &constants] {
+            for side in [None, Some(0)] {
+                let battery = config.resolve_battery_config(side).unwrap();
+                assert_eq!(battery.battery_adc_pin.as_deref(), Some(pin));
+                assert_eq!(battery.adc_divider_measured, measured);
+                assert_eq!(battery.adc_divider_total, total);
+            }
+            let counts = config.build_constants(&["split", "_ble"]).unwrap();
+            assert_eq!(counts.split_battery_peripheral_ids, [0]);
+            assert_eq!(counts.split_battery_peripheral_user_descriptions, ["Peripheral 0"]);
+            assert_eq!(
+                counts
+                    .events
+                    .iter()
+                    .find(|event| event.name == "peripheral_battery")
+                    .unwrap()
+                    .subs,
+                3
+            );
+        }
+    }
+}
+
+#[test]
+fn explicit_split_battery_tables_replace_presets_on_one_side_only() {
+    for (section, side) in [("central", None), ("peripheral", Some(0))] {
+        for (contents, expected_pin) in [("battery_adc_pin = \"P0_05\"", Some("P0_05")), ("", None)] {
+            let source = format!(
+                "{}\n[split.{section}.battery]\n{contents}\n",
+                NICE_NANO_SPLIT.replace("nice!nano_v2", "nice!nano")
+            );
+            let path = write_temp_keyboard_toml("split-battery-override", &source);
+            for config in [
+                KeyboardTomlConfig::new_from_toml_path(&path),
+                KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path),
+            ] {
+                let own = config.resolve_battery_config(side).unwrap();
+                assert_eq!(own.battery_adc_pin.as_deref(), expected_pin);
+                assert_eq!(own.adc_divider_measured, None);
+                assert_eq!(own.adc_divider_total, None);
+                let other = config
+                    .resolve_battery_config(if side.is_none() { Some(0) } else { None })
+                    .unwrap();
+                assert_eq!(other.battery_adc_pin.as_deref(), Some("P0_04"));
+                assert_eq!(other.adc_divider_measured, Some(2000));
+                assert_eq!(other.adc_divider_total, Some(2806));
+                let enabled = side.is_none() || expected_pin.is_some();
+                let counts = config.build_constants(&["split", "_ble"]).unwrap();
+                assert_eq!(counts.split_battery_peripheral_ids.len(), usize::from(enabled));
+                assert_eq!(
+                    counts
+                        .events
+                        .iter()
+                        .find(|event| event.name == "peripheral_battery")
+                        .unwrap()
+                        .subs,
+                    2 + usize::from(enabled)
+                );
+            }
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+#[test]
+fn split_battery_fallback_preserves_explicit_global_errors_and_optional_boards() {
+    for source in [
+        format!("{NICE_NANO_SPLIT}\n[battery]\n"),
+        format!("{NICE_NANO_SPLIT}\n[battery]\nbattery_adc_pin = \"vddh\"\n"),
+    ] {
+        let path = write_temp_keyboard_toml("split-battery-global", &source);
+        for config in [
+            KeyboardTomlConfig::new_from_toml_path(&path),
+            KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path),
+        ] {
+            assert!(
+                config
+                    .resolve_battery_config(None)
+                    .unwrap_err()
+                    .contains("Use [split.central.battery]")
+            );
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+    for source in [
+        NICE_NANO_SPLIT.replace("board = \"nice!nano_v2\"", "chip = \"nrf52840\""),
+        NICE_NANO_SPLIT.replace("board = \"nice!nano_v2\"", ""),
+    ] {
+        let path = write_temp_keyboard_toml("split-battery-no-preset", &source);
+        let config = KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path);
+        assert!(config.resolve_battery_config(None).unwrap().battery_adc_pin.is_none());
+        assert!(
+            config
+                .resolve_battery_config(Some(0))
+                .unwrap()
+                .battery_adc_pin
+                .is_none()
+        );
+        assert!(
+            config
+                .build_constants(&["split", "_ble"])
+                .unwrap()
+                .split_battery_peripheral_ids
+                .is_empty()
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 /// Unknown keys in the sections users edit most must be rejected, not
