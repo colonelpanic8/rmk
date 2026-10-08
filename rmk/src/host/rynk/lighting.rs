@@ -14,19 +14,24 @@ use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use heapless::{String, Vec};
+use postcard::experimental::max_size::MaxSize;
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 use rmk_types::protocol::rynk::{
-    LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_EXTENSION_NAME_CHUNK, LIGHTING_EXTENSION_NAME_SIZE,
-    LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_OVERLAY_CHUNK_SIZE, LIGHTING_SCENE_CHUNK_SIZE,
+    LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE,
     LightingAdvancedConditionalSceneCell as WireAdvancedConditionalSceneCell,
-    LightingAdvancedRuntimeConditionalScenesPage, LightingBackgroundMode, LightingBackgroundState,
+    LightingAdvancedRuntimeConditionalScenesPage, LightingRuntimeConditionalScenesPage,
+};
+use rmk_types::protocol::rynk::{
+    LIGHTING_EXTENSION_NAME_CHUNK, LIGHTING_EXTENSION_NAME_SIZE, LIGHTING_EXTENSION_PARAM_CHUNK,
+    LIGHTING_OVERLAY_CHUNK_SIZE, LIGHTING_SCENE_CHUNK_SIZE, LightingBackgroundMode, LightingBackgroundState,
     LightingCompiledScenesPage, LightingConditionalSceneCell as WireConditionalSceneCell,
     LightingControls as WireLightingControls, LightingError, LightingExtension, LightingExtensionLayers,
     LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionParam, LightingExtensionParamsPage,
     LightingExtensionState as WireExtensionState, LightingLayerPolicy, LightingMutableState,
     LightingOutputMode as WireLightingOutputMode, LightingOutputModeIndicator as WireLightingOutputModeIndicator,
-    LightingOutputModeState, LightingOverlayCell, LightingOverlayPage, LightingResult, LightingRgb8,
-    LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingSceneCell,
-    LightingSceneTransaction, LightingScenesPage, LightingState,
+    LightingOutputModeState, LightingOverlayCell, LightingOverlayPage, LightingResult, LightingRgb8, LightingRule,
+    LightingRulesPage, LightingRuntimeConditionalSceneTransaction, LightingSceneCell, LightingSceneTransaction,
+    LightingScenesPage, LightingState,
 };
 
 use crate::RawMutex;
@@ -515,8 +520,11 @@ pub enum RynkLightingReadback {
     ExtensionLayers(LightingExtensionLayers),
     ExtensionNamesPage(LightingExtensionNamesPage),
     ExtensionParamsPage(LightingExtensionParamsPage),
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     RuntimeConditionalScenesPage(LightingRuntimeConditionalScenesPage),
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     AdvancedRuntimeConditionalScenesPage(LightingAdvancedRuntimeConditionalScenesPage),
+    RulesPage(LightingRulesPage),
     RuntimeConditionalSceneTransaction(LightingRuntimeConditionalSceneTransaction),
     Unit,
 }
@@ -718,11 +726,17 @@ pub(super) enum RynkLightingCommand {
         value: u8,
     },
     ReadRuntimeConditionalSceneStatus,
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     ReadRuntimeConditionalScenes {
         expected_revision: u32,
         offset: u16,
     },
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     ReadAdvancedRuntimeConditionalScenes {
+        expected_revision: u32,
+        offset: u16,
+    },
+    ReadRules {
         expected_revision: u32,
         offset: u16,
     },
@@ -730,11 +744,13 @@ pub(super) enum RynkLightingCommand {
         expected_revision: u32,
         cell_count: u16,
     },
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     PutRuntimeConditionalSceneChunk {
         transaction_id: u32,
         offset: u16,
         cells: Vec<WireConditionalSceneCell, { rmk_types::protocol::rynk::LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE }>,
     },
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     PutAdvancedRuntimeConditionalSceneChunk {
         transaction_id: u32,
         offset: u16,
@@ -742,6 +758,12 @@ pub(super) enum RynkLightingCommand {
             WireAdvancedConditionalSceneCell,
             { rmk_types::protocol::rynk::LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE },
         >,
+    },
+    PutRuleChunk {
+        transaction_id: u32,
+        offset: u16,
+        count: u8,
+        rules: Vec<u8, { rmk_types::protocol::rynk::LIGHTING_RULE_PAGE_BYTES }>,
     },
     CommitRuntimeConditionalSceneReplace {
         transaction_id: u32,
@@ -1051,11 +1073,12 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
     #[cfg(feature = "storage")]
     async fn persist_runtime_conditional_scenes(&self, state: &StandardState) {
         use crate::channel::FLASH_CHANNEL;
-        use crate::storage::FlashOperationMessage;
+        use crate::storage::{FlashOperationMessage, LIGHTING_RULE_SHARD_BYTES};
 
         let mut total = state.runtime_conditional_scene_len.min(u16::MAX as usize) as u16;
         let mut offset: u16 = 0;
         let mut shard: u8 = 0;
+        let mut rules = Vec::<u8, LIGHTING_RULE_SHARD_BYTES>::new();
         while offset < total {
             let Ok(StandardReply::RuntimeConditionalScenesPage(page)) = self
                 .request_core(StandardCommand::ReadRuntimeConditionalScenes { offset })
@@ -1063,27 +1086,38 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
             else {
                 return;
             };
-            let page_cells = page.cells.as_slice();
-            let cells = &page_cells[..page_cells.len().min(LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE)];
+            let cells = page.cells.as_slice();
             if cells.is_empty() {
                 break;
             }
-            let mut wire_cells = Vec::new();
             for cell in cells {
-                let Some(wire) = self.runtime_conditional_scene_cell_to_extended_wire(*cell) else {
+                let Some(rule) = self.runtime_conditional_scene_cell_to_rule(*cell) else {
                     return;
                 };
-                let _ = wire_cells.push(wire);
+                let mut scratch = [0; LightingRule::POSTCARD_MAX_SIZE];
+                let Ok(encoded) = postcard::to_slice(&rule, &mut scratch) else {
+                    return;
+                };
+                if rules.len() + encoded.len() > rules.capacity() {
+                    FLASH_CHANNEL
+                        .send(FlashOperationMessage::LightingRuleShard {
+                            index: shard,
+                            rules: core::mem::take(&mut rules),
+                        })
+                        .await;
+                    shard = shard.saturating_add(1);
+                }
+                if rules.extend_from_slice(encoded).is_err() {
+                    return;
+                }
+                offset += 1;
             }
-            FLASH_CHANNEL
-                .send(FlashOperationMessage::LightingRuntimeConditionalSceneShard {
-                    index: shard,
-                    cells: wire_cells,
-                })
-                .await;
-            offset += cells.len() as u16;
-            shard = shard.saturating_add(1);
             total = page.total;
+        }
+        if !rules.is_empty() {
+            FLASH_CHANNEL
+                .send(FlashOperationMessage::LightingRuleShard { index: shard, rules })
+                .await;
         }
         FLASH_CHANNEL
             .send(FlashOperationMessage::LightingRuntimeConditionalSceneCommit { len: offset })
@@ -1375,6 +1409,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     cell_len: state.runtime_conditional_scene_len.min(u16::MAX as usize) as u16,
                 });
             }
+            #[cfg(feature = "lighting_legacy_conditional_scenes")]
             RynkLightingCommand::ReadRuntimeConditionalScenes {
                 expected_revision,
                 offset,
@@ -1394,6 +1429,15 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 }
                 let mut items = Vec::new();
                 for cell in page.cells.as_slice() {
+                    if cell.conditions.connection.is_some()
+                        || cell.conditions.effects.is_some()
+                        || cell.conditions.layers.is_some()
+                        || cell.conditions.indicators.is_some()
+                        || cell.conditions.maintenance.is_some()
+                        || cell.conditions.split_transport.is_some()
+                    {
+                        return Err(LightingError::Unsupported);
+                    }
                     items
                         .push(
                             self.runtime_conditional_scene_cell_to_wire(*cell)
@@ -1409,6 +1453,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     },
                 ));
             }
+            #[cfg(feature = "lighting_legacy_conditional_scenes")]
             RynkLightingCommand::ReadAdvancedRuntimeConditionalScenes {
                 expected_revision,
                 offset,
@@ -1433,6 +1478,9 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     .iter()
                     .take(LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE)
                 {
+                    if cell.conditions.maintenance.is_some() || cell.conditions.split_transport.is_some() {
+                        return Err(LightingError::Unsupported);
+                    }
                     items
                         .push(
                             self.runtime_conditional_scene_cell_to_extended_wire(*cell)
@@ -1447,6 +1495,61 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                         items,
                     },
                 ));
+            }
+            RynkLightingCommand::ReadRules {
+                expected_revision,
+                offset,
+            } => {
+                let mut rules = Vec::new();
+                let mut count = 0_u8;
+                let mut next = offset;
+                let total_count = loop {
+                    let page = match self
+                        .request_core(StandardCommand::ReadRuntimeConditionalScenes { offset: next })
+                        .await?
+                    {
+                        StandardReply::RuntimeConditionalScenesPage(page) => page,
+                        _ => return Err(LightingError::InvalidRequest),
+                    };
+                    if page.revision != expected_revision {
+                        return Err(LightingError::StateRevisionConflict {
+                            expected: expected_revision,
+                            current: page.revision,
+                        });
+                    }
+                    let total_count = page.total;
+                    if page.cells.as_slice().is_empty() {
+                        break total_count;
+                    }
+                    let mut full = false;
+                    for cell in page.cells.as_slice() {
+                        let rule = self
+                            .runtime_conditional_scene_cell_to_rule(*cell)
+                            .ok_or(LightingError::InvalidRequest)?;
+                        let mut scratch = [0; LightingRule::POSTCARD_MAX_SIZE];
+                        let encoded =
+                            postcard::to_slice(&rule, &mut scratch).map_err(|_| LightingError::InvalidRequest)?;
+                        if rules.len() + encoded.len() > rules.capacity() {
+                            full = true;
+                            break;
+                        }
+                        rules
+                            .extend_from_slice(encoded)
+                            .map_err(|_| LightingError::InvalidRequest)?;
+                        count = count.checked_add(1).ok_or(LightingError::InvalidRequest)?;
+                        next = next.checked_add(1).ok_or(LightingError::InvalidRequest)?;
+                    }
+                    if full || next >= total_count {
+                        break total_count;
+                    }
+                };
+                return Ok(RynkLightingReadback::RulesPage(LightingRulesPage {
+                    revision: expected_revision,
+                    total_count,
+                    offset,
+                    count,
+                    rules,
+                }));
             }
             RynkLightingCommand::BeginRuntimeConditionalSceneReplace {
                 expected_revision,
@@ -1467,6 +1570,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     _ => Err(LightingError::InvalidRequest),
                 };
             }
+            #[cfg(feature = "lighting_legacy_conditional_scenes")]
             RynkLightingCommand::PutRuntimeConditionalSceneChunk {
                 transaction_id,
                 offset,
@@ -1486,6 +1590,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 .await?;
                 return Ok(RynkLightingReadback::Unit);
             }
+            #[cfg(feature = "lighting_legacy_conditional_scenes")]
             RynkLightingCommand::PutAdvancedRuntimeConditionalSceneChunk {
                 transaction_id,
                 offset,
@@ -1503,6 +1608,48 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     cells: chunk,
                 })
                 .await?;
+                return Ok(RynkLightingReadback::Unit);
+            }
+            RynkLightingCommand::PutRuleChunk {
+                transaction_id,
+                offset,
+                count,
+                rules,
+            } => {
+                let mut remaining = rules.as_slice();
+                for _ in 0..count {
+                    let (rule, rest) = postcard::take_from_bytes::<LightingRule>(remaining)
+                        .map_err(|_| LightingError::InvalidRequest)?;
+                    Self::runtime_conditional_scene_cell_from_rule(self.topology, rule)?;
+                    remaining = rest;
+                }
+                if !remaining.is_empty() {
+                    return Err(LightingError::InvalidRequest);
+                }
+
+                let mut remaining = rules.as_slice();
+                let mut received = 0_u16;
+                while received < count as u16 {
+                    let chunk_offset = offset.checked_add(received).ok_or(LightingError::InvalidRequest)?;
+                    let mut chunk = RuntimeConditionalSceneChunk::new();
+                    while chunk.as_slice().len() < rmk_types::protocol::rynk::LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE
+                        && received < count as u16
+                    {
+                        let (rule, rest) = postcard::take_from_bytes::<LightingRule>(remaining)
+                            .map_err(|_| LightingError::InvalidRequest)?;
+                        chunk
+                            .push(Self::runtime_conditional_scene_cell_from_rule(self.topology, rule)?)
+                            .map_err(|error| map_standard_error(error, OVERLAY_CAPACITY))?;
+                        remaining = rest;
+                        received += 1;
+                    }
+                    self.request_core_state(StandardCommand::PutRuntimeConditionalSceneChunk {
+                        transaction_id,
+                        offset: chunk_offset,
+                        cells: chunk,
+                    })
+                    .await?;
+                }
                 return Ok(RynkLightingReadback::Unit);
             }
             RynkLightingCommand::CommitRuntimeConditionalSceneReplace { transaction_id } => {
@@ -1707,6 +1854,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         })
     }
 
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     fn runtime_conditional_scene_cell_from_wire(
         &self,
         cell: WireConditionalSceneCell,
@@ -1720,6 +1868,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         })
     }
 
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     fn runtime_conditional_scene_cell_from_extended_wire(
         &self,
         cell: WireAdvancedConditionalSceneCell,
@@ -1752,6 +1901,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         })
     }
 
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     fn runtime_conditional_scene_cell_to_wire(
         &self,
         cell: RuntimeConditionalSceneCell,
@@ -1759,6 +1909,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
         Some(self.runtime_conditional_scene_cell_to_extended_wire(cell)?.cell)
     }
 
+    #[cfg(feature = "lighting_legacy_conditional_scenes")]
     fn runtime_conditional_scene_cell_to_extended_wire(
         &self,
         cell: RuntimeConditionalSceneCell,
@@ -1793,6 +1944,257 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
             }),
         })
     }
+
+    fn runtime_conditional_scene_cell_from_rule(
+        topology: LightingTopology<'_>,
+        rule: LightingRule,
+    ) -> LightingResult<RuntimeConditionalSceneCell> {
+        use rmk_types::protocol::rynk::*;
+
+        rule.validate()?;
+        let slot = topology
+            .slot(LedId(rule.led_id.0))
+            .ok_or(LightingError::UnknownLed { led_id: rule.led_id })?;
+        let mut conditions = crate::lighting::ConditionSet::default();
+        for predicate in &rule.predicates {
+            match predicate.tag {
+                LIGHTING_PREDICATE_LAYER => {
+                    let value: LightingLayerCondition = decode_predicate_body(&predicate.body)?;
+                    conditions.layer = Some(crate::lighting::LayerCondition {
+                        layer: value.layer,
+                        active: value.active,
+                    });
+                }
+                LIGHTING_PREDICATE_BATTERY => {
+                    let value: LightingBatteryCondition = decode_predicate_body(&predicate.body)?;
+                    if value.min_level.is_some_and(|level| level > 100)
+                        || value.max_level.is_some_and(|level| level > 100)
+                        || matches!((value.min_level, value.max_level), (Some(min), Some(max)) if min > max)
+                    {
+                        return Err(LightingError::InvalidRequest);
+                    }
+                    conditions.battery = Some(crate::lighting::BatteryCondition {
+                        node: value.node.0,
+                        min_level: value.min_level,
+                        max_level: value.max_level,
+                        charge: match value.charge {
+                            LightingChargeCondition::Any => crate::lighting::ChargeCondition::Any,
+                            LightingChargeCondition::Charging => crate::lighting::ChargeCondition::Charging,
+                            LightingChargeCondition::Discharging => crate::lighting::ChargeCondition::Discharging,
+                            LightingChargeCondition::Unknown => crate::lighting::ChargeCondition::Unknown,
+                        },
+                    });
+                }
+                LIGHTING_PREDICATE_OUTPUT_MODE => {
+                    let value: LightingOutputMode = decode_predicate_body(&predicate.body)?;
+                    conditions.output_mode = Some(output_mode_from_wire(value));
+                }
+                LIGHTING_PREDICATE_CONNECTION => {
+                    let value: LightingConnectionCondition = decode_predicate_body(&predicate.body)?;
+                    #[cfg(feature = "_ble")]
+                    if value
+                        .profile
+                        .is_some_and(|profile| profile as usize >= crate::NUM_BLE_PROFILE)
+                        || value
+                            .bonded
+                            .is_some_and(|bonded| bonded.slot as usize >= crate::NUM_BLE_PROFILE)
+                    {
+                        return Err(LightingError::InvalidRequest);
+                    }
+                    conditions.connection = Some(connection_condition_from_wire(value));
+                }
+                LIGHTING_PREDICATE_EFFECTS => {
+                    let value: LightingEffectsCondition = decode_predicate_body(&predicate.body)?;
+                    conditions.effects = Some(crate::lighting::EffectsCondition { enabled: value.enabled });
+                }
+                LIGHTING_PREDICATE_LAYERS => {
+                    let value: LightingLayersCondition = decode_predicate_body(&predicate.body)?;
+                    if value.active & value.inactive != 0 {
+                        return Err(LightingError::InvalidRequest);
+                    }
+                    conditions.layers = Some(crate::lighting::LayersCondition {
+                        active: value.active,
+                        inactive: value.inactive,
+                    });
+                }
+                LIGHTING_PREDICATE_INDICATORS => {
+                    let value: LightingIndicatorCondition = decode_predicate_body(&predicate.body)?;
+                    conditions.indicators = Some(crate::lighting::IndicatorCondition {
+                        num_lock: value.num_lock,
+                        caps_lock: value.caps_lock,
+                        scroll_lock: value.scroll_lock,
+                    });
+                }
+                LIGHTING_PREDICATE_MAINTENANCE => {
+                    let value: LightingMaintenanceCondition = decode_predicate_body(&predicate.body)?;
+                    conditions.maintenance = Some(crate::lighting::MaintenanceCondition {
+                        unlocked: value.unlocked,
+                    });
+                }
+                LIGHTING_PREDICATE_SPLIT_TRANSPORT => {
+                    let value: LightingSplitTransportCondition = decode_predicate_body(&predicate.body)?;
+                    conditions.split_transport = Some(crate::lighting::SplitTransportCondition {
+                        link: value.link.map(|link| match link {
+                            LightingSplitLink::Wired => crate::lighting::SplitLink::Wired,
+                            LightingSplitLink::Ble => crate::lighting::SplitLink::Ble,
+                        }),
+                        force: value.force.map(|force| match force {
+                            LightingSplitForce::Auto => crate::lighting::SplitForce::Auto,
+                            LightingSplitForce::Wired => crate::lighting::SplitForce::Wired,
+                            LightingSplitForce::Ble => crate::lighting::SplitForce::Ble,
+                        }),
+                    });
+                }
+                tag => return Err(LightingError::UnknownPredicate { tag }),
+            }
+        }
+        Ok(RuntimeConditionalSceneCell {
+            conditions,
+            slot,
+            effect: effect_from_wire(rule.effect),
+        })
+    }
+
+    fn runtime_conditional_scene_cell_to_rule(&self, cell: RuntimeConditionalSceneCell) -> Option<LightingRule> {
+        use rmk_types::protocol::rynk::*;
+
+        let led = self.topology.led(cell.slot)?;
+        let mut predicates = Vec::new();
+        if let Some(value) = cell.conditions.layer {
+            push_predicate(
+                &mut predicates,
+                LIGHTING_PREDICATE_LAYER,
+                &LightingLayerCondition {
+                    layer: value.layer,
+                    active: value.active,
+                },
+            )?;
+        }
+        if let Some(value) = cell.conditions.battery {
+            push_predicate(
+                &mut predicates,
+                LIGHTING_PREDICATE_BATTERY,
+                &LightingBatteryCondition {
+                    node: LightingNodeId(value.node),
+                    min_level: value.min_level,
+                    max_level: value.max_level,
+                    charge: match value.charge {
+                        crate::lighting::ChargeCondition::Any => LightingChargeCondition::Any,
+                        crate::lighting::ChargeCondition::Charging => LightingChargeCondition::Charging,
+                        crate::lighting::ChargeCondition::Discharging => LightingChargeCondition::Discharging,
+                        crate::lighting::ChargeCondition::Unknown => LightingChargeCondition::Unknown,
+                    },
+                },
+            )?;
+        }
+        if let Some(value) = cell.conditions.output_mode {
+            push_predicate(
+                &mut predicates,
+                LIGHTING_PREDICATE_OUTPUT_MODE,
+                &match value {
+                    OutputMode::AlwaysOn => LightingOutputMode::AlwaysOn,
+                    OutputMode::AlwaysOff => LightingOutputMode::AlwaysOff,
+                    OutputMode::PoweredOnly => LightingOutputMode::PoweredOnly,
+                },
+            )?;
+        }
+        if let Some(value) = cell.conditions.connection {
+            push_predicate(
+                &mut predicates,
+                LIGHTING_PREDICATE_CONNECTION,
+                &connection_condition_to_wire(value),
+            )?;
+        }
+        if let Some(value) = cell.conditions.effects {
+            push_predicate(
+                &mut predicates,
+                LIGHTING_PREDICATE_EFFECTS,
+                &LightingEffectsCondition { enabled: value.enabled },
+            )?;
+        }
+        if let Some(value) = cell.conditions.layers {
+            push_predicate(
+                &mut predicates,
+                LIGHTING_PREDICATE_LAYERS,
+                &LightingLayersCondition {
+                    active: value.active,
+                    inactive: value.inactive,
+                },
+            )?;
+        }
+        if let Some(value) = cell.conditions.indicators {
+            push_predicate(
+                &mut predicates,
+                LIGHTING_PREDICATE_INDICATORS,
+                &LightingIndicatorCondition {
+                    num_lock: value.num_lock,
+                    caps_lock: value.caps_lock,
+                    scroll_lock: value.scroll_lock,
+                },
+            )?;
+        }
+        if let Some(value) = cell.conditions.maintenance {
+            push_predicate(
+                &mut predicates,
+                LIGHTING_PREDICATE_MAINTENANCE,
+                &LightingMaintenanceCondition {
+                    unlocked: value.unlocked,
+                },
+            )?;
+        }
+        if let Some(value) = cell.conditions.split_transport {
+            push_predicate(
+                &mut predicates,
+                LIGHTING_PREDICATE_SPLIT_TRANSPORT,
+                &LightingSplitTransportCondition {
+                    link: value.link.map(|link| match link {
+                        crate::lighting::SplitLink::Wired => LightingSplitLink::Wired,
+                        crate::lighting::SplitLink::Ble => LightingSplitLink::Ble,
+                    }),
+                    force: value.force.map(|force| match force {
+                        crate::lighting::SplitForce::Auto => LightingSplitForce::Auto,
+                        crate::lighting::SplitForce::Wired => LightingSplitForce::Wired,
+                        crate::lighting::SplitForce::Ble => LightingSplitForce::Ble,
+                    }),
+                },
+            )?;
+        }
+        Some(LightingRule {
+            led_id: LightingLedId(led.id.0),
+            effect: effect_to_wire(cell.effect),
+            predicates,
+        })
+    }
+}
+
+fn decode_predicate_body<T>(body: &[u8]) -> LightingResult<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let (value, rest) = postcard::take_from_bytes(body).map_err(|_| LightingError::InvalidRequest)?;
+    if !rest.is_empty() {
+        return Err(LightingError::InvalidRequest);
+    }
+    Ok(value)
+}
+
+fn push_predicate<T>(
+    predicates: &mut Vec<
+        rmk_types::protocol::rynk::LightingPredicate,
+        { rmk_types::protocol::rynk::LIGHTING_RULE_MAX_PREDICATES },
+    >,
+    tag: u8,
+    value: &T,
+) -> Option<()>
+where
+    T: serde::Serialize,
+{
+    let mut scratch = [0; rmk_types::protocol::rynk::LIGHTING_PREDICATE_BODY_MAX];
+    let body = postcard::to_slice(value, &mut scratch).ok()?;
+    let body = Vec::from_slice(body).ok()?;
+    predicates
+        .push(rmk_types::protocol::rynk::LightingPredicate { tag, body })
+        .ok()
 }
 
 /// Install persisted scene configuration into a standard engine at startup,
@@ -1824,6 +2226,7 @@ pub fn install_lighting_scenes<Extension, Status, const N: usize, const OVERLAY_
 }
 
 /// Install the persisted ordered runtime conditional source at startup.
+#[cfg(feature = "lighting_legacy_conditional_scenes")]
 pub fn install_lighting_runtime_conditional_scenes<
     Extension,
     Status,
@@ -1861,6 +2264,18 @@ pub fn install_lighting_runtime_conditional_scenes<
             slot,
             effect: effect_from_wire(cell.cell.effect),
         });
+    }
+}
+
+/// Install one persisted self-describing rule. Invalid rules and LED ids that
+/// no longer exist in the compiled topology are ignored at boot.
+pub fn install_lighting_rule<Extension, Status, const N: usize, const OVERLAY_CAP: usize, const SCENE_CAP: usize>(
+    engine: &mut StandardLightingEngine<'_, Extension, Status, N, OVERLAY_CAP, SCENE_CAP>,
+    topology: LightingTopology<'_>,
+    rule: LightingRule,
+) {
+    if let Ok(cell) = StandardRynkLightingAdapter::<1, 1, 1>::runtime_conditional_scene_cell_from_rule(topology, rule) {
+        let _ = engine.install_runtime_conditional_scene_cell(cell);
     }
 }
 
@@ -2047,6 +2462,8 @@ fn condition_set_from_wire(
         effects: None,
         layers: None,
         indicators: None,
+        maintenance: None,
+        split_transport: None,
         output_mode: conditions.output_mode.map(|mode| match mode {
             rmk_types::protocol::rynk::LightingOutputMode::AlwaysOn => crate::lighting::OutputMode::AlwaysOn,
             rmk_types::protocol::rynk::LightingOutputMode::AlwaysOff => crate::lighting::OutputMode::AlwaysOff,

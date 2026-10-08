@@ -1,6 +1,8 @@
 //! Adapters from authoritative RMK state to lighting snapshots.
 
-use super::{IndicatorState, LayerState, LightingContext, SnapshotProvider};
+#[cfg(feature = "split")]
+use super::SplitForce;
+use super::{IndicatorState, LayerState, LightingContext, SnapshotProvider, SplitTransportState};
 use crate::keymap::KeyMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,7 +59,31 @@ impl SnapshotProvider for KeymapLightingState<'_, '_> {
             local_powered: powered,
             connection,
             bonded_slots: bonded_slots(),
+            maintenance_unlocked: crate::state::maintenance_mode_enabled(),
+            split_transport: split_transport_state(),
         }
+    }
+}
+
+fn split_transport_state() -> SplitTransportState {
+    #[cfg(feature = "split")]
+    {
+        use crate::split::selector;
+
+        let auto = selector::auto_enabled();
+        SplitTransportState {
+            auto,
+            force: match selector::forced_mode() {
+                selector::FORCE_WIRED => SplitForce::Wired,
+                selector::FORCE_BLE => SplitForce::Ble,
+                _ => SplitForce::Auto,
+            },
+            wired: auto && selector::wired_selected(),
+        }
+    }
+    #[cfg(not(feature = "split"))]
+    {
+        SplitTransportState::default()
     }
 }
 
@@ -81,5 +107,45 @@ fn indicator_state() -> IndicatorState {
         scroll_lock: indicator.scroll_lock(),
         compose: indicator.compose(),
         kana: indicator.kana(),
+    }
+}
+
+#[cfg(all(test, feature = "split"))]
+mod tests {
+    use rmk_types::action::KeyAction;
+
+    use super::*;
+    use crate::config::{BehaviorConfig, PositionalConfig};
+    use crate::keymap::KeymapData;
+    use crate::test_support::test_block_on as block_on;
+
+    #[test]
+    fn snapshot_reads_live_maintenance_and_split_transport_state() {
+        let mut behavior = BehaviorConfig::default();
+        let positional: PositionalConfig<1, 1> = PositionalConfig::default();
+        let mut data: KeymapData<1, 1, 1, 0> = KeymapData::new([[[KeyAction::No]]]);
+        let keymap = block_on(KeyMap::new(&mut data, &mut behavior, &positional));
+        let provider = KeymapLightingState::new(&keymap).unwrap();
+
+        crate::state::set_maintenance_mode(false);
+        crate::split::selector::initialize(true);
+        crate::split::selector::set_forced(crate::split::selector::FORCE_BLE);
+        let snapshot = provider.snapshot();
+        assert!(!snapshot.maintenance_unlocked);
+        assert_eq!(
+            snapshot.split_transport,
+            SplitTransportState {
+                auto: true,
+                force: SplitForce::Ble,
+                wired: false,
+            }
+        );
+
+        crate::state::set_maintenance_mode(true);
+        crate::split::selector::set_forced(crate::split::selector::FORCE_WIRED);
+        let snapshot = provider.snapshot();
+        assert!(snapshot.maintenance_unlocked);
+        assert_eq!(snapshot.split_transport.force, SplitForce::Wired);
+        assert!(snapshot.split_transport.wired);
     }
 }

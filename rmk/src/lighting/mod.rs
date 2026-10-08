@@ -24,7 +24,9 @@ pub mod topology;
 
 pub use color::Rgb8;
 pub use compositor::{Compositor, LogicalFrame, RenderError, RenderPolicy, RenderResult, RenderTransaction};
-pub use context::{IndicatorState, LayerState, LightingContext, LightingContextProvider};
+pub use context::{
+    IndicatorState, LayerState, LightingContext, LightingContextProvider, SplitForce, SplitTransportState,
+};
 pub use effect::{BuiltinEffect, EffectSample, LightingEffect};
 pub use output::{
     BrightnessTransform, OutputSelection, RouteError, RoutedFrameSink, RoutedPixel, ValidatedRouting, VisitSummary,
@@ -40,8 +42,8 @@ pub use source::{
     ActiveTransport, BatteryCondition, BatteryStatusProvider, BondedSlotCondition, ChargeCondition, ConditionSet,
     ConditionalSceneCell, ConditionalScenes, ConnectionCondition, DenseSource, EffectsCondition, Indicator,
     IndicatorCondition, IndicatorScene, IndicatorScenes, LayerCondition, LayerPolicy, LayerScene, LayerScenes,
-    LayersCondition, LightingControls, OutputMode, OutputModeIndicator, OverlayError, OverlayUpdate, PoweredOnlyScope,
-    SceneCell, SparseScene, TtlOverlay,
+    LayersCondition, LightingControls, MaintenanceCondition, OutputMode, OutputModeIndicator, OverlayError,
+    OverlayUpdate, PoweredOnlyScope, SceneCell, SparseScene, SplitLink, SplitTransportCondition, TtlOverlay,
 };
 pub use standard::{
     BackgroundMode, BackgroundPatch, BackgroundState, CompiledScenePage, EmptySource, FRAME_CHUNK_SIZE, FramePage,
