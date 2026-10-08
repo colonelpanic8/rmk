@@ -751,6 +751,10 @@ fn expand_split_peripheral_entry(
                 tasks.push(t.clone());
             }
 
+            if let Some(t) = &dfu_task {
+                tasks.push(t.clone());
+            }
+
             let run_rmk_peripheral = join_all_tasks(tasks);
             quote! {
                 #serial_init

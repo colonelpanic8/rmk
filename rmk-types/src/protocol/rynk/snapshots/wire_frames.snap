@@ -55,6 +55,8 @@ GetPeripheralStatus reply Ok(PeripheralStatus{true,Available{Discharging,85}})  
 GetPeripheralStatus request 1                                                   05 04 08 01 01 00
 GetSleepState reply Ok(true)                                                    04 06 08 01 02 01 00
 GetSleepState request ()                                                        04 06 08 01 00
+GetSplitTransport reply Ok(state)                                               04 0a 07 01 04 01 02 01 01 00
+GetSplitTransport request ()                                                    04 0a 07 01 00
 GetVersion reply Ok(CURRENT)                                                    02 01 02 01 01 02 02 00
 GetVersion request ()                                                           02 01 02 01 00
 GetWpm reply Ok(42)                                                             04 05 08 01 02 2a 00
@@ -82,6 +84,8 @@ SetMacro reply Ok(())                                                           
 SetMacro request SetMacroRequest{2,macro}                                       06 02 02 01 02 04 02 01 08 04 03 ac 02 04 61 05 00
 SetMorse reply Ok(())                                                           04 02 04 01 01 00
 SetMorse request SetMorseRequest{0,morse}                                       04 02 04 01 01 04 01 02 01 02 04 00
+SetSplitTransportForce reply Ok(state)                                          04 0b 07 01 05 01 01 01 01 00
+SetSplitTransportForce request Wired                                            05 0b 07 01 01 00
 SleepState topic true                                                           03 04 80 02 01 00
 StorageReset reply Ok(())                                                       02 05 02 01 01 00
 StorageReset request StorageResetMode::Full                                     02 05 02 01 01 00
