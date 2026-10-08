@@ -159,7 +159,11 @@ impl<P: PacketPool> Runnable for BleBatteryServer<'_, '_, '_, P> {
                 return;
             }
             loop {
-                if let BatteryStatus::Available { level: Some(level), .. } = self.sub.next_message_pure().await.0 {
+                let mut state = self.sub.next_message_pure().await;
+                while let Some(newer) = self.sub.try_next_message_pure() {
+                    state = newer;
+                }
+                if let BatteryStatus::Available { level: Some(level), .. } = state.0 {
                     if let Err(e) = self.battery_level.notify(self.conn, &level, true).await {
                         error!("Failed to notify battery level: {:?}", e);
                     } else {
@@ -176,10 +180,11 @@ impl<P: PacketPool> Runnable for BleBatteryServer<'_, '_, '_, P> {
 
         // Report the battery level.
         loop {
-            let battery_status = self.wait_until_battery_status_available().await;
+            let mut state = self.wait_until_battery_status_available().await;
 
-            // Check if there's a newer event, if not, use original battery status event
-            let state = self.sub.try_next_message_pure().unwrap_or(battery_status);
+            while let Some(newer) = self.sub.try_next_message_pure() {
+                state = newer;
+            }
             if let BatteryStatus::Available { level: Some(level), .. } = state.0
                 && let Err(e) = self.battery_level.notify(self.conn, &level, true).await
             {
@@ -308,7 +313,8 @@ impl<P: PacketPool> Runnable for BlePeripheralBatteryServer<'_, '_, '_, P> {
         loop {
             let event = self.sub.next_message_pure().await;
             if let Some(slot) = find_peripheral_battery_slot(&crate::SPLIT_BATTERY_PERIPHERAL_IDS, event.id)
-                && let BatteryStatus::Available { level: Some(level), .. } = event.state.0
+                && let Some(BatteryStatus::Available { level: Some(level), .. }) =
+                    crate::split::driver::current_peripheral_battery_status(event.id)
                 && let Err(e) = self.battery_levels[slot].notify(self.conn, &level, true).await
             {
                 error!("Failed to notify peripheral {} battery level: {:?}", event.id, e);

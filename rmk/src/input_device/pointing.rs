@@ -6,11 +6,14 @@ use embedded_hal_async::digital::Wait;
 use futures::future::pending;
 use rmk_macro::{input_device, processor};
 use rmk_types::keycode::HidKeyCode;
-use usbd_hid::descriptor::MouseReport;
 
+#[cfg(feature = "_ble")]
+use crate::ble::sleep::report_activity;
 use crate::channel::send_hid_report;
-use crate::event::{Axis, AxisEvent, AxisValType, PointingEvent, PointingProcessorEvent, PointingSetCpiEvent};
-use crate::hid::{KeyboardReport, Report};
+use crate::event::{
+    Axis, AxisEvent, AxisValType, PointingEvent, PointingProcessorEvent, PointingSetCpiEvent, SleepStateEvent,
+};
+use crate::hid::{KeyboardReport, MouseReport, Report};
 use crate::keymap::KeyMap;
 
 pub const ALL_POINTING_DEVICES: u8 = 255;
@@ -53,6 +56,12 @@ pub trait PointingDriver {
         debug!("set_resolution() is not implemented for this sensor.");
         Err(PointingDriverError::NotImplementedError)
     }
+    /// Set low-power mode.
+    /// A pointing driver which has low-power mode should re-implement this function.
+    /// This function is called when the keyboard goes idle(sleep).
+    async fn set_low_power(&mut self, _enabled: bool) -> Result<(), PointingDriverError> {
+        Ok(())
+    }
 }
 
 /// Initialization state for the device
@@ -67,7 +76,7 @@ pub enum InitState {
 /// PointingDevice an InputDevice for RMK
 ///
 /// This device publishes `PointingEvent` events with relative X/Y movement.
-#[processor(subscribe = [PointingSetCpiEvent])]
+#[processor(subscribe = [PointingSetCpiEvent, SleepStateEvent])]
 #[input_device(publish = PointingEvent)]
 pub struct PointingDevice<S: PointingDriver> {
     pub sensor: S,
@@ -184,6 +193,17 @@ impl<S: PointingDriver> PointingDevice<S> {
         }
     }
 
+    async fn on_sleep_state_event(&mut self, e: SleepStateEvent) {
+        // Before init the sensor has no registers to update; init applies the
+        // awake state itself.
+        if self.init_state != InitState::Ready {
+            return;
+        }
+        if let Err(err) = self.sensor.set_low_power(e.0).await {
+            debug!("PointingDevice {}: low power switch failed: {:?}", self.id, err);
+        }
+    }
+
     // Read accumulated pointing event
     //
     // +--------------- loop ---------------+
@@ -283,6 +303,12 @@ pub struct CursorConfig {
     pub multiplier_x: u8,
     /// Multiplier for Y axis. Higher = more output per unit of motion. 0 disables Y.
     pub multiplier_y: u8,
+    /// Divisor for X axis, so the cursor can be slower than the sensor, e.g. 2/3 with
+    /// `multiplier_x: 2, divisor_x: 3`. Fractions carry over to the next motion. 0
+    /// disables X.
+    pub divisor_x: u8,
+    /// Divisor for Y axis. 0 disables Y.
+    pub divisor_y: u8,
     /// Invert X axis movement.
     pub invert_x: bool,
     /// Invert Y axis movement.
@@ -294,6 +320,8 @@ impl Default for CursorConfig {
         Self {
             multiplier_x: 1,
             multiplier_y: 1,
+            divisor_x: 1,
+            divisor_y: 1,
             invert_x: false,
             invert_y: false,
         }
@@ -395,7 +423,20 @@ impl Default for SniperConfig {
     }
 }
 
-/// Accumulator for sub-unit motion deltas (used in Scroll and Sniper modes)
+/// `d * multiplier / divisor`, saturating, with `remainder` carrying the fraction
+/// to the next call. A divisor of 0 disables the axis.
+fn scale_motion(d: i16, multiplier: u8, divisor: u8, remainder: &mut i16) -> i16 {
+    if divisor == 0 {
+        *remainder = 0;
+        return 0;
+    }
+    let total = i32::from(d) * i32::from(multiplier) + i32::from(*remainder);
+    let out = total / i32::from(divisor);
+    *remainder = (total - out * i32::from(divisor)) as i16;
+    out.clamp(i16::MIN.into(), i16::MAX.into()) as i16
+}
+
+/// Accumulator for sub-unit motion deltas (used in Cursor, Scroll and Sniper modes)
 ///
 /// When dividing motion by a divisor, small movements would be lost.
 /// The accumulator keeps track of the remainder so sub-unit deltas
@@ -476,6 +517,39 @@ impl MotionAccumulator {
     }
 }
 
+/// Pointer acceleration for cursor or scroll mode. Motion faster than `from_counts_per_s` is
+/// scaled up in proportion to its speed, to at most `max_percent`; slower motion
+/// passes unchanged, so fine positioning keeps its precision while fast moves cover
+/// more ground.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct PointerAcceleration {
+    /// Speed where acceleration starts, in sensor counts per second.
+    pub from_counts_per_s: u16,
+    /// The most motion is scaled up, in percent (250 = 2.5×).
+    pub max_percent: u16,
+}
+
+/// `(dx, dy)`, moved over `dt_ms`, under `accel`. `rest` carries the fractions of a
+/// count between calls.
+fn accelerate(dx: i16, dy: i16, dt_ms: u64, accel: PointerAcceleration, rest: &mut (i64, i64)) -> (i16, i16) {
+    let (dx, dy) = (i64::from(dx), i64::from(dy));
+    let speed = (dx * dx + dy * dy).unsigned_abs().isqrt() * 1000 / dt_ms.max(1);
+    let from = u64::from(accel.from_counts_per_s);
+    let gain = if from == 0 || speed <= from {
+        100
+    } else {
+        (speed * 100 / from).min(u64::from(accel.max_percent.max(100))) as i64
+    };
+    let scale = |d: i64, rest: &mut i64| {
+        let total = d * gain + *rest;
+        let out = total / 100;
+        *rest = total - out * 100;
+        out.clamp(i16::MIN.into(), i16::MAX.into()) as i16
+    };
+    (scale(dx, &mut rest.0), scale(dy, &mut rest.1))
+}
+
 #[derive(Clone)]
 pub struct PointingProcessorConfig {
     /// The id of the PointingDevice this processor handles.
@@ -487,6 +561,11 @@ pub struct PointingProcessorConfig {
     pub invert_y: bool,
     /// Swap X and Y axes (applied to all modes before mode-specific processing)
     pub swap_xy: bool,
+    /// Acceleration in cursor mode, applied before the cursor multiplier. Off when `None`.
+    pub acceleration: Option<PointerAcceleration>,
+    /// Acceleration in scroll mode, applied before the scroll multipliers and divisors.
+    /// Off when `None`.
+    pub scroll_acceleration: Option<PointerAcceleration>,
 }
 
 impl Default for PointingProcessorConfig {
@@ -496,6 +575,8 @@ impl Default for PointingProcessorConfig {
             invert_x: false,
             invert_y: false,
             swap_xy: false,
+            acceleration: None,
+            scroll_acceleration: None,
         }
     }
 }
@@ -510,6 +591,12 @@ pub struct PointingProcessor<'a> {
     accumulator: MotionAccumulator,
     /// current active mode
     current_mode: PointingMode,
+    /// Fractions of a count that acceleration carries to the next event, for the
+    /// cursor and for scrolling
+    acceleration_rest: (i64, i64),
+    scroll_acceleration_rest: (i64, i64),
+    /// When the previous event arrived, to measure the speed for acceleration
+    last_event_at: Instant,
 }
 
 impl<'a> PointingProcessor<'a> {
@@ -520,6 +607,9 @@ impl<'a> PointingProcessor<'a> {
             config,
             accumulator: MotionAccumulator::default(),
             current_mode: PointingMode::default(),
+            acceleration_rest: (0, 0),
+            scroll_acceleration_rest: (0, 0),
+            last_event_at: Instant::MIN,
         }
     }
 
@@ -535,6 +625,11 @@ impl<'a> PointingProcessor<'a> {
         if self.config.device_id != ALL_POINTING_DEVICES && event.device_id != self.config.device_id {
             return;
         }
+
+        // Report activity for sleep management, as the keyboard does for key
+        // events: on a pointing device, moving the ball is the activity.
+        #[cfg(feature = "_ble")]
+        report_activity();
 
         let mut x = 0i16;
         let mut y = 0i16;
@@ -561,25 +656,50 @@ impl<'a> PointingProcessor<'a> {
             (x, y) = (y, x);
         }
 
+        let now = Instant::now();
+        let dt_ms = now.saturating_duration_since(self.last_event_at).as_millis();
+        self.last_event_at = now;
+
         let buttons = self.keymap.mouse_buttons();
         match self.current_mode {
             PointingMode::Cursor(_) | PointingMode::Scroll(_) | PointingMode::Sniper(_) => {
                 // modes that generate mouse reports
                 let mouse_report = match self.current_mode {
                     PointingMode::Cursor(cursor_config) => {
-                        let out_x = x.saturating_mul(cursor_config.multiplier_x as i16);
-                        let out_y = y.saturating_mul(cursor_config.multiplier_y as i16);
+                        if let Some(acceleration) = self.config.acceleration {
+                            (x, y) = accelerate(x, y, dt_ms, acceleration, &mut self.acceleration_rest);
+                        }
+                        let accumulator = &mut self.accumulator;
+                        let out_x = scale_motion(
+                            x,
+                            cursor_config.multiplier_x,
+                            cursor_config.divisor_x,
+                            &mut accumulator.remainder_x,
+                        );
+                        let out_y = scale_motion(
+                            y,
+                            cursor_config.multiplier_y,
+                            cursor_config.divisor_y,
+                            &mut accumulator.remainder_y,
+                        );
+                        // Motion too small to move the cursor yet, as in sniper mode.
+                        if out_x == 0 && out_y == 0 && (x, y) != (0, 0) {
+                            return;
+                        }
                         let out_x = if cursor_config.invert_x { -out_x } else { out_x };
                         let out_y = if cursor_config.invert_y { -out_y } else { out_y };
                         MouseReport {
                             buttons,
-                            x: out_x.clamp(i8::MIN as i16, i8::MAX as i16) as i8,
-                            y: out_y.clamp(i8::MIN as i16, i8::MAX as i16) as i8,
+                            x: out_x,
+                            y: out_y,
                             wheel: 0,
                             pan: 0,
                         }
                     }
                     PointingMode::Scroll(scroll_config) => {
+                        if let Some(acceleration) = self.config.scroll_acceleration {
+                            (x, y) = accelerate(x, y, dt_ms, acceleration, &mut self.scroll_acceleration_rest);
+                        }
                         let (sx, sy) = self.accumulator.accumulate(
                             x,
                             y,
@@ -598,8 +718,8 @@ impl<'a> PointingProcessor<'a> {
                             buttons,
                             x: 0,
                             y: 0,
-                            wheel: wheel.clamp(i8::MIN as i16, i8::MAX as i16) as i8,
-                            pan: pan.clamp(i8::MIN as i16, i8::MAX as i16) as i8,
+                            wheel,
+                            pan,
                         }
                     }
                     PointingMode::Sniper(sniper_config) => {
@@ -616,8 +736,8 @@ impl<'a> PointingProcessor<'a> {
                         let out_y = if sniper_config.invert_y { -sy } else { sy };
                         MouseReport {
                             buttons,
-                            x: out_x.clamp(i8::MIN as i16, i8::MAX as i16) as i8,
-                            y: out_y.clamp(i8::MIN as i16, i8::MAX as i16) as i8,
+                            x: out_x,
+                            y: out_y,
                             wheel: 0,
                             pan: 0,
                         }
@@ -1453,6 +1573,7 @@ mod tests {
             multiplier_y: 3,
             invert_x: false,
             invert_y: false,
+            ..CursorConfig::default()
         };
         assert_eq!(10 * config.multiplier_x as i16, 20);
         assert_eq!(10 * config.multiplier_y as i16, 30);
@@ -1465,9 +1586,77 @@ mod tests {
             multiplier_y: 1,
             invert_x: true,
             invert_y: true,
+            ..CursorConfig::default()
         };
         assert_eq!(-(10 * config.multiplier_x as i16), -10);
         assert_eq!(-(10 * config.multiplier_y as i16), -10);
+    }
+
+    // === Cursor speed ===
+
+    #[test]
+    fn test_cursor_speed_scales_with_fractions_carried_over() {
+        let mut rest = 0;
+        // 8/27 of 10 is 2.96: 2, then 2.96 + 0.96 = 3.92: 3.
+        assert_eq!(scale_motion(10, 8, 27, &mut rest), 2);
+        assert_eq!(scale_motion(10, 8, 27, &mut rest), 3);
+        // Negative motion carries its own fraction the other way.
+        let mut rest = 0;
+        assert_eq!(scale_motion(-10, 8, 27, &mut rest), -2);
+        // 1/1 passes motion through unchanged, and a divisor of 0 stops the axis.
+        assert_eq!(scale_motion(7, 1, 1, &mut 0), 7);
+        assert_eq!(scale_motion(7, 1, 0, &mut 0), 0);
+        // Large accelerated motion saturates instead of overflowing.
+        assert_eq!(scale_motion(i16::MAX, 8, 1, &mut 0), i16::MAX);
+    }
+
+    // === Acceleration tests ===
+
+    /// From 1000 counts per second, up to 2.5×.
+    const ACCEL: PointerAcceleration = PointerAcceleration {
+        from_counts_per_s: 1000,
+        max_percent: 250,
+    };
+
+    #[test]
+    fn test_acceleration_leaves_slow_motion_unchanged() {
+        let mut rest = (0, 0);
+        // 5 counts in 10 ms is 500 counts/s, below 1000.
+        assert_eq!(accelerate(5, -3, 10, ACCEL, &mut rest), (5, -3));
+        assert_eq!(rest, (0, 0));
+    }
+
+    #[test]
+    fn test_acceleration_gains_in_proportion_to_speed_up_to_max() {
+        let mut rest = (0, 0);
+        // 2000 counts/s: twice the threshold, twice the motion.
+        assert_eq!(accelerate(20, 0, 10, ACCEL, &mut rest), (40, 0));
+        // 10000 counts/s would be 10×, capped at 2.5×.
+        assert_eq!(accelerate(100, 0, 10, ACCEL, &mut rest), (250, 0));
+    }
+
+    #[test]
+    fn test_acceleration_carries_fractions_over() {
+        let mut rest = (0, 0);
+        // 1500 counts/s: 1.5 × 15 = 22.5, then 22.5 + 0.5 left over = 23.
+        assert_eq!(accelerate(15, 0, 10, ACCEL, &mut rest), (22, 0));
+        assert_eq!(accelerate(15, 0, 10, ACCEL, &mut rest), (23, 0));
+    }
+
+    #[test]
+    fn test_acceleration_after_idle_is_slow() {
+        let mut rest = (0, 0);
+        // The first event after a pause spans the whole pause, so it is not accelerated.
+        assert_eq!(accelerate(30, 0, 5000, ACCEL, &mut rest), (30, 0));
+    }
+
+    #[test]
+    fn test_acceleration_saturates_instead_of_overflowing() {
+        let mut rest = (0, 0);
+        assert_eq!(
+            accelerate(i16::MAX, i16::MIN, 1, ACCEL, &mut rest),
+            (i16::MAX, i16::MIN)
+        );
     }
 
     // === Integration tests for PointingProcessor ===
@@ -1781,18 +1970,6 @@ mod tests {
         assert_eq!(sy, 0);
         assert_eq!(acc.remainder_x, -1);
         assert_eq!(acc.remainder_y, 0);
-    }
-
-    #[test]
-    fn test_pointing_layer_mode_bounds_checking() {
-        // Test that modes array is correctly sized
-        let modes: [PointingMode; 8] = [PointingMode::default(); 8];
-        assert_eq!(modes.len(), 8);
-
-        // Verify all default to Cursor
-        for mode in &modes {
-            assert_eq!(*mode, PointingMode::Cursor(CursorConfig::default()));
-        }
     }
 
     #[test]

@@ -25,7 +25,7 @@ rows = 2
 cols = 2
 "#;
 
-fn write_temp_keyboard_toml(name: &str, extra_toml: &str) -> std::path::PathBuf {
+fn write_temp_keyboard_toml(name: &str, content: &str) -> std::path::PathBuf {
     let path = std::env::temp_dir().join(format!(
         "rmk-{name}-{}-{}.toml",
         std::process::id(),
@@ -34,7 +34,7 @@ fn write_temp_keyboard_toml(name: &str, extra_toml: &str) -> std::path::PathBuf 
             .unwrap()
             .as_nanos()
     ));
-    std::fs::write(&path, format!("{MINIMAL_KEYBOARD_TOML}\n{extra_toml}")).unwrap();
+    std::fs::write(&path, content).unwrap();
     path
 }
 
@@ -96,10 +96,13 @@ fn all_use_config_examples_resolve() {
 fn host_unlock_keys_reject_too_many_entries() {
     let path = write_temp_keyboard_toml(
         "host-unlock-too-many",
-        r#"
+        &format!(
+            "{MINIMAL_KEYBOARD_TOML}\n{}",
+            r#"
 [host]
 unlock_keys = [[0, 0], [0, 1], [1, 0], [1, 1], [0, 0]]
-"#,
+"#
+        ),
     );
     let config = KeyboardTomlConfig::new_from_toml_path(&path);
 
@@ -122,10 +125,13 @@ unlock_keys = [[0, 0], [0, 1], [1, 0], [1, 1], [0, 0]]
 fn dfu_unlock_keys_reject_too_many_entries() {
     let path = write_temp_keyboard_toml(
         "dfu-unlock-too-many",
-        r#"
+        &format!(
+            "{MINIMAL_KEYBOARD_TOML}\n{}",
+            r#"
 [dfu]
 unlock_keys = [[0, 0], [0, 1], [1, 0], [1, 1], [0, 0]]
-"#,
+"#
+        ),
     );
     let config = KeyboardTomlConfig::new_from_toml_path(&path);
     let result = config.hardware();
@@ -144,10 +150,13 @@ unlock_keys = [[0, 0], [0, 1], [1, 0], [1, 1], [0, 0]]
 fn dfu_unlock_keys_reject_positions_outside_layout() {
     let path = write_temp_keyboard_toml(
         "dfu-unlock-outside-layout",
-        r#"
+        &format!(
+            "{MINIMAL_KEYBOARD_TOML}\n{}",
+            r#"
 [dfu]
 unlock_keys = [[0, 0], [2, 0]]
-"#,
+"#
+        ),
     );
     let config = KeyboardTomlConfig::new_from_toml_path(&path);
     let result = config.hardware();
@@ -160,6 +169,89 @@ unlock_keys = [[0, 0], [2, 0]]
         msg.contains("[dfu].unlock_keys position (2, 0)") && msg.contains("outside the 2x2 matrix"),
         "unexpected error: {msg}"
     );
+}
+
+#[test]
+fn battery_adc_rejects_zero_divider_total() {
+    let path = write_temp_keyboard_toml(
+        "battery-zero-divider-total",
+        &format!(
+            r#"{}
+[battery]
+battery_adc_pin = "P0_02"
+adc_divider_total = 0
+"#,
+            MINIMAL_KEYBOARD_TOML.replace("rp2040", "nrf52840")
+        ),
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+    let result = config.hardware();
+    std::fs::remove_file(path).ok();
+
+    let Err(msg) = result else {
+        panic!("zero battery ADC divider total must fail hardware resolution");
+    };
+    assert!(
+        msg.contains("adc_divider_total") && msg.contains("greater than zero"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn split_keyboard_on_board_with_default_battery_resolves() {
+    let path = write_temp_keyboard_toml(
+        "split-board-battery",
+        r#"
+[keyboard]
+name = "RMK Test"
+vendor_id = 0x4c4b
+product_id = 0x4643
+board = "nice!nano_v2"
+
+[layout]
+rows = 1
+cols = 2
+
+[split]
+connection = "ble"
+
+[split.central]
+rows = 1
+cols = 1
+row_offset = 0
+col_offset = 0
+[split.central.battery]
+battery_adc_pin = "P0_05"
+[split.central.matrix]
+matrix_type = "normal"
+row_pins = ["P0_02"]
+col_pins = ["P0_03"]
+
+[[split.peripheral]]
+rows = 1
+cols = 1
+row_offset = 0
+col_offset = 1
+[split.peripheral.matrix]
+matrix_type = "normal"
+row_pins = ["P0_02"]
+col_pins = ["P0_03"]
+"#,
+    );
+    let configs = [
+        KeyboardTomlConfig::new_from_toml_path(&path),
+        KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path),
+    ];
+    std::fs::remove_file(path).unwrap();
+
+    for config in configs {
+        let central = config.resolve_battery_config(None).unwrap();
+        assert_eq!(central.battery_adc_pin.as_deref(), Some("P0_05"));
+        let peripheral = config.resolve_battery_config(Some(0)).unwrap();
+        assert_eq!(peripheral.battery_adc_pin.as_deref(), Some("vddh"));
+        let constants = config.build_constants(&["split", "_ble"]).unwrap();
+        assert_eq!(constants.split_battery_peripheral_ids, [0]);
+    }
 }
 
 /// Unknown keys in the sections users edit most must be rejected, not
@@ -202,7 +294,9 @@ fn unknown_keys_are_rejected() {
 fn alias_keys_reject_delimiter_characters() {
     let path = write_temp_keyboard_toml(
         "alias-bad-key",
-        r#"
+        &format!(
+            "{MINIMAL_KEYBOARD_TOML}\n{}",
+            r#"
 [aliases]
 "bad(name" = "A"
 
@@ -210,7 +304,8 @@ fn alias_keys_reject_delimiter_characters() {
 
 [[keymap.layer]]
 keys = "A A A A"
-"#,
+"#
+        ),
     );
     let config = KeyboardTomlConfig::new_from_toml_path(&path);
     let result = config.keymap();
@@ -243,7 +338,7 @@ fn dfu_storage_conflict_reports_explicit_storage_keys() {
         ),
     ];
     for (name, extra, expect_start, expect_sectors) in cases {
-        let path = write_temp_keyboard_toml(name, extra);
+        let path = write_temp_keyboard_toml(name, &format!("{MINIMAL_KEYBOARD_TOML}\n{}", extra));
         let config = KeyboardTomlConfig::new_from_toml_path(&path);
         std::fs::remove_file(path).ok();
 
@@ -266,10 +361,269 @@ fn dfu_storage_conflict_absent_without_user_storage() {
         ("storage-only", "[storage]\nstart_addr = 0x100000\nnum_sectors = 8\n"),
     ];
     for (name, extra) in cases {
-        let path = write_temp_keyboard_toml(name, extra);
+        let path = write_temp_keyboard_toml(name, &format!("{MINIMAL_KEYBOARD_TOML}\n{}", extra));
         let config = KeyboardTomlConfig::new_from_toml_path(&path);
         std::fs::remove_file(path).ok();
 
         assert!(config.dfu_storage_conflict().is_none(), "{name}: expected no conflict");
+    }
+}
+
+#[test]
+fn split_side_dfu_replaces_global_per_side() {
+    let path = write_temp_keyboard_toml(
+        "split-side-dfu",
+        &format!(
+            "{MINIMAL_KEYBOARD_TOML}\n{}",
+            r#"
+[split]
+connection = "serial"
+
+[split.central]
+rows = 1
+cols = 2
+row_offset = 0
+col_offset = 0
+[split.central.matrix]
+matrix_type = "normal"
+row_pins = ["PIN_0"]
+col_pins = ["PIN_1"]
+
+[[split.peripheral]]
+rows = 1
+cols = 1
+row_offset = 1
+col_offset = 2
+[split.peripheral.matrix]
+matrix_type = "normal"
+row_pins = ["PIN_2"]
+col_pins = ["PIN_3"]
+
+[dfu]
+led = "PIN_4"
+[dfu.external_flash]
+driver = "w25q"
+flash_size = 8388608
+spi = { instance = "SPI0", sck = "PIN_5", mosi = "PIN_6", miso = "PIN_7", cs = "PIN_8" }
+
+[split.peripheral.dfu]
+led = "PIN_9"
+"#
+        ),
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+    std::fs::remove_file(path).ok();
+
+    // Central: global [dfu] with external flash.
+    let central = config.split_side_dfu(None).unwrap().unwrap();
+    assert_eq!(central.led.map(|l| l.pin), Some("PIN_4".into()));
+    assert!(
+        central.external_flash.is_some(),
+        "central should keep the external flash"
+    );
+
+    // Peripheral: own section completely replaces the global one.
+    let peripheral = config.split_side_dfu(Some(0)).unwrap().unwrap();
+    assert_eq!(peripheral.led.map(|l| l.pin), Some("PIN_9".into()));
+    assert!(
+        peripheral.external_flash.is_none(),
+        "peripheral's own [split.peripheral.dfu] must drop the external flash"
+    );
+}
+
+#[test]
+fn split_side_dfu_falls_back_to_global() {
+    let path = write_temp_keyboard_toml(
+        "split-side-dfu-fallback",
+        &format!(
+            "{MINIMAL_KEYBOARD_TOML}\n{}",
+            r#"
+[split]
+connection = "serial"
+
+[split.central]
+rows = 1
+cols = 2
+row_offset = 0
+col_offset = 0
+[split.central.matrix]
+matrix_type = "normal"
+row_pins = ["PIN_0"]
+col_pins = ["PIN_1"]
+
+[[split.peripheral]]
+rows = 1
+cols = 1
+row_offset = 1
+col_offset = 2
+[split.peripheral.matrix]
+matrix_type = "normal"
+row_pins = ["PIN_2"]
+col_pins = ["PIN_3"]
+
+[dfu]
+led = "PIN_4"
+"#
+        ),
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+    std::fs::remove_file(path).ok();
+
+    // No per-side section: both sides use the global [dfu].
+    let central = config.split_side_dfu(None).unwrap().unwrap();
+    let peripheral = config.split_side_dfu(Some(0)).unwrap().unwrap();
+    assert_eq!(central.led.map(|l| l.pin), Some("PIN_4".into()));
+    assert_eq!(peripheral.led.map(|l| l.pin), Some("PIN_4".into()));
+}
+
+#[test]
+fn split_central_dfu_replaces_global_for_central_only() {
+    let path = write_temp_keyboard_toml(
+        "split-central-dfu",
+        &format!(
+            "{MINIMAL_KEYBOARD_TOML}\n{}",
+            r#"
+[split]
+connection = "serial"
+
+[split.central]
+rows = 1
+cols = 2
+row_offset = 0
+col_offset = 0
+[split.central.matrix]
+matrix_type = "normal"
+row_pins = ["PIN_0"]
+col_pins = ["PIN_1"]
+
+[[split.peripheral]]
+rows = 1
+cols = 1
+row_offset = 1
+col_offset = 2
+[split.peripheral.matrix]
+matrix_type = "normal"
+row_pins = ["PIN_2"]
+col_pins = ["PIN_3"]
+
+[dfu]
+led = "PIN_4"
+[dfu.external_flash]
+driver = "w25q"
+flash_size = 8388608
+spi = { instance = "SPI0", sck = "PIN_5", mosi = "PIN_6", miso = "PIN_7", cs = "PIN_8" }
+
+[split.central.dfu]
+led = "PIN_9"
+"#
+        ),
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+    std::fs::remove_file(path).ok();
+
+    // Central: own [split.central.dfu] completely replaces the global one.
+    let central = config.split_side_dfu(None).unwrap().unwrap();
+    assert_eq!(central.led.map(|l| l.pin), Some("PIN_9".into()));
+    assert!(
+        central.external_flash.is_none(),
+        "central's own [split.central.dfu] must drop the external flash"
+    );
+
+    // Peripheral: no own section, falls back to the global [dfu].
+    let peripheral = config.split_side_dfu(Some(0)).unwrap().unwrap();
+    assert_eq!(peripheral.led.map(|l| l.pin), Some("PIN_4".into()));
+    assert!(
+        peripheral.external_flash.is_some(),
+        "peripheral should keep the global external flash"
+    );
+}
+
+#[test]
+fn split_boards_take_their_own_charger_pins() {
+    let path = write_temp_keyboard_toml(
+        "split-charge-state",
+        r#"
+[keyboard]
+name = "Battery test"
+vendor_id = 1
+product_id = 1
+chip = "nrf52840"
+[layout]
+rows = 1
+cols = 2
+[ble]
+enabled = true
+[split]
+connection = "ble"
+[split.central]
+rows = 1
+cols = 1
+row_offset = 0
+col_offset = 0
+matrix = { row_pins = ["P0_01"], col_pins = ["P0_02"] }
+[split.central.battery]
+charge_state = { pin = "P1_08", low_active = true }
+charge_led = { pin = "P0_13", low_active = false }
+[[split.peripheral]]
+rows = 1
+cols = 1
+row_offset = 0
+col_offset = 1
+matrix = { row_pins = ["P0_01"], col_pins = ["P0_02"] }
+[split.peripheral.battery]
+charge_state = { pin = "P0_07", low_active = false }
+charge_led = { pin = "P0_14", low_active = true }
+"#,
+    );
+    let hardware = KeyboardTomlConfig::new_from_toml_path(&path).hardware();
+    std::fs::remove_file(path).ok();
+    let hardware = hardware.unwrap();
+
+    for (battery, state_pin, state_low, led_pin, led_low) in [
+        (&hardware.battery, "P1_08", true, "P0_13", false),
+        (&hardware.peripheral_batteries[0], "P0_07", false, "P0_14", true),
+    ] {
+        let state = battery.charge_state.as_ref().unwrap();
+        let led = battery.charge_led.as_ref().unwrap();
+        assert_eq!((state.pin.as_str(), state.low_active), (state_pin, state_low));
+        assert_eq!((led.pin.as_str(), led.low_active), (led_pin, led_low));
+    }
+}
+
+#[test]
+fn charge_led_requires_a_local_battery_source() {
+    let path = write_temp_keyboard_toml(
+        "led-without-source",
+        &format!(
+            r#"{}
+[battery]
+charge_led = {{ pin = "P0_21", low_active = false }}
+"#,
+            MINIMAL_KEYBOARD_TOML.replace("rp2040", "nrf52840")
+        ),
+    );
+    let result = KeyboardTomlConfig::new_from_toml_path(&path).hardware();
+    std::fs::remove_file(path).ok();
+    assert!(
+        result
+            .err()
+            .unwrap()
+            .contains("charge_led requires battery_adc_pin or charge_state")
+    );
+}
+
+#[test]
+fn incomplete_or_ambiguous_battery_tables_are_rejected() {
+    for table in [
+        "adc_divider_total = 2",
+        "charge_led = { pin = \"PIN_5\", low_active = true }",
+        "battery_adc_pin = \"vddh\"",
+    ] {
+        let path = write_temp_keyboard_toml(
+            "bad-battery-table",
+            &format!("{MINIMAL_KEYBOARD_TOML}\n[battery]\n{table}"),
+        );
+        assert!(KeyboardTomlConfig::new_from_toml_path(&path).hardware().is_err());
+        std::fs::remove_file(path).ok();
     }
 }

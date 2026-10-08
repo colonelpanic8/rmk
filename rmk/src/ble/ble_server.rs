@@ -1,3 +1,6 @@
+#[cfg(all(feature = "dongle", feature = "custom_message"))]
+use postcard::experimental::max_size::MaxSize;
+use rmk_types::battery::BatteryStatus;
 use trouble_host::prelude::*;
 use usbd_hid::descriptor::{AsInputReport, SerializedDescriptor};
 
@@ -5,13 +8,15 @@ use super::battery_service::BatteryService;
 #[cfg(feature = "split")]
 use super::battery_service::PeripheralBatteryServices;
 use super::device_info::DeviceConfigurationService;
-#[cfg(all(feature = "dongle", feature = "host"))]
+#[cfg(all(feature = "dongle", feature = "custom_message"))]
+use crate::dongle::event::{CUSTOM_TO_DONGLE_UUID, CUSTOM_TO_KEYBOARD_UUID};
+#[cfg(feature = "dongle")]
 use crate::dongle::event::{DONGLE_EVENT_CHAR_UUID, DONGLE_EVENT_MAX, DONGLE_EVENT_SERVICE_UUID};
 #[cfg(feature = "rynk")]
 use crate::hid::RynkHidReport;
 #[cfg(feature = "vial")]
 use crate::hid::ViaReport;
-use crate::hid::{BleCompositeReport, CompositeReportType, HidError, HidWriterTrait, Report};
+use crate::hid::{BleCompositeReport, CompositeReportType, HidError, HidWriterTrait, MOUSE_REPORT_SIZE, Report};
 
 // Used for saving the client attribute (CCCD) table. Tracks the trouble-host
 // per-connection client-specific attribute buffer size.
@@ -37,16 +42,57 @@ pub(crate) struct Server {
     #[cfg(feature = "rynk")]
     pub(crate) rynk_hid_service: RynkHidService,
     pub(crate) device_config_service: DeviceConfigurationService,
-    #[cfg(all(feature = "dongle", feature = "host"))]
+    #[cfg(feature = "dongle")]
     pub(crate) dongle_event_service: DongleEventService,
 }
 
+impl Server<'_> {
+    pub(crate) fn refresh_battery_level(&self, handle: u16) {
+        let (attribute, status) = if handle == self.battery_service.level.handle {
+            (
+                self.battery_service.level,
+                crate::input_device::battery::current_battery_status(),
+            )
+        } else {
+            #[cfg(feature = "split")]
+            {
+                let Some(slot) = self
+                    .peripheral_battery_services
+                    .levels
+                    .iter()
+                    .position(|level| level.handle == handle)
+                else {
+                    return;
+                };
+                (
+                    self.peripheral_battery_services.levels[slot],
+                    crate::split::driver::current_peripheral_battery_status(crate::SPLIT_BATTERY_PERIPHERAL_IDS[slot])
+                        .unwrap_or(BatteryStatus::Unavailable),
+                )
+            }
+            #[cfg(not(feature = "split"))]
+            return;
+        };
+        if let BatteryStatus::Available { level: Some(level), .. } = status
+            && let Err(e) = self.set(&attribute, &level)
+        {
+            warn!("Failed to refresh battery level: {:?}", e);
+        }
+    }
+}
+
 /// One postcard-encoded [`crate::dongle::event::DongleEvent`] per notification.
-#[cfg(all(feature = "dongle", feature = "host"))]
+#[cfg(feature = "dongle")]
 #[gatt_service(uuid = DONGLE_EVENT_SERVICE_UUID)]
 pub(crate) struct DongleEventService {
     #[characteristic(uuid = DONGLE_EVENT_CHAR_UUID, notify, permissions(encrypted))]
     pub(crate) event: heapless::Vec<u8, DONGLE_EVENT_MAX>,
+    #[cfg(feature = "custom_message")]
+    #[characteristic(uuid = CUSTOM_TO_DONGLE_UUID, notify, permissions(encrypted))]
+    pub(crate) custom_to_dongle: heapless::Vec<u8, { crate::custom_message::CustomMessage::POSTCARD_MAX_SIZE }>,
+    #[cfg(feature = "custom_message")]
+    #[characteristic(uuid = CUSTOM_TO_KEYBOARD_UUID, write_without_response, permissions(encrypted))]
+    pub(crate) custom_to_keyboard: heapless::Vec<u8, { crate::custom_message::CustomMessage::POSTCARD_MAX_SIZE }>,
 }
 
 /// Rynk-over-GATT transport. The host writes request chunks to `output_data`;
@@ -122,8 +168,8 @@ pub(crate) struct VialGattService {
 pub(crate) struct HidService {
     #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
     pub(crate) hid_info: [u8; 4],
-    #[characteristic(uuid = "2a4b", read, value = BleCompositeReport::desc().try_into().expect("Failed to convert BleCompositeReport to [u8; 178]"))]
-    pub(crate) report_map: [u8; 178],
+    #[characteristic(uuid = "2a4b", read, value = BleCompositeReport::desc().try_into().expect("Failed to convert BleCompositeReport to [u8; 177]"))]
+    pub(crate) report_map: [u8; 177],
     #[characteristic(uuid = "2a4c", write_without_response)]
     pub(crate) hid_control_point: u8,
     #[characteristic(uuid = "2a4e", read, write_without_response, value = 1)]
@@ -136,7 +182,7 @@ pub(crate) struct HidService {
     pub(crate) output_keyboard: [u8; 1],
     #[descriptor(uuid = "2908", read, value = [CompositeReportType::Mouse as u8, 1u8])]
     #[characteristic(uuid = "2a4d", read, notify)]
-    pub(crate) mouse_report: [u8; 5],
+    pub(crate) mouse_report: [u8; MOUSE_REPORT_SIZE],
     #[descriptor(uuid = "2908", read, value = [CompositeReportType::Media as u8, 1u8])]
     #[characteristic(uuid = "2a4d", read, notify)]
     pub(crate) media_report: [u8; 2],
@@ -147,7 +193,7 @@ pub(crate) struct HidService {
 
 pub(crate) struct BleHidServer<'stack, 'server, 'conn, P: PacketPool> {
     input_keyboard: Characteristic<[u8; 8]>,
-    mouse_report: Characteristic<[u8; 5]>,
+    mouse_report: Characteristic<[u8; MOUSE_REPORT_SIZE]>,
     media_report: Characteristic<[u8; 2]>,
     system_report: Characteristic<[u8; 1]>,
     conn: &'conn GattConnection<'stack, 'server, P>,

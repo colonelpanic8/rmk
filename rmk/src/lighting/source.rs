@@ -758,6 +758,7 @@ mod tests {
                 ble: BleStatus {
                     profile: 3,
                     state: BleState::Connected,
+                    bonded: false,
                 },
                 preferred: ConnectionType::Ble,
             },
@@ -883,6 +884,7 @@ mod tests {
                 ble: BleStatus {
                     profile: 2,
                     state: BleState::Advertising,
+                    bonded: false,
                 },
                 preferred: ConnectionType::Usb,
             },

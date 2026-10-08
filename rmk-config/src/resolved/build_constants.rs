@@ -31,12 +31,14 @@ fn default_sub_count() -> usize {
 
 /// Compile-time constants emitted as `pub const` items by `rmk-types/build.rs`.
 pub struct BuildConstants {
+    pub custom_message_max_size: usize,
     pub combo_max_num: usize,
     pub combo_max_length: usize,
     pub fork_max_num: usize,
     pub morse_max_num: usize,
     pub morse_profile_max_num: usize,
     pub max_patterns_per_key: usize,
+    pub macro_max_num: usize,
     pub macro_space_size: usize,
     pub debounce_time: u16,
     pub mouse_key_interval: u16,
@@ -49,10 +51,10 @@ pub struct BuildConstants {
     pub split_battery_peripheral_ids: Vec<usize>,
     pub split_battery_peripheral_user_descriptions: Vec<String>,
     pub ble_profiles_num: usize,
+    pub ble_use_2m_phy: bool,
     pub split_central_sleep_timeout_seconds: u32,
     pub split_central_max_latency_powered: u16,
     pub split_central_max_latency_battery: u16,
-    pub protocol_macro_chunk_size: usize,
     pub auto_mouse_layer_max_num: usize,
     /// Rynk RX/TX buffer size (bytes).
     pub rynk_buffer_size: usize,
@@ -74,6 +76,24 @@ pub struct Passkey {
 }
 
 impl crate::KeyboardTomlConfig {
+    /// PointingDevices on the busiest board: a binary carries one board's devices.
+    fn pointing_device_count(&self) -> usize {
+        fn count(input_device: Option<&crate::InputDeviceConfig>) -> usize {
+            input_device
+                .map(|d| d.pmw3610.as_ref().map_or(0, |v| v.len()) + d.pmw33xx.as_ref().map_or(0, |v| v.len()))
+                .unwrap_or(0)
+        }
+        let boards = self.split.iter().flat_map(|split| {
+            core::iter::once(split.central.input_device.as_ref())
+                .chain(split.peripheral.iter().map(|p| p.input_device.as_ref()))
+        });
+        core::iter::once(self.input_device.as_ref())
+            .chain(boards)
+            .map(count)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Build compile-time constants from the configuration.
     ///
     /// `active_features` contains feature names enabled on the
@@ -88,46 +108,27 @@ impl crate::KeyboardTomlConfig {
         } else {
             rmk.split_peripherals_num
         };
+        let central_battery_user_description = self
+            .resolve_battery_config(None)?
+            .battery_user_description
+            .unwrap_or_else(|| "Central".into());
+        let mut split_battery_peripheral_ids = Vec::new();
+        let mut split_battery_peripheral_user_descriptions = Vec::new();
         if active_features.contains(&"split")
             && let Some(split) = &self.split
         {
-            for (id, peripheral) in split.peripheral.iter().enumerate() {
-                if peripheral.battery_user_description.is_some() && peripheral.battery_adc_pin.is_none() {
-                    return Err(format!(
-                        "keyboard.toml: [[split.peripheral]] at index {id} requires battery_adc_pin when battery_user_description is set"
-                    ));
+            for id in 0..split.peripheral.len() {
+                let battery = self.resolve_battery_config(Some(id))?;
+                if battery.battery_adc_pin.is_some() {
+                    split_battery_peripheral_ids.push(id);
+                    split_battery_peripheral_user_descriptions.push(
+                        battery
+                            .battery_user_description
+                            .unwrap_or_else(|| format!("Peripheral {id}")),
+                    );
                 }
             }
         }
-        let split_battery_peripheral_ids = if active_features.contains(&"split") {
-            match &self.split {
-                Some(split) => split
-                    .peripheral
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(id, peripheral)| peripheral.battery_adc_pin.as_ref().map(|_| id))
-                    .collect(),
-                None => Vec::new(),
-            }
-        } else {
-            Vec::new()
-        };
-        let central_battery_user_description = self
-            .split
-            .as_ref()
-            .and_then(|split| split.central.battery_user_description.clone())
-            .or_else(|| self.ble.as_ref().and_then(|ble| ble.battery_user_description.clone()))
-            .unwrap_or_else(|| "Central".to_string());
-        let split_battery_peripheral_user_descriptions = split_battery_peripheral_ids
-            .iter()
-            .map(|id| {
-                self.split
-                    .as_ref()
-                    .and_then(|split| split.peripheral.get(*id))
-                    .and_then(|peripheral| peripheral.battery_user_description.clone())
-                    .unwrap_or_else(|| format!("Peripheral {id}"))
-            })
-            .collect();
         // Build event channels
         macro_rules! event_channels {
             ($($field:ident),* $(,)?) => {
@@ -161,12 +162,43 @@ impl crate::KeyboardTomlConfig {
             clear_peer,
             dongle_state,
             dfu_status,
+            dfu_cmd,
             action,
+            custom_message,
+            custom_message_out,
         );
 
         // Auto-bump subscriber counts based on enabled feature flags.
         // Declarations live in subscriber_default.toml.
         apply_feature_subscriber_bumps(&mut events, active_features);
+
+        // Each PointingDevice subscribes to the sleep state. Devices built by
+        // hand in Rust are declared under `[event.sleep_state]` instead.
+        let pointing_devices = self.pointing_device_count();
+        if pointing_devices > 0
+            && let Some(event) = events.iter_mut().find(|event| event.name == "sleep_state")
+        {
+            event.subs += pointing_devices;
+        }
+
+        // Every link subscribes to the outgoing queue, so a central needs one
+        // slot per split peripheral on top of its link toward the dongle.
+        if active_features.contains(&"custom_message")
+            && active_features.contains(&"split")
+            && let Some(event) = events.iter_mut().find(|event| event.name == "custom_message_out")
+        {
+            event.subs += split_peripherals_num;
+        }
+
+        // Dynamically size dfu_cmd subscribers: 1 (central) + N (peripherals).
+        // The base count of 1 covers the central; each peripheral adds one.
+        if active_features.contains(&"dfu_split")
+            && let Some(event) = events.iter_mut().find(|e| e.name == "dfu_cmd")
+        {
+            event.subs += split_peripherals_num;
+            event.pubs += 1; // Split-Loop as second publisher (USB-Proxy is first)
+        }
+
         if !split_battery_peripheral_ids.is_empty()
             && active_features.contains(&"split")
             && active_features.contains(&"_ble")
@@ -198,11 +230,11 @@ impl crate::KeyboardTomlConfig {
                 protocol_limits::MAX_MORSE_SIZE
             ));
         }
-        if rmk.protocol_macro_chunk_size > protocol_limits::MAX_MACRO_DATA_SIZE {
+        if rmk.macro_space_size > protocol_limits::MAX_MACRO_SPACE_SIZE {
             return Err(format!(
-                "protocol_macro_chunk_size ({}) exceeds protocol ceiling MAX_MACRO_DATA_SIZE ({})",
-                rmk.protocol_macro_chunk_size,
-                protocol_limits::MAX_MACRO_DATA_SIZE
+                "macro_space_size ({}) exceeds protocol ceiling MAX_MACRO_SPACE_SIZE ({})",
+                rmk.macro_space_size,
+                protocol_limits::MAX_MACRO_SPACE_SIZE
             ));
         }
         let auto_mouse_layer_max_num = rmk
@@ -231,15 +263,18 @@ impl crate::KeyboardTomlConfig {
         validate_u8_capability("morse_max_num", rmk.morse_max_num)?;
         validate_u8_capability("split_peripherals_num", split_peripherals_num)?;
         validate_u8_capability("ble_profiles_num", rmk.ble_profiles_num)?;
+        validate_u8_capability("macro_max_num", rmk.macro_max_num)?;
         validate_u16_capability("macro_space_size", rmk.macro_space_size)?;
         validate_u16_capability("rynk_buffer_size", rmk.rynk_buffer_size)?;
         Ok(BuildConstants {
+            custom_message_max_size: rmk.custom_message_max_size,
             combo_max_num: rmk.combo_max_num,
             combo_max_length: rmk.combo_max_length,
             fork_max_num: rmk.fork_max_num,
             morse_max_num: rmk.morse_max_num,
             morse_profile_max_num: rmk.morse_profile_max_num,
             max_patterns_per_key: rmk.max_patterns_per_key,
+            macro_max_num: rmk.macro_max_num,
             macro_space_size: rmk.macro_space_size,
             debounce_time: rmk.debounce_time,
             mouse_key_interval: rmk.mouse_key_interval,
@@ -252,10 +287,10 @@ impl crate::KeyboardTomlConfig {
             split_battery_peripheral_ids,
             split_battery_peripheral_user_descriptions,
             ble_profiles_num: rmk.ble_profiles_num,
+            ble_use_2m_phy: self.ble.as_ref().and_then(|ble| ble.use_2m_phy).unwrap_or(true),
             split_central_sleep_timeout_seconds: rmk.split_central_sleep_timeout_seconds,
             split_central_max_latency_powered: rmk.split_central_max_latency_powered,
             split_central_max_latency_battery: rmk.split_central_max_latency_battery,
-            protocol_macro_chunk_size: rmk.protocol_macro_chunk_size,
             auto_mouse_layer_max_num,
             rynk_buffer_size: rmk.rynk_buffer_size,
             dongle_pairing_window_secs: rmk.dongle_pairing_window_secs,
@@ -322,6 +357,7 @@ fn resolve_passkey_enabled(ble: &crate::BleConfig) -> Result<Passkey, String> {
 #[cfg(test)]
 mod tests {
     use super::{BuildConstants, resolve_passkey_enabled, validate_u8_capability, validate_u16_capability};
+    use crate::battery::BatteryTomlConfig;
     use crate::{
         BleConfig, DEFAULT_PASSKEY_ENTRY_TIMEOUT_SECS, KeyboardTomlConfig, MIN_PASSKEY_ENTRY_TIMEOUT_SECS,
         SplitBoardConfig, SplitConfig,
@@ -372,6 +408,46 @@ mod tests {
     }
 
     #[test]
+    fn each_configured_pointing_device_reserves_a_sleep_state_subscriber() {
+        use crate::{InputDeviceConfig, Pmw3610Config};
+        let subs = |config: &KeyboardTomlConfig| {
+            config
+                .build_constants(&[])
+                .unwrap()
+                .events
+                .into_iter()
+                .find(|event| event.name == "sleep_state")
+                .unwrap()
+                .subs
+        };
+        let sensors = |n: usize| {
+            Some(InputDeviceConfig {
+                pmw3610: Some(vec![Pmw3610Config::default(); n]),
+                ..Default::default()
+            })
+        };
+        let mut config: KeyboardTomlConfig = toml::from_str("").unwrap();
+        let base = subs(&config);
+        config.input_device = sensors(1);
+        assert_eq!(subs(&config), base + 1);
+        // A split binary carries one board's devices: one on the central and
+        // two on a peripheral reserve two, not three.
+        config.input_device = None;
+        config.split = Some(SplitConfig {
+            central: SplitBoardConfig {
+                input_device: sensors(1),
+                ..Default::default()
+            },
+            peripheral: vec![SplitBoardConfig {
+                input_device: sensors(2),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        assert_eq!(subs(&config), base + 2);
+    }
+
+    #[test]
     fn configless_split_has_no_battery_peripheral_ids() {
         let config: KeyboardTomlConfig = toml::from_str("").unwrap();
 
@@ -386,7 +462,10 @@ mod tests {
         let mut config: KeyboardTomlConfig = toml::from_str("").unwrap();
         config.split = Some(SplitConfig {
             peripheral: vec![SplitBoardConfig {
-                battery_adc_pin: Some("P0_02".to_string()),
+                battery: Some(BatteryTomlConfig {
+                    battery_adc_pin: Some("P0_02".to_string()),
+                    ..Default::default()
+                }),
                 ..Default::default()
             }],
             ..Default::default()
@@ -413,12 +492,18 @@ mod tests {
         config.split = Some(SplitConfig {
             peripheral: vec![
                 SplitBoardConfig {
-                    battery_adc_pin: Some("P0_02".to_string()),
+                    battery: Some(BatteryTomlConfig {
+                        battery_adc_pin: Some("P0_02".to_string()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
                 SplitBoardConfig::default(),
                 SplitBoardConfig {
-                    battery_adc_pin: Some("P0_04".to_string()),
+                    battery: Some(BatteryTomlConfig {
+                        battery_adc_pin: Some("P0_04".to_string()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
             ],
@@ -438,7 +523,10 @@ mod tests {
             peripheral: vec![
                 SplitBoardConfig::default(),
                 SplitBoardConfig {
-                    battery_adc_pin: Some("P0_02".to_string()),
+                    battery: Some(BatteryTomlConfig {
+                        battery_adc_pin: Some("P0_02".to_string()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
             ],
@@ -499,7 +587,10 @@ mod tests {
         let mut config: KeyboardTomlConfig = toml::from_str("").unwrap();
         config.split = Some(SplitConfig {
             peripheral: vec![SplitBoardConfig {
-                battery_user_description: Some("Right".to_string()),
+                battery: Some(BatteryTomlConfig {
+                    battery_user_description: Some("Right".to_string()),
+                    ..Default::default()
+                }),
                 ..Default::default()
             }],
             ..Default::default()
@@ -521,24 +612,28 @@ mod tests {
     #[test]
     fn resolves_custom_battery_user_descriptions() {
         let mut config: KeyboardTomlConfig = toml::from_str("").unwrap();
-        config.ble = Some(BleConfig {
-            enabled: true,
-            battery_user_description: Some("Fallback Central".to_string()),
-            ..Default::default()
-        });
         config.split = Some(SplitConfig {
             central: SplitBoardConfig {
-                battery_user_description: Some("Left".to_string()),
+                battery: Some(BatteryTomlConfig {
+                    battery_user_description: Some("Left".to_string()),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             peripheral: vec![
                 SplitBoardConfig {
-                    battery_adc_pin: Some("P0_02".to_string()),
-                    battery_user_description: Some("Right".to_string()),
+                    battery: Some(BatteryTomlConfig {
+                        battery_adc_pin: Some("P0_02".to_string()),
+                        battery_user_description: Some("Right".to_string()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
                 SplitBoardConfig {
-                    battery_adc_pin: Some("P0_04".to_string()),
+                    battery: Some(BatteryTomlConfig {
+                        battery_adc_pin: Some("P0_04".to_string()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
             ],
@@ -648,10 +743,10 @@ mod tests {
             Err("ble_profiles_num (256) exceeds the u8 host capability field (max 255)".to_string())
         );
 
-        assert!(validate_u16_capability("macro_space_size", 65535).is_ok());
+        assert!(validate_u16_capability("rynk_buffer_size", 65535).is_ok());
         assert_eq!(
-            validate_u16_capability("macro_space_size", 65536),
-            Err("macro_space_size (65536) exceeds the u16 host capability field (max 65535)".to_string())
+            validate_u16_capability("rynk_buffer_size", 65536),
+            Err("rynk_buffer_size (65536) exceeds the u16 host capability field (max 65535)".to_string())
         );
     }
 }

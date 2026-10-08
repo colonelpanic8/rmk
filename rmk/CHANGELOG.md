@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Make Trouble BLE roles explicit, document environment-variable memory tuning, update the nRF52832 examples to peripheral-only SDC, and derive split notification capacity from Trouble's configured packet-pool MTU.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
@@ -7,13 +11,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: Use bare `#[register_processor]` to run the type's `Runnable`. See [processor migration](https://rmk.rs/docs/migration/v09_v10#processors).
+- **BREAKING**: Keyboard macros are reworked around `MacroOp` lists.
+- **BREAKING**: Bump Rynk protocol version to 0.2: now `GetMacro`/`SetMacro` read and write a whole macro by index, and `BleStatus` gained a `bonded` field, changing its wire format and that of `ConnectionStatus`.
+
 ### Added
 
+- Pointer acceleration in `PointingProcessor` for every pointing device: motion faster than a threshold is scaled up in proportion to its speed, up to a maximum, in cursor mode (`acceleration = { from, max }` in `keyboard.toml`) and scroll mode (`scroll_acceleration`). Off by default.
+- Fractional cursor speed: `CursorConfig::divisor_x`/`divisor_y` divide cursor motion, carrying the remainder between motions, so a cursor slower than the sensor loses no movement and still accelerates.
+- Add timer-only processors and combine polling with resettable deadlines through `#[processor]`. Both TOML and Rust projects implement `DeadlineProcessor::deadline()` and `on_deadline()` directly.
+- Macro operations accept any single action (`WM`, `MO`, `OSM`, ...) without the `vial` feature, and a new `pause_for_release` operation (`MacroOp::PauseForRelease`) runs the rest of the macro when the macro key is released
+- PMW3610 `force_awake` now follows the keyboard's sleep state, ZMK style: the sensor is held in RUN while the keyboard is awake and released to its REST modes when the idle sleep starts. `PointingDriver` gained a default-implemented `set_low_power` hint and `PointingDevice` subscribes to `SleepStateEvent`; each sensor in `keyboard.toml` reserves its subscriber slot automatically.
 - Make Trouble BLE roles explicit, document environment-variable memory tuning, update the nRF52832 examples to peripheral-only SDC, and derive split notification capacity from Trouble's configured packet-pool MTU.
+- Give dongles a USB DFU runtime interface: a DETACH in the 30 s after plug-in reboots into the bootloader (`jump_to_bootloader`), so a dongle can be updated with `dfu-util` or rmk-gui although its host protocol is relayed to the keyboard.
 - Publish the dongle's state.
+- Add `dfu_ext` feature for DFU writes to external SPI flash (e.g. W25Q64), so boards with limited internal flash can store the new firmware image externally.
+- Expose whether the active BLE profile is bonded via `BleStatus::bonded`, so LEDs and displays can tell a paired-but-disconnected profile from an empty slot.
+- Make `rmk::state::current_ble_status()` and `current_connection_status()` public, so user code can read the current status without subscribing to `ConnectionStatusChangeEvent`.
 
 ### Fixed
 
+- Re-pairing a cleared BLE profile with the same host no longer leaves the profile marked as removed.
+- Apply processor registration conditions to both construction and execution.
+- Reject zero processor polling intervals at compile time.
+- `[chip.nrf52833] dcdc_reg0_voltage` was ignored; it now sets the REG0 output voltage.
 - Keep other physically held one-shot modifiers active when one is released
 - Preserve unresolved keys from unrelated combos when another combo triggers, instead of silently discarding their press events
 - Identify the keyboard's HID report characteristics on the dongle by their Report Reference descriptor instead of `HidService`'s declaration order.

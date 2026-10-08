@@ -39,8 +39,12 @@ events = [
     # (gated on #[cfg(feature = "display")] in driver.rs)
     # Covers up to 2 peripherals; for 3+ peripherals override subs in keyboard.toml
     { name = "wpm_update", count = 2 },
-    { name = "sleep_state", count = 2 },
 ]
+
+# BatteryLedProcessor can run on USB-only boards too.
+[[subscriber]]
+features = []
+events = [{ name = "battery_status" }]
 
 # --- BLE-gated internal subscribers ---
 
@@ -48,8 +52,7 @@ events = [
 features = ["_ble"]
 events = [
     # ble/battery_service.rs: BatteryStatusEvent::subscriber()
-    # processor/builtin/battery_led.rs: subscribe = [BatteryStatusEvent] (user-optional but _ble-gated)
-    { name = "battery_status", count = 2 },
+    { name = "battery_status" },
     # ble/mod.rs: KeyboardEvent/PointingEvent wake subscribers, created when
     # advertising times out. Without a reserved slot they panic on boards whose
     # permanent subscribers already fill the base count.
@@ -149,6 +152,9 @@ events = [
     # split/driver.rs: ConnectionStatusChangeEvent::subscriber()
     # Covers up to 2 peripherals; for 3+ peripherals override subs in keyboard.toml
     { name = "connection_status_change", count = 2 },
+    # split/driver.rs: SleepStateEvent::subscriber()
+    # Covers up to 2 peripherals; for 3+ peripherals override subs in keyboard.toml
+    { name = "sleep_state", count = 2 },
 ]
 
 # --- Split + BLE-gated internal subscribers ---
@@ -158,8 +164,6 @@ features = ["split", "_ble"]
 events = [
     # split/ble/peripheral.rs: KeyboardEvent::subscriber() (temporary, on timeout)
     { name = "keyboard" },
-    # split/peripheral.rs: ChargingStateEvent::subscriber() (cfg _ble)
-    { name = "charging_state" },
     # split/peripheral.rs: BatteryStatusEvent::subscriber() (cfg _ble)
     { name = "battery_status" },
     # split/driver.rs: ClearPeerEvent::subscriber() (cfg _ble)
@@ -168,4 +172,13 @@ events = [
     # split/ble/central.rs: SleepStateEvent::subscriber() per connected link
     # Covers up to 2 peripherals; for 3+ peripherals override subs in keyboard.toml
     { name = "sleep_state", count = 2 },
+]
+
+# --- DFU Lock-gated internal subscribers ---
+
+[[subscriber]]
+features = ["dfu_lock"]
+events = [
+    # dfu/mod.rs: DfuLock subscribes to DfuCmdEvent for UnlockRequest
+    { name = "dfu_cmd" },
 ]

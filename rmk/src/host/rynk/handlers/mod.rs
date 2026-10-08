@@ -12,7 +12,7 @@ mod keymap;
 mod layout;
 #[cfg(feature = "lighting")]
 pub(super) mod lighting;
-mod macro_data;
+mod macros;
 mod morse;
 mod status;
 mod system;

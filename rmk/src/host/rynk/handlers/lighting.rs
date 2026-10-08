@@ -2907,7 +2907,7 @@ mod tests {
                 loop {
                     persisted
                         .borrow_mut()
-                        .push(crate::channel::FLASH_CHANNEL.receive().await);
+                        .push(crate::storage::receive_flash_message().await);
                 }
                 #[cfg(not(feature = "storage"))]
                 core::future::pending::<()>().await

@@ -8,7 +8,7 @@ mod keymap;
 mod layout;
 #[cfg(feature = "lighting")]
 mod lighting;
-mod macro_data;
+mod macros;
 mod morse;
 mod status;
 mod system;
@@ -21,7 +21,7 @@ pub use self::keymap::*;
 pub use self::layout::*;
 #[cfg(feature = "lighting")]
 pub use self::lighting::*;
-pub use self::macro_data::*;
+pub use self::macros::*;
 pub use self::morse::*;
 pub use self::status::*;
 pub use self::system::*;

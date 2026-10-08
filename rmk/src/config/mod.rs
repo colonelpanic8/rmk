@@ -9,8 +9,8 @@ mod storage;
 mod vial;
 
 pub use behavior::{
-    AutoMouseLayerConfig, BehaviorConfig, CombosConfig, ForksConfig, KeyboardMacrosConfig, MorsesConfig,
-    MouseKeyConfig, OneShotConfig, OneShotModifiersConfig, TapConfig,
+    AutoMouseLayerConfig, BehaviorConfig, CombosConfig, ForksConfig, MorsesConfig, MouseKeyConfig, OneShotConfig,
+    OneShotModifiersConfig, TapConfig,
 };
 #[cfg(feature = "_ble")]
 pub use ble_battery::BleBatteryConfig;
@@ -36,7 +36,7 @@ pub struct RmkConfig<'a> {
     #[cfg(feature = "storage")]
     pub storage_config: StorageConfig,
     #[cfg(feature = "_ble")]
-    pub ble_battery_config: BleBatteryConfig<'a>,
+    pub ble_battery_config: BleBatteryConfig,
 }
 
 #[cfg(feature = "rynk")]

@@ -899,8 +899,9 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
     /// engine clamped or partially declined stores what actually took effect.
     #[cfg(feature = "storage")]
     async fn persist_extension(&self) {
-        use crate::channel::FLASH_CHANNEL;
-        use crate::storage::{FlashOperationMessage, LightingExtensionOverlayRecord, LightingExtensionRecord};
+        use crate::storage::{
+            FlashOperationMessage, LightingExtensionOverlayRecord, LightingExtensionRecord, send_unchecked,
+        };
 
         let Ok(page) = self.request_extension_page().await else {
             return;
@@ -926,16 +927,15 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
             }
         }
 
-        FLASH_CHANNEL
-            .send(FlashOperationMessage::LightingExtensionState(LightingExtensionRecord {
-                effect: state.effect,
-                palette: state.palette,
-                value: state.value,
-                speed: state.speed,
-                param_len,
-                params,
-            }))
-            .await;
+        send_unchecked(FlashOperationMessage::LightingExtensionState(LightingExtensionRecord {
+            effect: state.effect,
+            palette: state.palette,
+            value: state.value,
+            speed: state.speed,
+            param_len,
+            params,
+        }))
+        .await;
 
         let overlay = match self.request_core(StandardCommand::ReadExtensionLayers).await {
             Ok(StandardReply::ExtensionLayers(page)) => page.state.and_then(|state| state.overlay),
@@ -953,15 +953,14 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 overlay_param_len += 1;
             }
         }
-        FLASH_CHANNEL
-            .send(FlashOperationMessage::LightingExtensionOverlay(
-                LightingExtensionOverlayRecord {
-                    effect: overlay,
-                    param_len: overlay_param_len,
-                    params: overlay_params,
-                },
-            ))
-            .await;
+        send_unchecked(FlashOperationMessage::LightingExtensionOverlay(
+            LightingExtensionOverlayRecord {
+                effect: overlay,
+                param_len: overlay_param_len,
+                params: overlay_params,
+            },
+        ))
+        .await;
     }
 
     #[cfg(not(feature = "storage"))]
@@ -978,8 +977,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
 
     #[cfg(feature = "storage")]
     async fn persist_scenes(&self, state: &StandardState) {
-        use crate::channel::FLASH_CHANNEL;
-        use crate::storage::FlashOperationMessage;
+        use crate::storage::{FlashOperationMessage, send_unchecked};
 
         let mut total = state.scene_len.min(u16::MAX as usize) as u16;
         let mut offset: u16 = 0;
@@ -1000,22 +998,20 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 };
                 let _ = wire_cells.push(wire);
             }
-            FLASH_CHANNEL
-                .send(FlashOperationMessage::LightingSceneShard {
-                    index: shard,
-                    cells: wire_cells,
-                })
-                .await;
+            send_unchecked(FlashOperationMessage::LightingSceneShard {
+                index: shard,
+                cells: wire_cells,
+            })
+            .await;
             offset += cells.len() as u16;
             shard = shard.saturating_add(1);
             total = page.total;
         }
-        FLASH_CHANNEL
-            .send(FlashOperationMessage::LightingSceneCommit {
-                len: offset,
-                policy: policy_to_wire(state.scene_policy),
-            })
-            .await;
+        send_unchecked(FlashOperationMessage::LightingSceneCommit {
+            len: offset,
+            policy: policy_to_wire(state.scene_policy),
+        })
+        .await;
     }
 
     #[cfg(not(feature = "storage"))]
@@ -1023,8 +1019,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
 
     #[cfg(feature = "storage")]
     async fn persist_runtime_conditional_scenes(&self, state: &StandardState) {
-        use crate::channel::FLASH_CHANNEL;
-        use crate::storage::FlashOperationMessage;
+        use crate::storage::{FlashOperationMessage, send_unchecked};
 
         let mut total = state.runtime_conditional_scene_len.min(u16::MAX as usize) as u16;
         let mut offset: u16 = 0;
@@ -1048,19 +1043,16 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                 };
                 let _ = wire_cells.push(wire);
             }
-            FLASH_CHANNEL
-                .send(FlashOperationMessage::LightingRuntimeConditionalSceneShard {
-                    index: shard,
-                    cells: wire_cells,
-                })
-                .await;
+            send_unchecked(FlashOperationMessage::LightingRuntimeConditionalSceneShard {
+                index: shard,
+                cells: wire_cells,
+            })
+            .await;
             offset += cells.len() as u16;
             shard = shard.saturating_add(1);
             total = page.total;
         }
-        FLASH_CHANNEL
-            .send(FlashOperationMessage::LightingRuntimeConditionalSceneCommit { len: offset })
-            .await;
+        send_unchecked(FlashOperationMessage::LightingRuntimeConditionalSceneCommit { len: offset }).await;
     }
 
     #[cfg(not(feature = "storage"))]
@@ -2806,7 +2798,7 @@ mod tests {
         // Persisting by readback means the last record is the settled state,
         // parameters included, no matter which command produced it.
         let mut last = None;
-        while let Ok(message) = crate::channel::FLASH_CHANNEL.try_receive() {
+        while let Some(message) = crate::storage::try_receive_flash_message() {
             if let FlashOperationMessage::LightingExtensionState(record) = message {
                 last = Some(record);
             }

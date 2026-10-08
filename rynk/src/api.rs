@@ -18,6 +18,7 @@ use rmk_types::ble::BleStatus;
 use rmk_types::combo::Combo;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::fork::Fork;
+use rmk_types::keyboard_macros::{Macro, MacroOp};
 use rmk_types::led_indicator::LedIndicator;
 use rmk_types::modifier::ModifierCombination;
 use rmk_types::morse::Morse;
@@ -28,8 +29,8 @@ use rmk_types::protocol::rynk::{
     ClearLightingOverlayRequest, Cmd, CommitLightingOverlayReplaceRequest,
     CommitLightingRuntimeConditionalSceneReplaceRequest, CommitLightingSceneReplaceRequest, DeviceCapabilities,
     DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetEncoderRequest, GetKeymapBulkRequest,
-    GetKeymapBulkResponse, GetMacroRequest, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LayerState,
-    LightingCapabilities, LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
+    GetKeymapBulkResponse, GetMorseBulkRequest, GetMorseBulkResponse, KeyPosition, LayerState, LightingCapabilities,
+    LightingCompiledSceneStatus, LightingCompiledScenesPage, LightingConditionalSceneStatus,
     LightingConditionalScenesPage, LightingExtendedRuntimeConditionalScenesPage, LightingExtension,
     LightingExtensionLayers, LightingExtensionNameKind, LightingExtensionNamesPage, LightingExtensionNamesRequest,
     LightingExtensionParamsPage, LightingExtensionParamsRequest, LightingFramePage, LightingFrameRequest,
@@ -39,8 +40,8 @@ use rmk_types::protocol::rynk::{
     LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
     LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
     LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZone, LightingZoneId,
-    LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState, PeripheralStatus,
-    ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
+    LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MatrixState, PeripheralStatus, ProtocolVersion,
+    PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
     PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest, SetComboRequest,
     SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetLightingExtensionLayersRequest,
     SetLightingExtensionParamRequest, SetLightingExtensionStateRequest, SetLightingLayerPolicyRequest,
@@ -348,17 +349,20 @@ impl Client {
         self.request::<command::SetMorseBulk>(&request).await
     }
 
-    /// Read one chunk of macro data starting at byte `offset`. Chunks are always full
-    /// size, zero-filled past the end of macro space, so find the end by parsing the
-    /// macro encoding rather than waiting for a short chunk.
-    pub async fn get_macro(&self, offset: u16) -> Result<MacroData, RynkHostError> {
-        self.request::<command::GetMacro>(&GetMacroRequest { offset }).await
+    /// Read macro `index` whole: its ops in order, empty for an unset slot. An
+    /// index at or past [`DeviceCapabilities::max_macros`] fails with `RynkError::Invalid`.
+    pub async fn get_macro(&self, index: u8) -> Result<Macro, RynkHostError> {
+        self.request::<command::GetMacro>(&index).await
     }
 
-    /// Write one chunk of macro data starting at byte `offset`. Writes past
-    /// the end of the device's macro space are truncated by the firmware.
-    pub async fn set_macro(&self, offset: u16, data: MacroData) -> Result<(), RynkHostError> {
-        self.request::<command::SetMacro>(&SetMacroRequest { offset, data })
+    /// Replace macro `index` with `ops`. A macro past
+    /// [`DeviceCapabilities::macro_space_size`] fails with [`RynkHostError::Encode`]
+    /// before anything is sent; the firmware answers `Invalid` for one it cannot
+    /// fit beside the other macros, and `Unimplemented` when
+    /// [`DeviceCapabilities::macros_writable`] is false.
+    pub async fn write_macro(&self, index: u8, ops: &[MacroOp]) -> Result<(), RynkHostError> {
+        let macro_ops = Macro::from_slice(ops).map_err(|_| RynkHostError::Encode(Cmd::SetMacro))?;
+        self.request::<command::SetMacro>(&SetMacroRequest { index, macro_ops })
             .await
     }
 
@@ -917,7 +921,7 @@ impl Client {
         self.request::<command::SetSplitCentralLatency>(&policy).await
     }
 
-    /// Read BLE status (active profile, connection state). Requires
+    /// Read BLE status (active profile, connection state, and bond presence). Requires
     /// [`DeviceCapabilities::ble_enabled`]; nothing is sent otherwise.
     pub async fn get_ble_status(&self) -> Result<BleStatus, RynkHostError> {
         self.require_ble(Cmd::GetBleStatus)?;
@@ -942,6 +946,11 @@ impl Client {
 
 #[cfg(feature = "alloc")]
 impl Client {
+    /// [`get_macro`](Self::get_macro) as a growable list.
+    pub async fn read_macro(&self, index: u8) -> Result<Vec<MacroOp>, RynkHostError> {
+        Ok(self.get_macro(index).await?.ops().collect())
+    }
+
     /// Read the whole keymap — every layer, in [`get_keymap_bulk`](Self::get_keymap_bulk)
     /// order — with concurrent paged reads. A short page ends the read early.
     pub async fn read_all_keymap(&self) -> Result<Vec<KeyAction>, RynkHostError> {
