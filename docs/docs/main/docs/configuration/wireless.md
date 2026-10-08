@@ -63,37 +63,44 @@ All other keys are silently discarded while passkey mode is active.
 
 ## Battery configuration
 
-Configure voltage measurement, charging detection, and an optional indicator LED in these tables. Battery monitoring also works with BLE disabled; ESP32 ADC setup has an additional requirement below.
+Battery configuration controls voltage measurement, charging-state detection, and an optional indicator LED. These features also work with BLE disabled.
+
+Choose the table for the board you are configuring:
 
 | Board            | Table                                                                |
 | ---------------- | -------------------------------------------------------------------- |
-| Unibody          | `[battery]`                                                          |
+| Unibody keyboard | `[battery]`                                                          |
 | Split central    | `[split.central.battery]`                                            |
-| Split peripheral | `[split.peripheral.battery]`, after its `[[split.peripheral]]` entry |
+| Split peripheral | `[split.peripheral.battery]`, below its `[[split.peripheral]]` entry |
 
-The board selected by `[keyboard].board` supplies any battery preset, such as nice!nano's ADC wiring:
-
-- **Unibody:** Omitted fields use the preset; an empty table keeps it.
-- **Split:** An omitted side table uses the preset. An explicit table replaces it entirely; an empty table disables that side's battery inputs. Top-level `[battery]` is not accepted.
+Configure each split board separately. Use only the split battery tables for a split keyboard; the top-level `[battery]` table is not accepted.
 
 ### Battery fields
 
-| Field                      | Description                                                                    | Default without a preset        |
-| -------------------------- | ------------------------------------------------------------------------------ | ------------------------------- |
-| `battery_adc_pin`          | ADC pin, or `"vddh"` on nRF52840/nRF52833.                                     | No voltage measurement          |
-| `adc_divider_measured`     | Divider resistance from ADC input to ground.                                   | `1`                             |
-| `adc_divider_total`        | Total divider resistance.                                                      | `1`                             |
-| `charge_state`             | Charging input: `{ pin, low_active }`.                                         | None                            |
-| `charge_led`               | Indicator output: `{ pin, low_active }`. Requires a voltage or charging input. | None                            |
-| `battery_user_description` | Battery name exposed over BLE; peripherals require an ADC input.               | `"Central"` or `"Peripheral N"` |
+All three tables accept the same fields. Omit inputs and outputs that your board does not have.
 
-Divider fields require `battery_adc_pin` and positive values in the same units: 2 MΩ to ground plus 806 kΩ to the battery gives `2000` / `2806`. `"vddh"` uses a fixed 1:5 divider and ignores these fields.
+| Field                      | Description                                                                                                                                                             | Default                                                  |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `battery_adc_pin`          | ADC pin connected to the battery voltage divider, or `"vddh"` for the internal VDDH input on nRF52840/nRF52833.                                                         | No voltage measurement                                   |
+| `adc_divider_measured`     | Resistance between the ADC input and ground. Requires `battery_adc_pin`.                                                                                                | `1`                                                      |
+| `adc_divider_total`        | Total resistance of the voltage divider. Requires `battery_adc_pin`.                                                                                                    | `1`                                                      |
+| `charge_state`             | Charging-status input as `{ pin, low_active }`. Set `low_active = true` if the charger drives the pin low while charging.                                               | No charging-status input                                 |
+| `charge_led`               | Indicator output as `{ pin, low_active }`. Set `low_active = true` if driving the pin low turns the LED on. Requires an ADC or charging-status input on the same board. | No indicator LED                                         |
+| `battery_user_description` | Battery name exposed over BLE. A peripheral requires `battery_adc_pin` to expose its battery service.                                                                   | `"Central"` or `"Peripheral N"`, where `N` starts at `0` |
 
-Set `low_active = true` for signals active at low voltage. With only `charge_state`, RMK reports charging without a percentage. The LED stays on while charging, blinks below 10%, and stays off otherwise.
+For unibody keyboards, omitted fields use the board preset; an empty `[battery]` table keeps those defaults.
+
+For split keyboards, an omitted side table uses the board preset. An explicit table replaces it entirely; an empty table disables that side's battery inputs.
+
+Set both divider values in the same units. For example, a divider with 806 kΩ between the battery and ADC input and 2 MΩ between the input and ground uses `2000` and `2806`. Both values must be greater than zero. With `battery_adc_pin = "vddh"`, RMK uses the internal 1:5 divider and ignores these two fields.
+
+On nRF52 chips with an ADC, RMK sets up voltage measurement automatically. The examples below use nRF52840 pins; replace them and the divider values to match your board.
+
+With only `charge_state` configured, RMK reports charging state without a battery percentage. The indicator LED stays on while charging, blinks below 10% when not charging, and stays off otherwise.
 
 ### Unibody keyboard
 
-Example for nRF52840; adjust pins and divider values for your board:
+Add `[battery]` to `keyboard.toml`. This example measures voltage through an external divider and reads a charging-status pin:
 
 ```toml
 [battery]
@@ -101,41 +108,80 @@ battery_adc_pin = "P0_05"
 adc_divider_measured = 2000
 adc_divider_total = 2806
 charge_state = { pin = "P0_20", low_active = true }
+# Optional indicator LED
 charge_led = { pin = "P0_21", low_active = false }
 battery_user_description = "Main"
 ```
 
 ### Split battery ADC configuration
 
-Omit side tables to use the preset, or use the fields above to override each side independently. Place a peripheral's table after its existing `[[split.peripheral]]` entry and before the next one. For an nRF52840 peripheral:
+Add a battery table to override the preset for that side. Place each `[split.peripheral.battery]` table after the corresponding `[[split.peripheral]]` entry and before the next peripheral entry. Keep each board's existing matrix and connection settings.
 
 ```toml
+[split.central.battery]
+battery_adc_pin = "P0_01"
+adc_divider_measured = 2000
+adc_divider_total = 2806
+battery_user_description = "Left"
+
+[[split.peripheral]]
+# Keep this peripheral's existing board settings here.
+
 [split.peripheral.battery]
-battery_adc_pin = "vddh"
+battery_adc_pin = "P0_02"
+adc_divider_measured = 2000
+adc_divider_total = 2806
 battery_user_description = "Right"
 ```
 
-For old `[ble]` or flat split battery fields, see [Migrate battery configuration](../migration/v09_v10#battery-configuration-tables).
+For an existing configuration with battery fields under `[ble]` or directly under a split board, see [Migrate battery configuration](../migration/v09_v10#battery-configuration-tables).
 
 ### RP2040 battery input
 
-Use an ADC pin such as `PIN_26`. Conversion assumes a 3.3 V reference; other references require a custom Rust reader that publishes ADC input millivolts.
+Set `battery_adc_pin` to an ADC-capable pin, such as `PIN_26`, and set the divider values to match your board. RP2040 voltage measurement assumes a 3.3 V ADC reference.
 
-Sampling starts after 30 seconds and repeats every 30 seconds. Failed reads keep the previous measurement until a later sample succeeds.
+For a unibody board with a 1:2 divider:
+
+```toml
+[battery]
+battery_adc_pin = "PIN_26"
+adc_divider_measured = 1
+adc_divider_total = 2
+```
+
+For a split board, put these fields in its central or peripheral battery table. RMK waits 30 seconds before each sample, including the first. If a read fails, it keeps the previous reading and retries at the next sampling interval. Boards with a different ADC reference need a custom Rust reader that publishes ADC input millivolts.
 
 ### ESP32 battery input
 
-Use an ADC1-capable GPIO, such as `GPIO0` on ESP32-C3. Readings are calibrated. Sampling starts after 30 seconds and repeats every 30 seconds.
+Set `battery_adc_pin` to an ADC1-capable GPIO for your chip and set the divider values to match your board. RMK uses calibrated voltage readings and waits 30 seconds before each sample, including the first.
 
-This reserves ADC1 and requires RMK's ESP32 BLE initialization. Choose pins and divider values for your chip and board.
+For an ESP32-C3 unibody board with a 1:2 divider:
+
+```toml
+[battery]
+battery_adc_pin = "GPIO0"
+adc_divider_measured = 1
+adc_divider_total = 2
+```
+
+For a split board, put these fields in its central or peripheral battery table. GPIO numbering and ADC support vary by chip; the pin in this example is for ESP32-C3.
+
+Battery measurement reserves ADC1. This configuration requires RMK's ESP32 BLE initialization, which enables the radio before using the hardware random-number generator.
 
 ### Peripheral battery reporting over BLE GATT
 
-Over split BLE, the central exposes a standard Battery Service (`0x180F`) for itself and each peripheral with an ADC input, including inputs from presets. `battery_user_description` sets each battery's name; the host decides whether to display separate names and levels.
+When peripherals are configured to sample their batteries (see above), their levels are forwarded to the central over the split BLE links and re-exposed to the host through standard Battery Service instances (UUID `0x180F`) on the central's GATT server. The host sees one Battery Service instance for:
 
-RMK uses trouble-host's default client ATT table size. To increase it, set this project-wide override in `.cargo/config.toml`; it takes precedence over trouble-host Cargo features:
+- the central's own battery level, and
+- each peripheral with `battery_adc_pin` set by its own table or the board preset.
+
+Set `battery_user_description` in each board's battery table to give its battery a name such as `"Left"` or `"Right"`. The host determines whether these names and separate battery levels appear in its interface.
+
+The split feature uses trouble-host's default client ATT table size. To reserve more space for client-specific attributes such as CCCDs, set `TROUBLE_HOST_CLIENT_ATT_TABLE_SIZE` in the project environment, for example in `.cargo/config.toml`:
 
 ```toml
 [env]
 TROUBLE_HOST_CLIENT_ATT_TABLE_SIZE = "128"
 ```
+
+This project-wide override takes precedence over trouble-host Cargo feature settings and can be set to the size required by the enabled services.
