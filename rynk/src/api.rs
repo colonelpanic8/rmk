@@ -40,9 +40,10 @@ use rmk_types::protocol::rynk::{
     LightingRuntimeConditionalScenePageRequest, LightingRuntimeConditionalSceneStatus,
     LightingRuntimeConditionalSceneTransaction, LightingRuntimeConditionalScenesPage, LightingScenePageRequest,
     LightingSceneStatus, LightingSceneTransaction, LightingScenesPage, LightingState, LightingZone, LightingZoneId,
-    LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MatrixState, MorseHoldTriggerPositionState,
-    MorseProfileEntry, MorseProfileState, PeripheralStatus, PointingCapabilities, PointingConfig, ProtocolVersion,
-    PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
+    LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MacroData, MaintenanceMode, MatrixState,
+    MorseHoldTriggerPositionState, MorseProfileEntry, MorseProfileState, PeripheralStatus, PointingCapabilities,
+    PointingConfig, ProtocolVersion, PutLightingExtendedRuntimeConditionalSceneChunkRequest,
+    PutLightingOverlayChunkRequest,
     PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetAutoMouseLayerConfigsRequest,
     SetComboBulkRequest, SetComboRequest, SetEncoderRequest, SetForkRequest, SetKeyRequest, SetKeymapBulkRequest,
     SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest, SetLightingExtensionStateRequest,
@@ -151,6 +152,11 @@ impl Client {
         self.request::<command::PeripheralBootloaderJump>(&slot).await
     }
 
+    /// Read the live maintenance gate and the value restored at boot.
+    pub async fn get_maintenance_mode(&self) -> Result<MaintenanceMode, RynkHostError> {
+        self.request::<command::GetMaintenanceMode>(&()).await
+    }
+
     /// Reset persistent storage. Requires [`DeviceCapabilities::storage_enabled`]:
     /// without storage the wipe would silently do nothing, so nothing is sent.
     pub async fn storage_reset(&self, mode: StorageResetMode) -> Result<(), RynkHostError> {
@@ -160,26 +166,18 @@ impl Client {
         self.request::<command::StorageReset>(&mode).await
     }
 
-    /// Read the current lock state; unlike [`unlock_poll`](Self::unlock_poll) this has
-    /// no side effects. [`LockStatus::key_positions`] lists the keys to hold to unlock;
-    /// empty while [`locked`](LockStatus::locked) means the device can never be
-    /// unlocked (no `unlock_keys` in keyboard.toml).
+    /// Legacy compatibility endpoint. Current firmware reports an inert,
+    /// permanently unlocked state; use [`get_maintenance_mode`](Self::get_maintenance_mode).
     pub async fn get_lock_status(&self) -> Result<LockStatus, RynkHostError> {
         self.request::<command::GetLockStatus>(&()).await
     }
 
-    /// Start or keep alive an unlock attempt, reporting which challenge keys are held
-    /// right now. Call every ~150 ms while the user holds the keys from
-    /// [`LockStatus::key_positions`]: [`remaining_keys`](LockStatus::remaining_keys)
-    /// counts down and [`locked`](LockStatus::locked) turns false once all are held at
-    /// once. The attempt expires ~500 ms after the last call, so to cancel it, just
-    /// stop calling.
+    /// Legacy compatibility endpoint, equivalent to [`get_lock_status`](Self::get_lock_status).
     pub async fn unlock_poll(&self) -> Result<LockStatus, RynkHostError> {
         self.request::<command::UnlockPoll>(&()).await
     }
 
-    /// Lock the device again immediately. Does nothing on an `insecure`
-    /// device.
+    /// Legacy compatibility endpoint. Current firmware ignores this request.
     pub async fn lock(&self) -> Result<(), RynkHostError> {
         self.request::<command::Lock>(&()).await
     }

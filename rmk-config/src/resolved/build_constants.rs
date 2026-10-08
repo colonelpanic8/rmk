@@ -153,6 +153,7 @@ impl crate::KeyboardTomlConfig {
             led_indicator,
             sleep_state,
             lighting_changed,
+            maintenance_mode,
             battery_status,
             battery_adc,
             charging_state,
