@@ -38,6 +38,32 @@ passkey_entry_timeout = 120
 Some legacy BLE adapters cannot connect to devices using 2M PHY at all. For those hosts, enable the `use_1m_phy` Cargo feature of the `rmk` crate, which makes the keyboard use 1M PHY for the host connection.
 This only affects host connections. The dongle link and the split link between the halves always run at 2M PHY, so a keyboard built with both `dongle` and `use_1m_phy` keeps those links fast and still connects to a legacy adapter on its other BLE profiles.
 
+### Host advertising backoff
+
+Host BLE connections advertise quickly for a short window, then reduce their
+advertising rate while waiting for the computer. Configure the compiled firmware
+in `keyboard.toml`:
+
+```toml
+[ble]
+enabled = true
+advertising_fast_interval_ms = 30
+advertising_slow_interval_ms = 200
+advertising_fast_timeout_secs = 5
+```
+
+These are the defaults. Both intervals must be between 20 and 10240 milliseconds,
+and the fast interval must not exceed the slow interval. The controller represents
+intervals in 0.625 ms units, so whole-millisecond values may be rounded down.
+Set `advertising_fast_timeout_secs = 0` to advertise at the slow interval immediately.
+Equal intervals also skip the phase transition.
+
+Each new host advertising attempt starts a fresh fast window, including after boot,
+disconnect, profile selection, and waking from advertising-timeout sleep. The
+existing total advertising timeout includes both phases; backoff does not extend
+it. Split and dongle advertisements keep their existing timing. This affects
+connection discovery, not the connection interval or key-report rate once connected.
+
 ### Passkey entry
 
 RMK supports typing a BLE passkey directly on the keyboard during pairing. This is disabled by default, and requires the `passkey_entry` Cargo feature of the `rmk` crate in addition to the configuration below.
