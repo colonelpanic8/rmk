@@ -281,6 +281,7 @@ impl<'a> RynkService<'a> {
             | Cmd::GetSleepState
             | Cmd::GetLedIndicator
             | Cmd::GetLayerState
+            | Cmd::GetLayerMetadata
             | Cmd::GetModifierState
             | Cmd::GetPointingConfig
             | Cmd::GetPointingCapabilities => Some(false),
