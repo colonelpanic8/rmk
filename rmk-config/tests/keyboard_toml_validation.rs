@@ -221,7 +221,7 @@ cols = 1
 row_offset = 0
 col_offset = 0
 [split.central.battery]
-battery_adc_pin = "vddh"
+battery_adc_pin = "P0_05"
 [split.central.matrix]
 matrix_type = "normal"
 row_pins = ["P0_02"]
@@ -238,13 +238,20 @@ row_pins = ["P0_02"]
 col_pins = ["P0_03"]
 "#,
     );
-    let config = KeyboardTomlConfig::new_from_toml_path(&path);
-    std::fs::remove_file(path).ok();
+    let configs = [
+        KeyboardTomlConfig::new_from_toml_path(&path),
+        KeyboardTomlConfig::new_from_toml_path_with_event_defaults(&path),
+    ];
+    std::fs::remove_file(path).unwrap();
 
-    let central = config.resolve_battery_config(None).unwrap();
-    assert_eq!(central.battery_adc_pin.as_deref(), Some("vddh"));
-    let peripheral = config.resolve_battery_config(Some(0)).unwrap();
-    assert!(peripheral.battery_adc_pin.is_none());
+    for config in configs {
+        let central = config.resolve_battery_config(None).unwrap();
+        assert_eq!(central.battery_adc_pin.as_deref(), Some("P0_05"));
+        let peripheral = config.resolve_battery_config(Some(0)).unwrap();
+        assert_eq!(peripheral.battery_adc_pin.as_deref(), Some("vddh"));
+        let constants = config.build_constants(&["split", "_ble"]).unwrap();
+        assert_eq!(constants.split_battery_peripheral_ids, [0]);
+    }
 }
 
 /// Unknown keys in the sections users edit most must be rejected, not

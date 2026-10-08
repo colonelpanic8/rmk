@@ -88,7 +88,9 @@ All three tables accept the same fields. Omit inputs and outputs that your board
 | `charge_led`               | Indicator output as `{ pin, low_active }`. Set `low_active = true` if driving the pin low turns the LED on. Requires an ADC or charging-status input on the same board. | No indicator LED                                         |
 | `battery_user_description` | Battery name exposed over BLE. A peripheral requires `battery_adc_pin` to expose its battery service.                                                                   | `"Central"` or `"Peripheral N"`, where `N` starts at `0` |
 
-A board preset can supply values for omitted fields. An empty battery table does not clear preset values.
+For unibody keyboards, omitted fields use the board preset; an empty `[battery]` table keeps those defaults.
+
+For split keyboards, an omitted side table uses the board preset. An explicit table replaces it entirely; an empty table disables that side's battery inputs.
 
 Set both divider values in the same units. For example, a divider with 806 kΩ between the battery and ADC input and 2 MΩ between the input and ground uses `2000` and `2806`. Both values must be greater than zero. With `battery_adc_pin = "vddh"`, RMK uses the internal 1:5 divider and ignores these two fields.
 
@@ -113,7 +115,7 @@ battery_user_description = "Main"
 
 ### Split battery ADC configuration
 
-Add a battery table to the central and to each peripheral that measures its battery. Place each `[split.peripheral.battery]` table after the corresponding `[[split.peripheral]]` entry and before the next peripheral entry. Keep each board's existing matrix and connection settings.
+Add a battery table to override the preset for that side. Place each `[split.peripheral.battery]` table after the corresponding `[[split.peripheral]]` entry and before the next peripheral entry. Keep each board's existing matrix and connection settings.
 
 ```toml
 [split.central.battery]
@@ -171,7 +173,7 @@ Battery measurement reserves ADC1. This configuration requires RMK's ESP32 BLE i
 When peripherals are configured to sample their batteries (see above), their levels are forwarded to the central over the split BLE links and re-exposed to the host through standard Battery Service instances (UUID `0x180F`) on the central's GATT server. The host sees one Battery Service instance for:
 
 - the central's own battery level, and
-- each peripheral whose `[split.peripheral.battery]` defines `battery_adc_pin`.
+- each peripheral with `battery_adc_pin` set by its own table or the board preset.
 
 Set `battery_user_description` in each board's battery table to give its battery a name such as `"Left"` or `"Right"`. The host determines whether these names and separate battery levels appear in its interface.
 

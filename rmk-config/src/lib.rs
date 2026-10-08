@@ -196,8 +196,8 @@ impl KeyboardTomlConfig {
         let mut config = Self::parse_from_toml_path(path, Some(default_config_str));
         config.set_storage_user_flags(user_config.storage.as_ref());
         config.dfu_user_set = user_config.dfu.is_some();
-        // A board's default [battery] is for unibody keyboards; split keyboards
-        // set [split.central.battery] and [split.peripheral.battery] instead.
+        // Split battery resolution applies the preset per side; only an explicit
+        // top-level [battery] should reach its validation error.
         if config.split.is_some() && user_config.battery.is_none() {
             config.battery = None;
         }
