@@ -17,14 +17,26 @@ use rmk_types::morse::MorseProfile;
 use rmk_types::morse::MorseProfileName;
 #[cfg(feature = "host")]
 use rmk_types::protocol::rynk::BehaviorOptions;
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+use rmk_types::protocol::rynk::LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE;
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+use rmk_types::protocol::rynk::LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE;
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+use rmk_types::protocol::rynk::LIGHTING_EXTENSION_PARAM_CHUNK;
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+use rmk_types::protocol::rynk::LIGHTING_SCENE_CHUNK_SIZE;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::LayerMetadata;
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+use rmk_types::protocol::rynk::LightingConditionalSceneCell;
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+use rmk_types::protocol::rynk::LightingExtendedConditionalSceneCell;
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+use rmk_types::protocol::rynk::LightingLayerPolicy;
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+use rmk_types::protocol::rynk::LightingSceneCell;
 #[cfg(feature = "rynk")]
 use rmk_types::protocol::rynk::PointingConfig;
-#[cfg(all(feature = "lighting", feature = "rynk"))]
-use rmk_types::protocol::rynk::{
-    LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE,
-    LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_SCENE_CHUNK_SIZE, LightingConditionalSceneCell,
-    LightingExtendedConditionalSceneCell, LightingLayerPolicy, LightingSceneCell,
-};
 use rmk_types::unicode::UnicodeMode;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::Cache;
@@ -250,6 +262,8 @@ pub(crate) enum StorageKey {
     BleName,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers,
+    #[cfg(feature = "rynk")]
+    LayerMetadata(u8),
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -360,6 +374,11 @@ pub(crate) enum StorageItem {
     BleName(BleName),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers(u64),
+    #[cfg(feature = "rynk")]
+    LayerMetadata {
+        layer: u8,
+        metadata: LayerMetadata,
+    },
 }
 
 impl StorageItem {
@@ -401,6 +420,10 @@ impl StorageItem {
             Self::BleName(v) => (StorageKey::BleName, StorageValue::BleName(v)),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             Self::LightingWakeLayers(v) => (StorageKey::LightingWakeLayers, StorageValue::LightingWakeLayers(v)),
+            #[cfg(feature = "rynk")]
+            Self::LayerMetadata { layer, metadata } => {
+                (StorageKey::LayerMetadata(layer), StorageValue::LayerMetadata(metadata))
+            }
             Self::UserData { slot, data } => (StorageKey::UserData(slot), StorageValue::UserData(data)),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             Self::LightingSceneTable(v) => (StorageKey::LightingSceneTable, StorageValue::LightingSceneTable(v)),
@@ -563,6 +586,8 @@ pub(crate) enum StorageValue {
     PositionCombo(PositionComboConfig),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers(u64),
+    #[cfg(feature = "rynk")]
+    LayerMetadata(LayerMetadata),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -1828,6 +1853,30 @@ mod tests {
         });
     }
 
+    #[cfg(feature = "rynk")]
+    #[test]
+    fn layer_metadata_survives_flash_map_reopen() {
+        block_on(async {
+            let metadata = LayerMetadata {
+                occupied: true,
+                name: heapless::String::try_from("Navigation").unwrap(),
+            };
+            let mut storage = new_storage(async_flash_wrapper(Part::new())).await;
+            storage
+                .put(StorageItem::LayerMetadata {
+                    layer: 2,
+                    metadata: metadata.clone(),
+                })
+                .await
+                .unwrap();
+            let (flash, _) = storage.flash.destroy();
+            let mut reopened = new_storage(flash).await;
+            assert!(
+                matches!(reopened.fetch(StorageKey::LayerMetadata(2)).await, Ok(Some(StorageValue::LayerMetadata(actual))) if actual == metadata)
+            );
+        });
+    }
+
     #[test]
     fn user_data_round_trips_through_its_slot() {
         with_storage_task(Part::new(), async {
@@ -2116,6 +2165,9 @@ mod tests {
             StorageKey::BleName,
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageKey::LightingWakeLayers,
+            StorageKey::UserData(0),
+            #[cfg(feature = "rynk")]
+            StorageKey::LayerMetadata(9),
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -2209,6 +2261,8 @@ mod tests {
             StorageValue::BleName(BleName {
                 template: heapless::String::new(),
             }),
+            #[cfg(feature = "rynk")]
+            StorageValue::LayerMetadata(LayerMetadata::vacant()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
