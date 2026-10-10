@@ -1,0 +1,16 @@
+[layout]
+rows = 1
+cols = 1
+map = "(0,0,L)"
+[[keymap.layer]]
+keys = "MT(A, LShift, local)"
+[behavior.morse]
+opposite_hand_hold = true
+hold_timeout = "200ms"
+[behavior.morse.profiles.local]
+unilateral_tap = true
+normal_mode = true
+[[test]]
+name = "named_unilateral_policy_overrides_opposite_hand_default"
+steps = [{ tap = { pos = [0, 0], duration = 250 } }]
+expect = [["LShift"], []]
