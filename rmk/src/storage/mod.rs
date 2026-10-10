@@ -2030,7 +2030,6 @@ mod tests {
             StorageKey::AutoMouseLayerConfigs,
             #[cfg(feature = "host")]
             StorageKey::MorseProfileName(12),
-            StorageKey::UserData(0),
             #[cfg(feature = "_ble")]
             StorageKey::BleName,
         ];
