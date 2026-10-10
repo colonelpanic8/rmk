@@ -162,6 +162,7 @@ impl<S: PointingDriver> PointingDevice<S> {
 
         Some(PointingEvent {
             device_id: self.id,
+            buttons: 0,
             axes: [
                 AxisEvent {
                     typ: AxisValType::Rel,
@@ -597,6 +598,8 @@ pub struct PointingProcessor<'a> {
     scroll_acceleration_rest: (i64, i64),
     /// When the previous event arrived, to measure the speed for acceleration
     last_event_at: Instant,
+    /// Device-originated button state from the last processed event
+    device_buttons: u8,
 }
 
 impl<'a> PointingProcessor<'a> {
@@ -610,6 +613,7 @@ impl<'a> PointingProcessor<'a> {
             acceleration_rest: (0, 0),
             scroll_acceleration_rest: (0, 0),
             last_event_at: Instant::MIN,
+            device_buttons: 0,
         }
     }
 
@@ -660,7 +664,9 @@ impl<'a> PointingProcessor<'a> {
         let dt_ms = now.saturating_duration_since(self.last_event_at).as_millis();
         self.last_event_at = now;
 
-        let buttons = self.keymap.mouse_buttons();
+        let device_buttons_changed = event.buttons != self.device_buttons;
+        self.device_buttons = event.buttons;
+        let buttons = self.keymap.mouse_buttons() | event.buttons;
         match self.current_mode {
             PointingMode::Cursor(_) | PointingMode::Scroll(_) | PointingMode::Sniper(_) => {
                 // modes that generate mouse reports
@@ -683,7 +689,7 @@ impl<'a> PointingProcessor<'a> {
                             &mut accumulator.remainder_y,
                         );
                         // Motion too small to move the cursor yet, as in sniper mode.
-                        if out_x == 0 && out_y == 0 && (x, y) != (0, 0) {
+                        if out_x == 0 && out_y == 0 && (x, y) != (0, 0) && !device_buttons_changed {
                             return;
                         }
                         let out_x = if cursor_config.invert_x { -out_x } else { out_x };
@@ -706,7 +712,7 @@ impl<'a> PointingProcessor<'a> {
                             (scroll_config.multiplier_x, scroll_config.divisor_x),
                             (scroll_config.multiplier_y, scroll_config.divisor_y),
                         );
-                        if sx == 0 && sy == 0 {
+                        if sx == 0 && sy == 0 && !device_buttons_changed {
                             return;
                         }
                         // Sensor X → pan, sensor Y → wheel.
@@ -729,7 +735,7 @@ impl<'a> PointingProcessor<'a> {
                             (sniper_config.multiplier, sniper_config.divisor),
                             (sniper_config.multiplier, sniper_config.divisor),
                         );
-                        if sx == 0 && sy == 0 {
+                        if sx == 0 && sy == 0 && !device_buttons_changed {
                             return;
                         }
                         let out_x = if sniper_config.invert_x { -sx } else { sx };

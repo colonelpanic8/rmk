@@ -134,6 +134,7 @@ mod tests {
 
         let roll = || PointingEvent {
             device_id: 0,
+            buttons: 0,
             axes: [
                 AxisEvent {
                     typ: AxisValType::Rel,
