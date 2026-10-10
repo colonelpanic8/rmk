@@ -257,7 +257,9 @@ impl<'a> RynkService<'a> {
             #[cfg(feature = "_ble")]
             Cmd::GetBleStatus | Cmd::SwitchBleProfile | Cmd::GetBatteryStatus => Some(false),
             #[cfg(feature = "split")]
-            Cmd::GetPeripheralStatus => Some(false),
+            Cmd::GetPeripheralStatus | Cmd::GetSplitTransport => Some(false),
+            #[cfg(feature = "split")]
+            Cmd::SetSplitTransportForce => Some(true),
             Cmd::SetMorseProfileEntry | Cmd::DeleteMorseProfile => Some(true),
             Cmd::GetBuildInfo
             | Cmd::GetMorseHoldTriggerPositions
