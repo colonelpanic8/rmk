@@ -9,6 +9,8 @@ use embedded_storage::nor_flash::NorFlash;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 #[cfg(feature = "host")]
 use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
+#[cfg(feature = "_ble")]
+use rmk_types::ble::BleName;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
 #[cfg(feature = "host")]
@@ -241,6 +243,8 @@ pub(crate) enum StorageKey {
     AutoMouseLayerConfigs,
     #[cfg(feature = "host")]
     MorseProfileName(u8),
+    #[cfg(feature = "_ble")]
+    BleName,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -342,6 +346,8 @@ pub(crate) enum StorageItem {
         idx: u8,
         name: MorseProfileName,
     },
+    #[cfg(feature = "_ble")]
+    BleName(BleName),
 }
 
 impl StorageItem {
@@ -377,6 +383,8 @@ impl StorageItem {
             Self::BondInfo(v) => (StorageKey::BondInfo(v.slot_num), StorageValue::BondInfo(v)),
             #[cfg(feature = "_ble")]
             Self::ActiveBleProfile(v) => (StorageKey::ActiveBleProfile, StorageValue::ActiveBleProfile(v)),
+            #[cfg(feature = "_ble")]
+            Self::BleName(v) => (StorageKey::BleName, StorageValue::BleName(v)),
             Self::UserData { slot, data } => (StorageKey::UserData(slot), StorageValue::UserData(data)),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             Self::LightingSceneTable(v) => (StorageKey::LightingSceneTable, StorageValue::LightingSceneTable(v)),
@@ -532,6 +540,8 @@ pub(crate) enum StorageValue {
     AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
     #[cfg(feature = "host")]
     MorseProfileName(MorseProfileName),
+    #[cfg(feature = "_ble")]
+    BleName(BleName),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -2020,6 +2030,9 @@ mod tests {
             StorageKey::AutoMouseLayerConfigs,
             #[cfg(feature = "host")]
             StorageKey::MorseProfileName(12),
+            StorageKey::UserData(0),
+            #[cfg(feature = "_ble")]
+            StorageKey::BleName,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -2109,6 +2122,10 @@ mod tests {
             StorageValue::AutoMouseLayerConfigs(heapless::Vec::new()),
             #[cfg(feature = "host")]
             StorageValue::MorseProfileName(MorseProfileName::new()),
+            #[cfg(feature = "_ble")]
+            StorageValue::BleName(BleName {
+                template: heapless::String::new(),
+            }),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {

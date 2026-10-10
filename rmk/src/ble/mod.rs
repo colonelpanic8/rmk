@@ -47,6 +47,7 @@ pub(crate) mod device_info;
 #[cfg(feature = "host")]
 pub(crate) mod host;
 pub(crate) mod led;
+pub(crate) mod name;
 #[cfg(feature = "_nrf_ble")]
 pub(crate) mod nrf;
 pub mod passkey;
@@ -95,6 +96,7 @@ where
     controller: Option<C>,
     address: [u8; 6],
     device_config: DeviceConfig<'static>,
+    ble_name: Option<&'static str>,
     config: BleBatteryConfig,
     /// One matrix region per split peripheral.
     #[cfg(feature = "split")]
@@ -120,6 +122,7 @@ where
             controller: Some(controller),
             address,
             device_config: rmk_config.device_config,
+            ble_name: rmk_config.ble_name,
             config: rmk_config.ble_battery_config,
             #[cfg(feature = "split")]
             peripheral_matrices,
@@ -159,6 +162,7 @@ where
         run_ble_keyboard(
             &stack,
             &self.device_config,
+            self.ble_name,
             &self.config,
             #[cfg(feature = "host")]
             self.host_service,
@@ -207,6 +211,7 @@ impl<
             run_ble_keyboard(
                 &stack,
                 &self.device_config,
+                self.ble_name,
                 &self.config,
                 #[cfg(feature = "host")]
                 self.host_service,
@@ -227,10 +232,17 @@ async fn run_ble_keyboard<
 >(
     stack: &Stack<'_, C, DefaultPacketPool>,
     device_config: &DeviceConfig<'static>,
+    ble_name: Option<&'static str>,
     config: &BleBatteryConfig,
     #[cfg(feature = "host")] host_service: Option<&'r crate::host::HostService<'r>>,
 ) -> ! {
     let product_name = device_config.product_name;
+    name::initialize(ble_name.unwrap_or(product_name));
+    if let Ok(Some(crate::storage::StorageValue::BleName(saved))) =
+        crate::storage::read(crate::storage::StorageKey::BleName).await
+    {
+        name::restore(saved);
+    }
     #[cfg(feature = "_nrf_ble")]
     let serial_number = crate::ble::nrf::get_serial_number();
     #[cfg(not(feature = "_nrf_ble"))]
@@ -286,6 +298,9 @@ async fn run_ble_keyboard<
         // the first advertise below sets it.
         let mut adv_deadline: Option<Instant> = None;
         loop {
+            name::BLE_NAME_CHANGED.reset();
+            let advertised_name = name::render(crate::state::current_profile());
+
             // On the dongle slot, advertise directed to the bonded dongle or
             // as a seeking broadcast; on the normal profiles, plain HID.
             #[cfg(feature = "dongle")]
@@ -295,10 +310,10 @@ async fn run_ble_keyboard<
                     None => Adv::DongleSeeking,
                 }
             } else {
-                Adv::Host { name: product_name }
+                Adv::Host { name: &advertised_name }
             };
             #[cfg(not(feature = "dongle"))]
-            let adv = Adv::Host { name: product_name };
+            let adv = Adv::Host { name: &advertised_name };
 
             // Wait for 10ms to ensure the USB is checked
             Timer::after_millis(10).await;
@@ -311,13 +326,14 @@ async fn run_ble_keyboard<
             let deadline = *adv_deadline.get_or_insert(now + Duration::from_secs(300));
             let timeout = deadline.saturating_duration_since(now);
 
-            match select(
+            match select3(
                 advertise(&mut peripheral, &server.server, adv, timeout),
                 profile_manager.update_profile(),
+                name::BLE_NAME_CHANGED.wait(),
             )
             .await
             {
-                Either::First(Ok(conn)) => {
+                Either3::First(Ok(conn)) => {
                     info!("[adv] connection established");
                     if let Err(e) = conn.raw().set_bondable(true) {
                         error!("Set bondable error: {:?}", e);
@@ -360,7 +376,7 @@ async fn run_ble_keyboard<
                         disconnect(&conn).await;
                     }
                 }
-                Either::First(Err(BleHostError::BleHost(Error::Timeout))) => {
+                Either3::First(Err(BleHostError::BleHost(Error::Timeout))) => {
                     warn!("Advertising timeout, sleep and wait for any key");
                     set_ble_state(BleState::Inactive);
 
@@ -377,13 +393,13 @@ async fn run_ble_keyboard<
 
                     report_activity();
                 }
-                Either::First(Err(e)) => {
+                Either3::First(Err(e)) => {
                     #[cfg(feature = "defmt")]
                     let e = defmt::Debug2Format(&e);
                     error!("Advertise error: {:?}", e);
                     Timer::after_millis(200).await;
                 }
-                Either::Second(()) => {}
+                Either3::Second(()) | Either3::Third(()) => {}
             };
 
             // Starts a fresh advertising session.
