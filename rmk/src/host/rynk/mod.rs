@@ -160,6 +160,10 @@ impl<'a> RynkService<'a> {
         if cmd == Cmd::SetBleName {
             return true;
         }
+        #[cfg(feature = "_ble")]
+        if cmd == Cmd::SetAutoSwitchTransport {
+            return true;
+        }
         matches!(
             cmd,
             Cmd::SetKeyAction
@@ -339,7 +343,7 @@ impl<'a> RynkService<'a> {
             | Cmd::GetLightingAdvancedRuntimeConditionalSceneStatus
             | Cmd::GetLightingAdvancedRuntimeConditionalScenes => Some(false),
             #[cfg(feature = "_ble")]
-            Cmd::GetBleName => Some(false),
+            Cmd::GetBleName | Cmd::GetAutoSwitchTransport => Some(false),
             Cmd::GetComboDefinition | Cmd::GetComboDefinitionBulk => Some(false),
             Cmd::GetDeviceDataDescriptor | Cmd::GetDeviceDataRecord => Some(false),
             _ => None,
@@ -448,6 +452,10 @@ impl<'a> RynkService<'a> {
             Cmd::SetSplitTransportForce => serve::<command::SetSplitTransportForce, _>(self, msg).await,
             #[cfg(feature = "_ble")]
             Cmd::ClearAllBleProfiles => serve::<command::ClearAllBleProfiles, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::GetAutoSwitchTransport => serve::<command::GetAutoSwitchTransport, _>(self, msg).await,
+            #[cfg(feature = "_ble")]
+            Cmd::SetAutoSwitchTransport => serve::<command::SetAutoSwitchTransport, _>(self, msg).await,
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,

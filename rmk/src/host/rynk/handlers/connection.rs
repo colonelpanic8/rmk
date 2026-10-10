@@ -7,9 +7,21 @@ use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::protocol::rynk::BleName;
 use rmk_types::protocol::rynk::RynkError;
 #[cfg(feature = "_ble")]
-use rmk_types::protocol::rynk::command::{
-    ClearAllBleProfiles, ClearBleProfile, GetBleName, GetBleStatus, SetBleName, SwitchBleProfile,
-};
+use rmk_types::protocol::rynk::command::ClearAllBleProfiles;
+#[cfg(feature = "_ble")]
+use rmk_types::protocol::rynk::command::ClearBleProfile;
+#[cfg(feature = "_ble")]
+use rmk_types::protocol::rynk::command::GetAutoSwitchTransport;
+#[cfg(feature = "_ble")]
+use rmk_types::protocol::rynk::command::GetBleName;
+#[cfg(feature = "_ble")]
+use rmk_types::protocol::rynk::command::GetBleStatus;
+#[cfg(feature = "_ble")]
+use rmk_types::protocol::rynk::command::SetAutoSwitchTransport;
+#[cfg(feature = "_ble")]
+use rmk_types::protocol::rynk::command::SetBleName;
+#[cfg(feature = "_ble")]
+use rmk_types::protocol::rynk::command::SwitchBleProfile;
 use rmk_types::protocol::rynk::command::{GetConnectionStatus, GetConnectionType};
 #[cfg(all(feature = "_ble", feature = "split"))]
 use rmk_types::protocol::rynk::command::{GetSplitCentralLatency, SetSplitCentralLatency};
@@ -141,6 +153,27 @@ impl Handle<SetBleName> for RynkService<'_> {
     async fn handle(&self, value: BleName) -> Result<(), RynkError> {
         crate::ble::name::set(value.clone()).map_err(|_| RynkError::Invalid)?;
         crate::storage::store(crate::storage::StorageItem::BleName(value))
+            .await
+            .map_err(|_| RynkError::StorageFault)?;
+        Ok(())
+    }
+}
+
+/// `Cmd::GetAutoSwitchTransport` — whether the cable drives the preference.
+#[cfg(feature = "_ble")]
+impl Handle<GetAutoSwitchTransport> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<bool, RynkError> {
+        Ok(crate::state::auto_switch_transport())
+    }
+}
+
+/// `Cmd::SetAutoSwitchTransport` — the policy applies from the next plug or
+/// unplug, so the current preference is deliberately left where it is.
+#[cfg(feature = "_ble")]
+impl Handle<SetAutoSwitchTransport> for RynkService<'_> {
+    async fn handle(&self, enabled: bool) -> Result<(), RynkError> {
+        crate::state::set_auto_switch_transport(enabled);
+        crate::storage::store(crate::storage::StorageItem::AutoSwitchTransport(enabled))
             .await
             .map_err(|_| RynkError::StorageFault)?;
         Ok(())

@@ -302,6 +302,8 @@ pub(crate) enum StorageKey {
     LightingRuleShardV4(u8),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuleShardV4B(u8),
+    #[cfg(feature = "_ble")]
+    AutoSwitchTransport,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -429,6 +431,8 @@ pub(crate) enum StorageItem {
         index: u8,
         rules: heapless::Vec<u8, LIGHTING_RULE_SHARD_BYTES>,
     },
+    #[cfg(feature = "_ble")]
+    AutoSwitchTransport(bool),
 }
 
 impl StorageItem {
@@ -474,6 +478,8 @@ impl StorageItem {
             Self::LayerMetadata { layer, metadata } => {
                 (StorageKey::LayerMetadata(layer), StorageValue::LayerMetadata(metadata))
             }
+            #[cfg(feature = "_ble")]
+            Self::AutoSwitchTransport(v) => (StorageKey::AutoSwitchTransport, StorageValue::AutoSwitchTransport(v)),
             Self::UserData { slot, data } => (StorageKey::UserData(slot), StorageValue::UserData(data)),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             Self::LightingSceneTable(v) => (StorageKey::LightingSceneTable, StorageValue::LightingSceneTable(v)),
@@ -674,6 +680,8 @@ pub(crate) enum StorageValue {
     LightingExtensionParams(LightingExtensionParamsRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuleShardV4(heapless::Vec<u8, LIGHTING_RULE_SHARD_BYTES>),
+    #[cfg(feature = "_ble")]
+    AutoSwitchTransport(bool),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -2539,6 +2547,8 @@ mod tests {
             StorageKey::LightingRuleShardV4(0),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageKey::LightingRuleShardV4B(0),
+            #[cfg(feature = "_ble")]
+            StorageKey::AutoSwitchTransport,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -2657,6 +2667,8 @@ mod tests {
             }),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageValue::LightingRuleShardV4(heapless::Vec::new()),
+            #[cfg(feature = "_ble")]
+            StorageValue::AutoSwitchTransport(false),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
