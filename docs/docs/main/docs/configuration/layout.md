@@ -273,21 +273,22 @@ The `layer.keys` string follows several rules:
    2. `PDF(n)` — switch the default layer to layer `n` and persist it to storage, so it survives reboots.
    3. `MO(n)` — momentarily activate layer `n`.
    4. `LM(n, modifier)` — activate layer `n` with a modifier held. The modifier chains like `WM`.
-   5. `LT(n, key, <profile_name>)` — activate layer `n` on hold, or tap `key` (tap/hold). `key` is an RMK [`KeyCode`](./keymap_configuration/keycodes); the optional `profile_name` sets the key's [profile](./behavior#per-key-profiles-for-morse-tapdance-tap-hold-fine-tuning).
-   6. `OSL(n)` — one-shot layer `n`.
-   7. `OSM(modifier)` — one-shot modifier. The modifier chains like `WM`.
-   8. `TT(n)` — activate layer `n`, or tap-toggle it.
-   9. `TG(n)` — toggle layer `n`.
-   10. `TO(n)` — activate layer `n` and deactivate all other layers.
+   5. `LMT(n, modifier, key)` — activate layer `n` with one modifier held and tap `key` once on activation. The layer and modifier remain active until release; `n` must be 0-15.
+   6. `LT(n, key, <profile_name>)` — activate layer `n` on hold, or tap `key` (tap/hold). `key` is an RMK [`KeyCode`](./keymap_configuration/keycodes); the optional `profile_name` sets the key's [profile](./behavior#per-key-profiles-for-morse-tapdance-tap-hold-fine-tuning).
+   7. `OSL(n)` — one-shot layer `n`.
+   8. `OSM(modifier)` — one-shot modifier. The modifier chains like `WM`.
+   9. `TT(n)` — activate layer `n`, or tap-toggle it.
+   10. `TG(n)` — toggle layer `n`.
+   11. `TO(n)` — activate layer `n` and deactivate all other layers.
 
-   These match QMK's definitions; see the [QMK layer docs](https://docs.qmk.fm/#/feature_layers). If you need another action, please [file an issue](https://github.com/rmk-rs/rmk/issues/new).
+   Except for RMK's `LMT`, these match QMK's definitions; see the [QMK layer docs](https://docs.qmk.fm/#/feature_layers). If you need another action, please [file an issue](https://github.com/rmk-rs/rmk/issues/new).
 
 5. For modifier-tap-hold, use `MT(key, modifier, <profile_name>)`, where the modifier can be a chain as in rule 1. The optional `profile_name` sets the key's [profile](./behavior#per-key-profiles-for-morse-tapdance-tap-hold-fine-tuning).
 <!-- If you're using home-row mod(HRM), you can also use `HRM(key, modifier)` to create a modifier-tap-hold whose configuration is optimized for home-row mod. -->
 
 6. For a generic tap-hold, use `TH(key-tap, key-hold, <profile_name>)`. The optional `profile_name` sets the key's [profile](./behavior#per-key-profiles-for-morse-tapdance-tap-hold-fine-tuning).
 
-   The tap/hold slots of `MT`, `TH`, and `LT` aren't limited to plain keycodes — they accept any single action, so you can nest other actions inside them. For example, `MT(WM(P, RAlt), LShift, HRM)` taps `RAlt+P` and holds `LShift` with the `HRM` profile, and `TH(WM(A, LShift), MO(2))` taps `Shift+A` and holds momentary-layer 2. Composite tap-hold/morse forms (`MT`/`TH`/`LT`/`TT`/`TD`) cannot be nested inside a slot.
+   The tap/hold slots of `MT`, `TH`, and `LT` aren't limited to plain keycodes — they accept any single action, so you can nest other actions inside them. For example, `MT(WM(P, RAlt), LShift, HRM)` taps `RAlt+P` and holds `LShift` with the `HRM` profile, and `TH(WM(A, LShift), MO(2))` taps `Shift+A` and holds momentary-layer 2. Composite forms (`LMT`/`MT`/`TH`/`LT`/`TT`/`TD`) cannot be nested inside a slot.
 
 7. For a shifted key, you can use `SHIFTED(key)` as an alternative to with-modifier (`WM(key, LShift)` - see above).
 
