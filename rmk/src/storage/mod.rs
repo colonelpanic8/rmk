@@ -83,6 +83,9 @@ pub(crate) enum FlashOperationMessage {
     LightingExtensionState(LightingExtensionRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingExtensionOverlay(LightingExtensionOverlayRecord),
+    /// Layers that temporarily wake otherwise-disabled lighting.
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingWakeLayers(u64),
 }
 
 // Requests to the storage task, handled in order (FIFO). Each carries the id `REPLY` answers it
@@ -245,6 +248,8 @@ pub(crate) enum StorageKey {
     MorseProfileName(u8),
     #[cfg(feature = "_ble")]
     BleName,
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingWakeLayers,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -353,6 +358,8 @@ pub(crate) enum StorageItem {
     },
     #[cfg(feature = "_ble")]
     BleName(BleName),
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingWakeLayers(u64),
 }
 
 impl StorageItem {
@@ -392,6 +399,8 @@ impl StorageItem {
             Self::ActiveBleProfile(v) => (StorageKey::ActiveBleProfile, StorageValue::ActiveBleProfile(v)),
             #[cfg(feature = "_ble")]
             Self::BleName(v) => (StorageKey::BleName, StorageValue::BleName(v)),
+            #[cfg(all(feature = "lighting", feature = "rynk"))]
+            Self::LightingWakeLayers(v) => (StorageKey::LightingWakeLayers, StorageValue::LightingWakeLayers(v)),
             Self::UserData { slot, data } => (StorageKey::UserData(slot), StorageValue::UserData(data)),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             Self::LightingSceneTable(v) => (StorageKey::LightingSceneTable, StorageValue::LightingSceneTable(v)),
@@ -552,6 +561,8 @@ pub(crate) enum StorageValue {
     /// Appended to preserve every existing postcard enum discriminant.
     #[cfg(feature = "host")]
     PositionCombo(PositionComboConfig),
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    LightingWakeLayers(u64),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -1105,6 +1116,16 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
         }
     }
 
+    /// Read the user-selected wake-layer mask. `None` preserves the board's
+    /// compiled fallback on keyboards that have never configured it.
+    #[cfg(all(feature = "lighting", feature = "rynk"))]
+    pub async fn read_lighting_wake_layers(&mut self) -> Option<u64> {
+        match self.fetch(StorageKey::LightingWakeLayers).await {
+            Ok(Some(StorageValue::LightingWakeLayers(layers))) => Some(layers),
+            _ => None,
+        }
+    }
+
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     pub async fn read_lighting_extension_overlay(&mut self) -> Option<LightingExtensionOverlayRecord> {
         match self.fetch(StorageKey::LightingExtensionOverlay).await {
@@ -1493,6 +1514,17 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                         Ok(Some(StorageValue::LightingExtensionState(saved))) if saved == record => Ok(None),
                         _ => self
                             .put(StorageItem::LightingExtensionState(record))
+                            .await
+                            .map(|_| None)
+                            .map_err(print_storage_error::<F>),
+                    }
+                }
+                #[cfg(all(feature = "lighting", feature = "rynk"))]
+                FlashOperationMessage::LightingWakeLayers(layers) => {
+                    match self.fetch(StorageKey::LightingWakeLayers).await {
+                        Ok(Some(StorageValue::LightingWakeLayers(saved))) if saved == layers => Ok(None),
+                        _ => self
+                            .put(StorageItem::LightingWakeLayers(layers))
                             .await
                             .map(|_| None)
                             .map_err(print_storage_error::<F>),
@@ -2082,6 +2114,8 @@ mod tests {
             StorageKey::MorseProfileName(12),
             #[cfg(feature = "_ble")]
             StorageKey::BleName,
+            #[cfg(all(feature = "lighting", feature = "rynk"))]
+            StorageKey::LightingWakeLayers,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
