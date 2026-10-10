@@ -2,22 +2,50 @@
 
 use embassy_time::Duration;
 use rmk_types::action::{EncoderAction, KeyAction};
+use rmk_types::auto_mouse::AutoMouseLayerConfig;
 #[cfg(feature = "_ble")]
 use rmk_types::battery::BatteryStatus;
 use rmk_types::combo::Combo as ComboConfig;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
 use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
+#[cfg(feature = "storage")]
+use rmk_types::morse::MorseProfileName;
 use rmk_types::morse::{Morse, MorseProfile};
 #[cfg(feature = "rynk")]
-use rmk_types::protocol::rynk::{
-    BehaviorConfig, MorseHoldTriggerPosition, MorseHoldTriggerPositionState, MorseHoldTriggerPositions,
-    SetMorseHoldTriggerPositionsRequest, LAYER_STATE_BITMAP_SIZE, LAYER_STATE_CAPACITY, LayerState,
-};
+use rmk_types::protocol::rynk::AutoMouseLayerConfigs;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::BehaviorConfig;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::BehaviorOptions;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::LAYER_STATE_BITMAP_SIZE;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::LAYER_STATE_CAPACITY;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::LayerState;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::MORSE_PROFILE_ENTRY_CHUNK;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::MorseHoldTriggerPosition;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::MorseHoldTriggerPositionState;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::MorseHoldTriggerPositions;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::MorseProfileEntry;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::MorseProfileState;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::SetMorseHoldTriggerPositionsRequest;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::SetMorseProfileEntryRequest;
 
 #[cfg(feature = "rynk")]
 use crate::config::HoldTriggerPositions;
-use crate::event::KeyboardEventPos;
+#[cfg(feature = "rynk")]
+use crate::config::OneShotModifiersConfig;
+use crate::event::{AutoMouseLayerConfigChangeEvent, KeyboardEventPos, publish_event};
 use crate::keyboard::combo::Combo;
 use crate::keymap::KeyMap;
 #[cfg(feature = "storage")]
@@ -197,6 +225,122 @@ impl<'a> KeyboardContext<'a> {
         self.keymap.morse_default_profile()
     }
 
+    pub fn morse_profiles_capacity(&self) -> usize {
+        self.keymap.morse_profiles_capacity()
+    }
+
+    /// Profile a key bound to `idx` resolves to. `None` if `idx` is past the
+    /// table's capacity.
+    pub fn get_morse_profile(&self, idx: u8) -> Option<MorseProfile> {
+        ((idx as usize) < self.keymap.morse_profiles_capacity()).then(|| self.keymap.morse_profile(idx))
+    }
+
+    #[cfg(feature = "rynk")]
+    pub fn morse_profile_state(&self, offset: u8) -> MorseProfileState {
+        let total = (0..self.keymap.morse_profiles_capacity())
+            .filter(|index| self.keymap.morse_profile_name(*index as u8).is_some())
+            .count();
+        let entries = (0..self.keymap.morse_profiles_capacity())
+            .filter(|index| self.keymap.morse_profile_name(*index as u8).is_some())
+            .skip(offset as usize)
+            .take(MORSE_PROFILE_ENTRY_CHUNK)
+            .map(|index| {
+                let index = index as u8;
+                MorseProfileEntry {
+                    index,
+                    name: self.keymap.morse_profile_name(index).expect("filtered occupied slot"),
+                    profile: self.keymap.morse_profile(index),
+                }
+            })
+            .collect();
+        MorseProfileState {
+            capacity: self.keymap.morse_profiles_capacity() as u8,
+            total: total as u8,
+            entries,
+        }
+    }
+
+    /// Replace the profile at `idx` and persist it. `Ok(false)` for an index
+    /// past the table's capacity, which changes nothing.
+    pub async fn set_morse_profile(&self, idx: u8, profile: MorseProfile) -> Result<bool, ()> {
+        if !self.keymap.set_morse_profile(idx, profile) {
+            return Ok(false);
+        }
+        #[cfg(feature = "storage")]
+        {
+            store(StorageItem::MorseProfile { idx, profile }).await?;
+            store(StorageItem::MorseProfileName {
+                idx,
+                name: self.keymap.morse_profile_name(idx).expect("setter occupies the slot"),
+            })
+            .await?;
+        }
+        Ok(true)
+    }
+
+    /// Create, rename, or update one slot. `Ok(false)` for an index past the table, an
+    /// empty name, or a name another slot already carries; nothing changes then.
+    #[cfg(feature = "rynk")]
+    pub async fn set_morse_profile_entry(&self, request: SetMorseProfileEntryRequest) -> Result<bool, ()> {
+        let capacity = self.keymap.morse_profiles_capacity();
+        let entry = request.entry;
+        if entry.index as usize >= capacity || entry.name.trim().is_empty() {
+            return Ok(false);
+        }
+        for index in 0..capacity {
+            if index != entry.index as usize
+                && self
+                    .keymap
+                    .morse_profile_name(index as u8)
+                    .is_some_and(|name| name == entry.name)
+            {
+                return Ok(false);
+            }
+        }
+        if !self
+            .keymap
+            .set_named_morse_profile(entry.index, entry.name.clone(), entry.profile)
+        {
+            return Ok(false);
+        }
+
+        #[cfg(feature = "storage")]
+        {
+            store(StorageItem::MorseProfile {
+                idx: entry.index,
+                profile: entry.profile,
+            })
+            .await?;
+            store(StorageItem::MorseProfileName {
+                idx: entry.index,
+                name: entry.name,
+            })
+            .await?;
+        }
+        Ok(true)
+    }
+
+    /// Vacate slot `idx`. `Ok(false)` for an index past the table.
+    pub async fn delete_morse_profile(&self, idx: u8) -> Result<bool, ()> {
+        if !self.keymap.delete_morse_profile(idx) {
+            return Ok(false);
+        }
+        #[cfg(feature = "storage")]
+        {
+            store(StorageItem::MorseProfile {
+                idx,
+                profile: MorseProfile::default(),
+            })
+            .await?;
+            store(StorageItem::MorseProfileName {
+                idx,
+                name: MorseProfileName::new(),
+            })
+            .await?;
+        }
+        Ok(true)
+    }
+
     pub fn morse_prior_idle_time(&self) -> Duration {
         self.keymap.morse_prior_idle_time()
     }
@@ -232,6 +376,95 @@ impl<'a> KeyboardContext<'a> {
         #[cfg(feature = "storage")]
         store(StorageItem::MorseHoldTriggerPositions(stored)).await?;
         Ok(())
+    }
+
+    pub fn behavior_options(&self) -> BehaviorOptions {
+        let one_shot = self.keymap.one_shot_modifiers_config();
+        BehaviorOptions {
+            tri_layer: self.keymap.tri_layer(),
+            combo_prior_idle_ms: self
+                .keymap
+                .combo_prior_idle_time()
+                .map(|duration| duration.as_millis() as u16),
+            oneshot_activate_on_keypress: one_shot.activate_on_keypress,
+            oneshot_quick_release: one_shot.quick_release,
+            morse_enable_flow_tap: self.keymap.morse_enable_flow_tap(),
+            morse_prior_idle_ms: self.keymap.morse_prior_idle_time().as_millis() as u16,
+            morse_default_profile: self.keymap.morse_default_profile(),
+        }
+    }
+
+    /// Replace the global behavior options and persist them. Invalid layer
+    /// indices reject the whole update before any field changes: `Ok(false)`.
+    #[cfg(feature = "rynk")]
+    pub async fn set_behavior_options(&self, options: BehaviorOptions) -> Result<bool, ()> {
+        let (_, _, layers) = self.keymap.get_keymap_config();
+        if options
+            .tri_layer
+            .is_some_and(|tri_layer| tri_layer.into_iter().any(|layer| layer as usize >= layers))
+        {
+            return Ok(false);
+        }
+
+        self.keymap.set_tri_layer(options.tri_layer);
+        self.keymap
+            .set_combo_prior_idle_time(options.combo_prior_idle_ms.map(|ms| Duration::from_millis(ms as u64)));
+        self.keymap.set_one_shot_modifiers_config(OneShotModifiersConfig {
+            activate_on_keypress: options.oneshot_activate_on_keypress,
+            quick_release: options.oneshot_quick_release,
+        });
+        self.keymap.set_morse_enable_flow_tap(options.morse_enable_flow_tap);
+        self.keymap
+            .set_morse_prior_idle_time(Duration::from_millis(options.morse_prior_idle_ms as u64));
+        self.keymap.set_morse_default_profile(options.morse_default_profile);
+
+        // The prior-idle time and default profile live in the older `BehaviorConfig` item.
+        #[cfg(feature = "storage")]
+        {
+            store(StorageItem::BehaviorOptions(options.into())).await?;
+            store(StorageItem::BehaviorConfig(self.keymap.behavior_snapshot())).await?;
+        }
+        Ok(true)
+    }
+
+    pub fn auto_mouse_layer_configs(&self) -> AutoMouseLayerConfigs {
+        self.keymap.auto_mouse_layer_configs().into_iter().collect()
+    }
+
+    /// Atomically replace the auto mouse layer table after validating every
+    /// entry against this firmware's compiled resources. `Ok(false)` rejects
+    /// the whole table without changing anything.
+    pub async fn set_auto_mouse_layer_configs(&self, configs: AutoMouseLayerConfigs) -> Result<bool, ()> {
+        if configs.len() > crate::AUTO_MOUSE_LAYER_MAX_NUM {
+            return Ok(false);
+        }
+        let (_, _, layers) = self.keymap.get_keymap_config();
+        for (index, config) in configs.iter().enumerate() {
+            if config.target_layer as usize >= layers
+                || config.timeout_ms == 0
+                || config.threshold == 0
+                || config.extra_mouse_keys.len() > rmk_types::auto_mouse::AUTO_MOUSE_LAYER_EXTRA_KEY_MAX_NUM
+            {
+                return Ok(false);
+            }
+            if (config.deactivate_on_key || config.reset_timeout_on_key) && crate::ACTION_EVENT_SUB_SIZE == 0 {
+                return Ok(false);
+            }
+            if configs[..index]
+                .iter()
+                .any(|existing| existing.device_id == config.device_id)
+            {
+                return Ok(false);
+            }
+        }
+
+        let firmware_configs: heapless::Vec<AutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> =
+            configs.into_iter().collect();
+        self.keymap.set_auto_mouse_layer_configs(firmware_configs.clone());
+        publish_event(AutoMouseLayerConfigChangeEvent);
+        #[cfg(feature = "storage")]
+        store(StorageItem::AutoMouseLayerConfigs(firmware_configs)).await?;
+        Ok(true)
     }
 
     pub async fn set_combo_timeout(&self, ms: u16) -> Result<(), ()> {

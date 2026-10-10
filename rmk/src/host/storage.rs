@@ -1,7 +1,10 @@
+use core::fmt::Write;
+
 use embassy_futures::yield_now;
 use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::constants::MACRO_CHUNK_SIZE;
+use rmk_types::morse::{MorseProfile, MorseProfileName};
 
 use crate::keyboard::combo::Combo;
 use crate::storage::{Storage, StorageKey, StorageValue, print_storage_error};
@@ -20,6 +23,11 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             .fetch_all_items(&mut self.buffer)
             .await
             .map_err(|e| print_storage_error::<F>(e))?;
+
+        // Which profile slots storage spoke for, so a slot whose profile was stored without a
+        // name gets a generated one below, while a stored empty name still means "vacant".
+        let mut stored_profile = [false; crate::MORSE_PROFILE_MAX_NUM];
+        let mut stored_name = [false; crate::MORSE_PROFILE_MAX_NUM];
 
         let mut records_read = 0u32;
         while let Some((key, value)) = key_iterator
@@ -62,6 +70,17 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                     behavior.tap.tap_interval = c.tap_interval;
                     behavior.tap.tap_capslock_interval = c.tap_capslock_interval;
                 }
+                (StorageKey::AutoMouseLayerConfigs, StorageValue::AutoMouseLayerConfigs(configs)) => {
+                    behavior.runtime_auto_mouse_layer = Some(configs);
+                }
+                (StorageKey::BehaviorOptions, StorageValue::BehaviorOptions(options)) => {
+                    behavior.tri_layer = options.tri_layer;
+                    behavior.combo.prior_idle_time =
+                        options.combo_prior_idle_ms.map(|ms| Duration::from_millis(ms as u64));
+                    behavior.one_shot_modifiers.activate_on_keypress = options.oneshot_activate_on_keypress;
+                    behavior.one_shot_modifiers.quick_release = options.oneshot_quick_release;
+                    behavior.morse.enable_flow_tap = options.morse_enable_flow_tap;
+                }
                 (StorageKey::Combo(idx), StorageValue::Combo(config)) => {
                     if let Some(slot) = behavior.combo.combos.get_mut(idx as usize) {
                         *slot = Some(Combo::new(config));
@@ -75,6 +94,33 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 (StorageKey::Morse(idx), StorageValue::Morse(morse)) => {
                     if let Some(slot) = behavior.morse.morses.get_mut(idx as usize) {
                         *slot = morse;
+                    }
+                }
+                // The table is only as long as `keyboard.toml` made it, so a stored slot beyond
+                // its end grows it, the same growth the setter does at runtime.
+                (StorageKey::MorseProfile(idx), StorageValue::MorseProfile(profile)) => {
+                    let idx = idx as usize;
+                    let profiles = &mut behavior.morse.profiles;
+                    if idx < profiles.capacity() {
+                        if idx >= profiles.len() {
+                            profiles.resize(idx + 1, MorseProfile::default()).ok();
+                        }
+                        profiles[idx] = profile;
+                        stored_profile[idx] = true;
+                    }
+                }
+                (StorageKey::MorseProfileName(idx), StorageValue::MorseProfileName(name)) => {
+                    let idx = idx as usize;
+                    let morse = &mut behavior.morse;
+                    if idx < morse.profiles.capacity() {
+                        if idx >= morse.profiles.len() {
+                            morse.profiles.resize(idx + 1, MorseProfile::default()).ok();
+                        }
+                        if idx >= morse.profile_names.len() {
+                            morse.profile_names.resize(idx + 1, MorseProfileName::new()).ok();
+                        }
+                        morse.profile_names[idx] = name;
+                        stored_name[idx] = true;
                     }
                 }
                 // Absent means no pointing policy at all, so only a stored one seeds the pads.
@@ -92,6 +138,19 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             if records_read.is_multiple_of(32) {
                 // Memory-mapped flash can keep every read ready, so let other tasks run.
                 yield_now().await;
+            }
+        }
+
+        // A profile written before names existed occupies its slot under a generated name.
+        for idx in 0..crate::MORSE_PROFILE_MAX_NUM {
+            let names = &mut behavior.morse.profile_names;
+            if stored_profile[idx] && !stored_name[idx] && names.get(idx).is_none_or(|name| name.is_empty()) {
+                let mut name = MorseProfileName::new();
+                write!(name, "profile_{idx:03}").expect("generated profile name fits");
+                if idx >= names.len() {
+                    names.resize(idx + 1, MorseProfileName::new()).ok();
+                }
+                names[idx] = name;
             }
         }
 

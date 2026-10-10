@@ -129,17 +129,23 @@ fn expand_morse(morse: &Option<Morse>) -> proc_macro2::TokenStream {
         let profiles_token = if profile_names.is_empty() {
             quote! {}
         } else {
-            let profile_tokens = profile_names.into_iter().map(|name| {
+            let profile_tokens = profile_names.iter().map(|name| {
                 let profile = profiles_ref
                     .as_ref()
-                    .and_then(|m| m.get(&name))
+                    .and_then(|m| m.get(name))
                     .expect("name from same map");
                 expand_profile(profile)
             });
+            let name_tokens = profile_names.iter();
             quote! {
                 profiles: {
                     let mut v = ::rmk::heapless::Vec::new();
                     #( let _ = v.push(#profile_tokens); )*
+                    v
+                },
+                profile_names: {
+                    let mut v = ::rmk::heapless::Vec::new();
+                    #( let _ = v.push(::rmk::types::morse::MorseProfileName::try_from(#name_tokens).expect("validated morse profile name")); )*
                     v
                 },
             }

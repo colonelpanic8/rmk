@@ -7,8 +7,14 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embedded_storage::nor_flash::NorFlash;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
+#[cfg(feature = "host")]
+use rmk_types::auto_mouse::AutoMouseLayerConfig as RuntimeAutoMouseLayerConfig;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
+#[cfg(feature = "host")]
+use rmk_types::morse::MorseProfileName;
+#[cfg(feature = "host")]
+use rmk_types::protocol::rynk::BehaviorOptions;
 #[cfg(feature = "rynk")]
 use rmk_types::protocol::rynk::PointingConfig;
 #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -227,6 +233,14 @@ pub(crate) enum StorageKey {
     UnicodeMode,
     #[cfg(feature = "rynk")]
     PointingConfig,
+    #[cfg(feature = "host")]
+    MorseProfile(u8),
+    #[cfg(feature = "host")]
+    BehaviorOptions,
+    #[cfg(feature = "host")]
+    AutoMouseLayerConfigs,
+    #[cfg(feature = "host")]
+    MorseProfileName(u8),
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -314,6 +328,20 @@ pub(crate) enum StorageItem {
     /// Every pointing device's behavior, replaced as one unit.
     #[cfg(feature = "rynk")]
     PointingConfig(PointingConfig),
+    #[cfg(feature = "host")]
+    MorseProfile {
+        idx: u8,
+        profile: MorseProfile,
+    },
+    #[cfg(feature = "host")]
+    BehaviorOptions(StoredBehaviorOptions),
+    #[cfg(feature = "host")]
+    AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
+    #[cfg(feature = "host")]
+    MorseProfileName {
+        idx: u8,
+        name: MorseProfileName,
+    },
 }
 
 impl StorageItem {
@@ -405,6 +433,19 @@ impl StorageItem {
             Self::UnicodeMode(v) => (StorageKey::UnicodeMode, StorageValue::UnicodeMode(v)),
             #[cfg(feature = "rynk")]
             Self::PointingConfig(v) => (StorageKey::PointingConfig, StorageValue::PointingConfig(v)),
+            #[cfg(feature = "host")]
+            Self::MorseProfile { idx, profile } => (StorageKey::MorseProfile(idx), StorageValue::MorseProfile(profile)),
+            #[cfg(feature = "host")]
+            Self::BehaviorOptions(v) => (StorageKey::BehaviorOptions, StorageValue::BehaviorOptions(v)),
+            #[cfg(feature = "host")]
+            Self::AutoMouseLayerConfigs(v) => (
+                StorageKey::AutoMouseLayerConfigs,
+                StorageValue::AutoMouseLayerConfigs(v),
+            ),
+            #[cfg(feature = "host")]
+            Self::MorseProfileName { idx, name } => {
+                (StorageKey::MorseProfileName(idx), StorageValue::MorseProfileName(name))
+            }
         }
     }
 }
@@ -483,6 +524,14 @@ pub(crate) enum StorageValue {
     UnicodeMode(UnicodeMode),
     #[cfg(feature = "rynk")]
     PointingConfig(PointingConfig),
+    #[cfg(feature = "host")]
+    MorseProfile(MorseProfile),
+    #[cfg(feature = "host")]
+    BehaviorOptions(StoredBehaviorOptions),
+    #[cfg(feature = "host")]
+    AutoMouseLayerConfigs(heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }>),
+    #[cfg(feature = "host")]
+    MorseProfileName(MorseProfileName),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -705,6 +754,71 @@ impl From<&config::BehaviorConfig> for BehaviorConfig {
     }
 }
 
+/// The behavior settings added after [`BehaviorConfig`], kept as their own item so that
+/// one keeps its postcard layout.
+#[cfg(feature = "host")]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub(crate) struct StoredBehaviorOptions {
+    pub(crate) tri_layer: Option<[u8; 3]>,
+    pub(crate) combo_prior_idle_ms: Option<u16>,
+    pub(crate) oneshot_activate_on_keypress: bool,
+    pub(crate) oneshot_quick_release: bool,
+    pub(crate) morse_enable_flow_tap: bool,
+}
+
+#[cfg(feature = "host")]
+impl From<BehaviorOptions> for StoredBehaviorOptions {
+    fn from(options: BehaviorOptions) -> Self {
+        Self {
+            tri_layer: options.tri_layer,
+            combo_prior_idle_ms: options.combo_prior_idle_ms,
+            oneshot_activate_on_keypress: options.oneshot_activate_on_keypress,
+            oneshot_quick_release: options.oneshot_quick_release,
+            morse_enable_flow_tap: options.morse_enable_flow_tap,
+        }
+    }
+}
+
+#[cfg(feature = "host")]
+impl From<&config::BehaviorConfig> for StoredBehaviorOptions {
+    fn from(behavior: &config::BehaviorConfig) -> Self {
+        Self {
+            tri_layer: behavior.tri_layer,
+            combo_prior_idle_ms: behavior
+                .combo
+                .prior_idle_time
+                .map(|duration| duration.as_millis() as u16),
+            oneshot_activate_on_keypress: behavior.one_shot_modifiers.activate_on_keypress,
+            oneshot_quick_release: behavior.one_shot_modifiers.quick_release,
+            morse_enable_flow_tap: behavior.morse.enable_flow_tap,
+        }
+    }
+}
+
+/// The auto mouse layer table a host last wrote, or the compiled one until then.
+#[cfg(feature = "host")]
+fn auto_mouse_layer_configs(
+    behavior: &config::BehaviorConfig,
+) -> heapless::Vec<RuntimeAutoMouseLayerConfig, { crate::AUTO_MOUSE_LAYER_MAX_NUM }> {
+    if let Some(configs) = &behavior.runtime_auto_mouse_layer {
+        return configs.clone();
+    }
+    behavior
+        .auto_mouse_layer
+        .iter()
+        .map(|config| RuntimeAutoMouseLayerConfig {
+            device_id: config.device_id,
+            target_layer: config.target_layer,
+            timeout_ms: config.timeout.as_millis() as u32,
+            threshold: config.threshold,
+            deactivate_on_key: config.deactivate_on_key,
+            extra_mouse_keys: config.extra_mouse_keys.iter().copied().collect(),
+            reset_timeout_on_key: config.reset_timeout_on_key,
+        })
+        .collect()
+}
+
 pub fn async_flash_wrapper<F: NorFlash>(flash: F) -> BlockingAsync<F> {
     embassy_embedded_hal::adapter::BlockingAsync::new(flash)
 }
@@ -876,6 +990,8 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             behavior.morse.hold_trigger_positions.clone(),
         ))
         .await;
+        put(StorageItem::BehaviorOptions(behavior.into())).await;
+        put(StorageItem::AutoMouseLayerConfigs(auto_mouse_layer_configs(behavior))).await;
         put(StorageItem::DefaultLayer(0)).await;
         put(StorageItem::LayoutOption(0)).await;
 
@@ -923,6 +1039,17 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
                 morse: morse.clone(),
             })
             .await;
+        }
+        // Every slot, so a profile the host wrote past the compiled table is cleared too.
+        for idx in 0..crate::MORSE_PROFILE_MAX_NUM {
+            let profile = behavior.morse.profiles.get(idx).copied().unwrap_or_default();
+            put(StorageItem::MorseProfile {
+                idx: idx as u8,
+                profile,
+            })
+            .await;
+            let name = behavior.morse.profile_names.get(idx).cloned().unwrap_or_default();
+            put(StorageItem::MorseProfileName { idx: idx as u8, name }).await;
         }
         // The whole buffer, so a macro the user wrote over the host protocol is
         // replaced by its default or cleared.
@@ -1885,6 +2012,14 @@ mod tests {
             StorageKey::UnicodeMode,
             #[cfg(feature = "rynk")]
             StorageKey::PointingConfig,
+            #[cfg(feature = "host")]
+            StorageKey::MorseProfile(9),
+            #[cfg(feature = "host")]
+            StorageKey::BehaviorOptions,
+            #[cfg(feature = "host")]
+            StorageKey::AutoMouseLayerConfigs,
+            #[cfg(feature = "host")]
+            StorageKey::MorseProfileName(12),
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1966,6 +2101,14 @@ mod tests {
             StorageValue::UnicodeMode(UnicodeMode::Linux),
             #[cfg(feature = "rynk")]
             StorageValue::PointingConfig(PointingConfig::default()),
+            #[cfg(feature = "host")]
+            StorageValue::MorseProfile(MorseProfile::default()),
+            #[cfg(feature = "host")]
+            StorageValue::BehaviorOptions((&RuntimeBehaviorConfig::default()).into()),
+            #[cfg(feature = "host")]
+            StorageValue::AutoMouseLayerConfigs(heapless::Vec::new()),
+            #[cfg(feature = "host")]
+            StorageValue::MorseProfileName(MorseProfileName::new()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
