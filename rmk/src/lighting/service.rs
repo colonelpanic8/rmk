@@ -399,6 +399,7 @@ where
     }
 
     /// Apply one mutation synchronously through the sole mutable owner.
+    #[inline(never)]
     pub fn handle_command(&mut self, now_ms: u64, command: E::Command) -> Result<E::Reply, E::Error> {
         let snapshot = self.provider.snapshot();
         let result = self.engine.handle_command(now_ms, command, &snapshot)?;
