@@ -117,12 +117,8 @@ impl BatteryProcessor {
             return;
         };
         match self.battery_status {
-            // Skip ADC updates while charging
-            BatteryStatus::Available {
-                charge_state: ChargeState::Charging,
-                ..
-            } => {}
-            // Not charging: publish if the percentage changed.
+            // Keep measuring while charging; otherwise the level freezes at its
+            // value when the charger was attached until it is removed.
             BatteryStatus::Available { charge_state, level } => {
                 if level != Some(battery_percent) {
                     self.commit(BatteryStatus::Available {
