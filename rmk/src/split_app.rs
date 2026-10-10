@@ -1,41 +1,18 @@
 //! Bounded application-message hook for the split protocol.
 //!
-//! A small, opaque, bounded payload that an application can send between the
-//! split central and its peripheral alongside — but never in front of — the
-//! normal split traffic. RMK itself attaches no meaning to the bytes; a
-//! firmware built on RMK can use it for application-level side-band state
-//! (for example, propagating lighting or UI state across the split link).
+//! An application built on RMK can exchange small opaque payloads
+//! ([`SplitAppData`]) between the split halves alongside — but never in front
+//! of — normal split traffic. RMK attaches no meaning to the bytes.
 //!
-//! Flow:
+//! Each side queues outgoing payloads with `try_send` ([`SPLIT_APP_TX`] on
+//! the central, [`SPLIT_APP_PERIPH_TX`] on the peripheral). The split loops
+//! drain them as their lowest-priority outgoing arm and deliver received
+//! payloads into [`SPLIT_APP_RX`], dropping on full so application traffic
+//! can never delay key events. [`SPLIT_APP_LINK`] carries the link state; its
+//! `false → true` edge is the application's cue to resync, which also covers
+//! messages lost to a full queue.
 //!
-//! - Central: the application queues [`SplitAppData`] into [`SPLIT_APP_TX`]
-//!   (bounded, `try_send` only — the queue must never be awaited full).
-//!   `PeripheralManager` drains it as one more (lowest-priority) arm of its
-//!   outgoing-message select and wraps each payload in
-//!   `SplitMessage::Application`. Peripheral→central key events always win:
-//!   they arrive on the read arm, which is polled first.
-//! - Peripheral: `SplitPeripheral` forwards received `Application` messages
-//!   into [`SPLIT_APP_RX`] with `try_send` (drop-on-full keeps the split read
-//!   loop responsive; the application is expected to tolerate loss, e.g. by
-//!   resyncing on reconnect).
-//! - Peripheral → central: the peripheral application queues
-//!   [`SplitAppData`] into [`SPLIT_APP_PERIPH_TX`] (bounded, `try_send`
-//!   only); `SplitPeripheral` drains it as one more outgoing arm of its
-//!   select, behind key events. The central's `PeripheralManager` forwards
-//!   received `Application` messages into [`SPLIT_APP_RX`] the same way the
-//!   peripheral does — the inbox is symmetric ("this side's received
-//!   application messages"), only the senders differ.
-//! - Both sides: [`SPLIT_APP_LINK`] carries the split-link state (central:
-//!   "peripheral link up"; peripheral: "central link up"), set by the split
-//!   driver. The central raises it at session start; the peripheral raises
-//!   it on the FIRST message received from the central — for BLE the bare
-//!   connection is not enough, since notifications to a central that has
-//!   not yet subscribed are silently dropped (see `split/peripheral.rs`).
-//!   Both lower it at session end. Applications use the `false → true` edge
-//!   to trigger an idempotent resync.
-//!
-//! Note: the queues assume a single split peripheral. Extending this hook to
-//! multiple peripherals would key them by peripheral id.
+//! The queues assume a single split peripheral.
 
 use embassy_sync::channel::Channel;
 use embassy_sync::watch::Watch;
@@ -44,13 +21,11 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::RawMutex;
 
-/// Maximum payload of one application split message. Deliberately small:
-/// every split BLE transfer is `SPLIT_MESSAGE_MAX_SIZE` bytes on the wire,
-/// so this bound also taxes key-event messages. Hard cap: the trouble
-/// `gatt_service` macro initializes its characteristic arrays via
-/// `Default`, which arrays only implement up to 32 elements — so
-/// `SPLIT_MESSAGE_MAX_SIZE` (this + 1-byte length prefix + 1-byte enum
-/// discriminant + 4 bytes margin) must stay ≤ 32.
+/// Maximum payload of one application split message. Every split transfer is
+/// `SPLIT_MESSAGE_MAX_SIZE` bytes on the wire, and trouble's `gatt_service`
+/// macro caps that at 32 (it initializes characteristic arrays via `Default`,
+/// which arrays only implement up to 32 elements), so this plus postcard
+/// overhead must keep `SPLIT_MESSAGE_MAX_SIZE` ≤ 32.
 pub const SPLIT_APP_MSG_MAX: usize = 26;
 
 /// One opaque application payload. Only `data[..len]` is meaningful.
@@ -101,27 +76,102 @@ impl MaxSize for SplitAppData {
     const POSTCARD_MAX_SIZE: usize = SPLIT_APP_MSG_MAX + 1;
 }
 
-/// Central → peripheral queue, drained by `PeripheralManager` while the link
-/// is up. Producers MUST use `try_send` (bounded, never block); capacity is
-/// sized so one full application resync burst fits with headroom. One hundred
-/// and twelve entries admit a complete 40-cell overlay plus a 64-cell runtime
-/// scene table (begin, context, one cell per packet, and commit). This is
-/// mutation/reconnect traffic, not rendered-frame streaming.
+/// Central → peripheral queue. Producers must use `try_send` (never await a
+/// full queue); capacity fits one full application resync burst.
 pub static SPLIT_APP_TX: Channel<RawMutex, SplitAppData, 112> = Channel::new();
 
-/// This side's inbox of received application messages (peripheral: from the
-/// central's `SPLIT_APP_TX`; central: from the peripheral's
-/// `SPLIT_APP_PERIPH_TX`). Filled with `try_send` (drop-on-full) by the
-/// split read loops.
-pub static SPLIT_APP_RX: Channel<RawMutex, SplitAppData, 8> = Channel::new();
+/// This side's inbox of received application messages. Filled with `try_send`
+/// (drop-on-full) by the split read loops.
+// Sized like SPLIT_APP_TX: an application snapshot arrives as one
+// back-to-back burst, and unlike BLE a wired transport delivers it faster
+// than the consumer drains, so the burst must fit or `deliver_received`
+// silently drops the difference.
+pub static SPLIT_APP_RX: Channel<RawMutex, SplitAppData, 112> = Channel::new();
 
-/// Peripheral → central queue, drained by `SplitPeripheral` while the link
-/// is up. Producers MUST use `try_send`. Small: the application announces
-/// tiny, rare state (e.g. its build identity once per link-up).
-pub static SPLIT_APP_PERIPH_TX: Channel<RawMutex, SplitAppData, 2> = Channel::new();
+/// Peripheral → central queue. Producers must use `try_send`. Small: meant
+/// for tiny, rare state such as a build identity announced once per link-up.
+pub static SPLIT_APP_PERIPH_TX: Channel<RawMutex, SplitAppData, 16> = Channel::new();
 
-/// Split-link state for the application: on the central, "peripheral link
-/// up"; on the peripheral, "central link up". Written by the split driver at
-/// session start/end; state-based (a late receiver still observes the latest
-/// value), so edges cannot be lost the way pub/sub events can.
+/// Deliver a received payload into [`SPLIT_APP_RX`]. Drop-on-full: a slow
+/// application consumer must never stall the split read loops, and the
+/// application resyncs on reconnect anyway.
+pub(crate) fn deliver_received(data: SplitAppData) {
+    if SPLIT_APP_RX.try_send(data).is_err() {
+        warn!("split app message dropped (inbox full)");
+    }
+}
+
+/// Split-link state for the application, written by the split loops via
+/// [`LinkGuard`]. State-based, so a late receiver still observes the current
+/// value.
 pub static SPLIT_APP_LINK: Watch<RawMutex, bool, 2> = Watch::new();
+
+/// Owns one split session's [`SPLIT_APP_LINK`] state: `mark_up` sends the
+/// link-up edge once, and `Drop` sends the link-down edge. The down edge must
+/// come from `Drop` because the session futures holding a guard are cancelled
+/// from outside on connection loss.
+pub(crate) struct LinkGuard {
+    up: bool,
+}
+
+impl LinkGuard {
+    pub(crate) fn new() -> Self {
+        Self { up: false }
+    }
+
+    /// Send the link-up edge; idempotent.
+    pub(crate) fn mark_up(&mut self) {
+        if !self.up {
+            SPLIT_APP_LINK.sender().send(true);
+            self.up = true;
+        }
+    }
+}
+
+impl Drop for LinkGuard {
+    fn drop(&mut self) {
+        SPLIT_APP_LINK.sender().send(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payload_bound_and_wire_round_trip() {
+        for payload in [&[][..], &[7; SPLIT_APP_MSG_MAX][..]] {
+            let data = SplitAppData::new(payload).unwrap();
+            let mut bytes = [0; SPLIT_APP_MSG_MAX + 1];
+            let encoded = postcard::to_slice(&data, &mut bytes).unwrap();
+            let decoded: SplitAppData = postcard::from_bytes(encoded).unwrap();
+            assert_eq!(decoded.payload(), payload);
+        }
+        assert!(SplitAppData::new(&[0; SPLIT_APP_MSG_MAX + 1]).is_none());
+        let mut oversized = [0; SPLIT_APP_MSG_MAX + 2];
+        oversized[0] = (SPLIT_APP_MSG_MAX + 1) as u8;
+        assert!(postcard::from_bytes::<SplitAppData>(&oversized).is_err());
+    }
+
+    #[test]
+    fn inbox_overflow_preserves_queued_messages() {
+        for value in 0..112 {
+            deliver_received(SplitAppData::new(&[value]).unwrap());
+        }
+        deliver_received(SplitAppData::new(&[255]).unwrap());
+        for value in 0..112 {
+            assert_eq!(SPLIT_APP_RX.try_receive().unwrap().payload(), &[value]);
+        }
+        assert!(SPLIT_APP_RX.try_receive().is_err());
+    }
+
+    #[test]
+    fn dropping_a_session_publishes_link_down() {
+        let mut guard = LinkGuard::new();
+        guard.mark_up();
+        guard.mark_up();
+        assert_eq!(SPLIT_APP_LINK.try_get(), Some(true));
+        drop(guard);
+        assert_eq!(SPLIT_APP_LINK.try_get(), Some(false));
+    }
+}

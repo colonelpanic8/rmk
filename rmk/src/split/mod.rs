@@ -107,10 +107,8 @@ pub(crate) enum SplitMessage {
     #[cfg(feature = "dfu_split")]
     SystemReset,
 
-    /// opaque bounded application payload, central →
-    /// peripheral (see `crate::split_app`). Kept as the LAST variant so
-    /// the postcard discriminants of all existing messages stay stable across
-    /// halves flashed at different revisions.
+    /// Opaque application payload, either direction (see `crate::split_app`).
+    /// Appended after upstream messages to preserve their discriminants.
     Application(crate::split_app::SplitAppData),
 }
 
