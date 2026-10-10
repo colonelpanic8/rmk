@@ -15,6 +15,7 @@ use rmk_types::protocol::rynk::{
     LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_SCENE_CHUNK_SIZE, LightingConditionalSceneCell,
     LightingExtendedConditionalSceneCell, LightingLayerPolicy, LightingSceneCell,
 };
+use rmk_types::unicode::UnicodeMode;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::Cache;
 use sequential_storage::cache::key_pointers::ArrayKeyPointers;
@@ -219,6 +220,9 @@ pub(crate) enum StorageKey {
     LightingRuntimeConditionalSceneShardB(u8),
     #[cfg(feature = "host")]
     MorseHoldTriggerPositions,
+    /// Stored under its own key rather than in `BehaviorConfig`, so a build that
+    /// predates the mode keeps the one `keyboard.toml` configured.
+    UnicodeMode,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -301,6 +305,8 @@ pub(crate) enum StorageItem {
     LightingRuntimeConditionalSceneCommit(LightingRuntimeConditionalSceneCommitRecord),
     #[cfg(feature = "host")]
     MorseHoldTriggerPositions(HoldTriggerPositions),
+    // Input method `Action::Unicode` types codepoints through
+    UnicodeMode(UnicodeMode),
 }
 
 impl StorageItem {
@@ -389,6 +395,7 @@ impl StorageItem {
                 StorageKey::MorseHoldTriggerPositions,
                 StorageValue::MorseHoldTriggerPositions(v),
             ),
+            Self::UnicodeMode(v) => (StorageKey::UnicodeMode, StorageValue::UnicodeMode(v)),
         }
     }
 }
@@ -464,6 +471,7 @@ pub(crate) enum StorageValue {
     LightingRuntimeConditionalSceneCommit(LightingRuntimeConditionalSceneCommitRecord),
     #[cfg(feature = "host")]
     MorseHoldTriggerPositions(HoldTriggerPositions),
+    UnicodeMode(UnicodeMode),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -1863,6 +1871,7 @@ mod tests {
             StorageKey::LightingRuntimeConditionalSceneShardB(0),
             #[cfg(feature = "host")]
             StorageKey::MorseHoldTriggerPositions,
+            StorageKey::UnicodeMode,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1941,6 +1950,7 @@ mod tests {
             }),
             #[cfg(feature = "host")]
             StorageValue::MorseHoldTriggerPositions(HoldTriggerPositions::new()),
+            StorageValue::UnicodeMode(UnicodeMode::Linux),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
