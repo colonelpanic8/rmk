@@ -7,6 +7,7 @@ use embassy_sync::channel::{Channel, TrySendError};
 use embassy_sync::signal::Signal;
 pub use embassy_sync::{blocking_mutex, channel, pubsub, zerocopy_channel};
 use rmk_types::connection::ConnectionType;
+use rmk_types::keycode::HidKeyCode;
 #[cfg(feature = "_ble")]
 use {crate::ble::profile::BleProfileAction, rmk_types::led_indicator::LedIndicator};
 
@@ -95,3 +96,15 @@ pub(crate) static VIAL_BLE_RX_CHANNEL: Channel<RawMutex, [u8; 32], VIAL_CHANNEL_
 /// Rynk RX from the BLE `output_data` writes. The 512 B ring is ~2× one MTU's maximal payload.
 #[cfg(all(feature = "rynk", feature = "_ble"))]
 pub(crate) static RYNK_BLE_RX_PIPE: embassy_sync::pipe::Pipe<RawMutex, 512> = embassy_sync::pipe::Pipe::new();
+
+/// A key a pointing device presses on the keyboard's behalf (caret and keypad
+/// modes). Consumer: the keyboard loop, which folds it into the same report
+/// state as physical keys so held keys, modifiers, and remapping survive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub(crate) struct VirtualKeyEvent {
+    pub key: HidKeyCode,
+    pub pressed: bool,
+}
+
+pub(crate) static VIRTUAL_KEY_CHANNEL: Channel<RawMutex, VirtualKeyEvent, 8> = Channel::new();

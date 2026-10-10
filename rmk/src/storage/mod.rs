@@ -9,6 +9,8 @@ use embedded_storage::nor_flash::NorFlash;
 use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
+#[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::PointingConfig;
 #[cfg(all(feature = "lighting", feature = "rynk"))]
 use rmk_types::protocol::rynk::{
     LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE, LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE,
@@ -223,6 +225,8 @@ pub(crate) enum StorageKey {
     /// Stored under its own key rather than in `BehaviorConfig`, so a build that
     /// predates the mode keeps the one `keyboard.toml` configured.
     UnicodeMode,
+    #[cfg(feature = "rynk")]
+    PointingConfig,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -307,6 +311,9 @@ pub(crate) enum StorageItem {
     MorseHoldTriggerPositions(HoldTriggerPositions),
     // Input method `Action::Unicode` types codepoints through
     UnicodeMode(UnicodeMode),
+    /// Every pointing device's behavior, replaced as one unit.
+    #[cfg(feature = "rynk")]
+    PointingConfig(PointingConfig),
 }
 
 impl StorageItem {
@@ -396,6 +403,8 @@ impl StorageItem {
                 StorageValue::MorseHoldTriggerPositions(v),
             ),
             Self::UnicodeMode(v) => (StorageKey::UnicodeMode, StorageValue::UnicodeMode(v)),
+            #[cfg(feature = "rynk")]
+            Self::PointingConfig(v) => (StorageKey::PointingConfig, StorageValue::PointingConfig(v)),
         }
     }
 }
@@ -472,6 +481,8 @@ pub(crate) enum StorageValue {
     #[cfg(feature = "host")]
     MorseHoldTriggerPositions(HoldTriggerPositions),
     UnicodeMode(UnicodeMode),
+    #[cfg(feature = "rynk")]
+    PointingConfig(PointingConfig),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -1872,6 +1883,8 @@ mod tests {
             #[cfg(feature = "host")]
             StorageKey::MorseHoldTriggerPositions,
             StorageKey::UnicodeMode,
+            #[cfg(feature = "rynk")]
+            StorageKey::PointingConfig,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1951,6 +1964,8 @@ mod tests {
             #[cfg(feature = "host")]
             StorageValue::MorseHoldTriggerPositions(HoldTriggerPositions::new()),
             StorageValue::UnicodeMode(UnicodeMode::Linux),
+            #[cfg(feature = "rynk")]
+            StorageValue::PointingConfig(PointingConfig::default()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
@@ -2304,6 +2319,30 @@ mod tests {
                 storage.fetch(StorageKey::LightingRuntimeConditionalSceneTableV2).await,
                 Ok(Some(StorageValue::LightingRuntimeConditionalSceneTableV2(0)))
             ));
+        });
+    }
+    /// A stored pointing configuration seeds the live one at boot.
+    #[cfg(feature = "rynk")]
+    #[test]
+    fn pointing_configuration_restored_by_keymap_boot() {
+        use crate::keymap::{KeyMap, KeymapData};
+
+        block_on(async {
+            let config = PointingConfig {
+                revision: 17,
+                ..Default::default()
+            };
+            let flash = seeded(&[
+                (StorageKey::StorageConfig, StorageValue::StorageConfig(SCHEMA_HASH)),
+                (StorageKey::PointingConfig, StorageValue::PointingConfig(config)),
+            ])
+            .await;
+            let mut storage = new_storage(flash).await;
+            let mut data = KeymapData::new([[[KeyAction::No]]]);
+            let mut behavior = RuntimeBehaviorConfig::default();
+            let positional = crate::config::PositionalConfig::<1, 1>::default();
+            let _keymap = KeyMap::new_from_storage(&mut data, Some(&mut storage), &mut behavior, &positional).await;
+            assert_eq!(crate::input_device::pointing_config::get().await, config);
         });
     }
 }
