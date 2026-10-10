@@ -23,6 +23,7 @@ use sequential_storage::cache::page_states::CalculatedPageStates;
 use sequential_storage::map::{Key as MapKey, MapConfig, MapStorage, PostcardValue, SerializationError};
 #[cfg(feature = "host")]
 use {
+    crate::config::HoldTriggerPositions,
     crate::keyboard::combo::ComboConfig,
     rmk_types::action::{EncoderAction, KeyAction},
     rmk_types::constants::MACRO_CHUNK_SIZE,
@@ -216,6 +217,8 @@ pub(crate) enum StorageKey {
     LightingRuntimeConditionalSceneCommit,
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuntimeConditionalSceneShardB(u8),
+    #[cfg(feature = "host")]
+    MorseHoldTriggerPositions,
 }
 
 /// A Storage item is actually a storage (key, value) pair.
@@ -296,6 +299,8 @@ pub(crate) enum StorageItem {
     LightingSceneCommit(LightingSceneCommitRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuntimeConditionalSceneCommit(LightingRuntimeConditionalSceneCommitRecord),
+    #[cfg(feature = "host")]
+    MorseHoldTriggerPositions(HoldTriggerPositions),
 }
 
 impl StorageItem {
@@ -379,6 +384,11 @@ impl StorageItem {
                 StorageKey::LightingRuntimeConditionalSceneCommit,
                 StorageValue::LightingRuntimeConditionalSceneCommit(v),
             ),
+            #[cfg(feature = "host")]
+            Self::MorseHoldTriggerPositions(v) => (
+                StorageKey::MorseHoldTriggerPositions,
+                StorageValue::MorseHoldTriggerPositions(v),
+            ),
         }
     }
 }
@@ -452,6 +462,8 @@ pub(crate) enum StorageValue {
     LightingSceneCommit(LightingSceneCommitRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingRuntimeConditionalSceneCommit(LightingRuntimeConditionalSceneCommitRecord),
+    #[cfg(feature = "host")]
+    MorseHoldTriggerPositions(HoldTriggerPositions),
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
@@ -713,6 +725,7 @@ pub(crate) const SCHEMA_HASH: u32 = {
         hash = fnv_hash(hash, &(crate::MACRO_SPACE_SIZE as u32).to_le_bytes());
         hash = fnv_hash(hash, &(crate::COMBO_SIZE as u32).to_le_bytes());
         hash = fnv_hash(hash, &(crate::MORSE_SIZE as u32).to_le_bytes());
+        hash = fnv_hash(hash, &(crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM as u32).to_le_bytes());
     }
     hash
 };
@@ -840,6 +853,10 @@ impl<F: AsyncNorFlash, const ROW: usize, const COL: usize, const NUM_LAYER: usiz
             }
         };
         put(StorageItem::BehaviorConfig(behavior.into())).await;
+        put(StorageItem::MorseHoldTriggerPositions(
+            behavior.morse.hold_trigger_positions.clone(),
+        ))
+        .await;
         put(StorageItem::DefaultLayer(0)).await;
         put(StorageItem::LayoutOption(0)).await;
 
@@ -1343,7 +1360,16 @@ pub(crate) fn print_storage_error<F: AsyncNorFlash>(e: SSError<F::Error>) {
 
 /// Holds any one item with its key and framing; a multiple of 32 because
 /// `sequential-storage` wants that alignment on some flashes.
-const BUFFER_SIZE: usize = 256;
+const BUFFER_SIZE: usize = {
+    let mut size = 256;
+    // The hold-trigger table scales with its own capacity: three bytes per
+    // position plus key, tag, and length prefix.
+    #[cfg(feature = "host")]
+    if crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM * 3 + 16 > size {
+        size = crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM * 3 + 16;
+    }
+    (size + 31) & !31
+};
 
 /// Test-only: forget queued requests and any pending reply, so a test starts clean.
 #[cfg(any(test, feature = "std"))]
@@ -1497,6 +1523,27 @@ mod tests {
     const STALE_CONFIG: StorageValue = StorageValue::StorageConfig(0);
 
     const STORAGE_RANGE: core::ops::Range<u32> = (16_384 - 2 * 4_096) as u32..16_384u32;
+
+    /// A full table is the largest single item a host can store, so it must fit `BUFFER_SIZE`.
+    #[cfg(feature = "host")]
+    #[test]
+    fn full_hold_trigger_table_fits_flash_buffer() {
+        block_on(async {
+            let mut storage = new_storage(BlockingAsync::new(Part::new())).await;
+            let mut positions = HoldTriggerPositions::new();
+            for i in 0..crate::HOLD_TRIGGER_KEY_POSITION_MAX_NUM {
+                positions.push(((i / 40) as u8, 0, (i % 40) as u8)).unwrap();
+            }
+            storage
+                .put(StorageItem::MorseHoldTriggerPositions(positions.clone()))
+                .await
+                .unwrap();
+            assert!(matches!(
+                storage.fetch(StorageKey::MorseHoldTriggerPositions).await,
+                Ok(Some(StorageValue::MorseHoldTriggerPositions(stored))) if stored == positions
+            ));
+        });
+    }
 
     /// A flash holding `items`, written by an uncached map so `Storage::new` boots over them.
     async fn seeded(items: &[(StorageKey, StorageValue)]) -> TestFlash {
@@ -1814,6 +1861,8 @@ mod tests {
             StorageKey::LightingRuntimeConditionalSceneCommit,
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageKey::LightingRuntimeConditionalSceneShardB(0),
+            #[cfg(feature = "host")]
+            StorageKey::MorseHoldTriggerPositions,
         ];
         let mut buffer = [0u8; 64];
         for (tag, key) in keys.iter().enumerate() {
@@ -1890,6 +1939,8 @@ mod tests {
                 len: 0,
                 digest: 0,
             }),
+            #[cfg(feature = "host")]
+            StorageValue::MorseHoldTriggerPositions(HoldTriggerPositions::new()),
         ];
         let mut buffer = [0u8; BUFFER_SIZE];
         for (tag, item) in data.iter().enumerate() {
