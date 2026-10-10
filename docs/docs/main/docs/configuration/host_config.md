@@ -21,9 +21,7 @@ rynk_enabled = true
 # Disable Vial when using Rynk. Rynk and Vial are mutually exclusive.
 vial_enabled = false
 
-# Physical keys (row, col) held simultaneously to unlock dangerous operations
-# (optional, up to 4). Shared by the Vial lock and the Rynk lock gate. See the
-# "Locking dangerous operations" section of the Rynk feature page.
+# Physical keys (row, col) held simultaneously to unlock Vial (optional, up to 4).
 unlock_keys = [[0, 0], [0, 1]]  # Keys at (row=0,col=0) and (row=0,col=1)
 
 # Start (and stay) unlocked, bypassing the unlock-key combo (default: false).
@@ -31,14 +29,9 @@ unlock_keys = [[0, 0], [0, 1]]  # Keys at (row=0,col=0) and (row=0,col=1)
 # which still parses.
 insecure = false
 
-# Rynk only: move config writes (SetKeyAction, SetMacro, …) into the locked
-# tier so they also require unlock (default: false).
-write_requires_unlock = false
-
-# Rynk only: require physical unlock before central or split-peripheral
-# bootloader entry (default: true). Set false for host-managed deployment;
-# other dangerous operations remain gated.
-bootloader_requires_unlock = true
+# Rynk only: start with the keyboard-controlled maintenance lock engaged.
+# When engaged, every mutation and sensitive operation is denied.
+maintenance_lock_default = false
 ```
 
 ## Common Setups

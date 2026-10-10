@@ -250,6 +250,48 @@ impl<'a> RynkService<'a> {
             Cmd::GetBleStatus | Cmd::SwitchBleProfile | Cmd::GetBatteryStatus => Some(false),
             #[cfg(feature = "split")]
             Cmd::GetPeripheralStatus => Some(false),
+            Cmd::SetMorseProfileEntry | Cmd::DeleteMorseProfile => Some(true),
+            Cmd::GetBuildInfo
+            | Cmd::GetMorseHoldTriggerPositions
+            | Cmd::GetMorseProfileCount
+            | Cmd::GetMorseProfile
+            | Cmd::GetMorseProfileBulk
+            | Cmd::GetMorseProfileState
+            | Cmd::GetBehaviorOptions
+            | Cmd::GetAutoMouseLayerConfigs
+            | Cmd::GetLayerState
+            | Cmd::GetModifierState
+            | Cmd::GetPointingConfig
+            | Cmd::GetPointingCapabilities => Some(false),
+            #[cfg(all(feature = "_ble", feature = "split"))]
+            Cmd::GetSplitCentralLatency => Some(false),
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingCapabilities
+            | Cmd::GetLightingState
+            | Cmd::GetLightingPhysicalKeys
+            | Cmd::GetLightingLeds
+            | Cmd::GetLightingZones
+            | Cmd::GetLightingZoneMemberships
+            | Cmd::GetLightingOutputs
+            | Cmd::GetLightingRoutes
+            | Cmd::GetLightingKeys
+            | Cmd::GetLightingSceneStatus
+            | Cmd::GetLightingScenes
+            | Cmd::GetLightingOverlay
+            | Cmd::GetLightingCompiledSceneStatus
+            | Cmd::GetLightingCompiledScenes
+            | Cmd::GetLightingConditionalSceneStatus
+            | Cmd::GetLightingConditionalScenes
+            | Cmd::GetLightingOutputMode
+            | Cmd::GetLightingExtension
+            | Cmd::GetLightingExtensionNames
+            | Cmd::GetLightingExtensionParams
+            | Cmd::GetLightingExtensionLayers
+            | Cmd::GetLightingReplicaStatus
+            | Cmd::GetLightingRuntimeConditionalSceneStatus
+            | Cmd::GetLightingRuntimeConditionalScenes
+            | Cmd::GetLightingExtendedRuntimeConditionalSceneStatus
+            | Cmd::GetLightingExtendedRuntimeConditionalScenes => Some(false),
             _ => None,
         }
     }
