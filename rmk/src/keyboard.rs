@@ -401,6 +401,17 @@ impl<'a> Keyboard<'a> {
     }
 
     async fn process_key_action(&mut self, key_action: &KeyAction, event: KeyboardEvent, event_time: Instant) {
+        if event.pressed {
+            for k in self.held_buffer.keys.iter_mut() {
+                if k.event.pos != event.pos {
+                    k.retro_tap_interrupted = true;
+                    if let KeyState::RetroTapCandidate(hold_action) = k.state {
+                        k.state = KeyState::ProcessedButReleaseNotReportedYet(hold_action);
+                    }
+                }
+            }
+        }
+
         // First, make the decision for current key and held keys
         let (decision_for_current_key, decisions) = self.make_decisions_for_keys(key_action, event);
 

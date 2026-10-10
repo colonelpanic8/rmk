@@ -1186,6 +1186,10 @@ pub(crate) struct MorseProfile {
     pub gap_timeout: Option<DurationMillis>,
 
     pub quick_tap_timeout: Option<DurationMillis>,
+
+    /// if true, a hold resolved by timeout alone sends the tap action instead when the key is
+    /// released without any other key having been pressed
+    pub retro_tap: Option<bool>,
 }
 
 /// Configurations for tri layer
@@ -1313,6 +1317,10 @@ pub(crate) struct MorsesConfig {
     pub gap_timeout: Option<DurationMillis>,
 
     pub quick_tap_timeout: Option<DurationMillis>,
+
+    /// if true, a hold resolved by timeout alone sends the tap action instead when the key is
+    /// released without any other key having been pressed
+    pub retro_tap: Option<bool>,
 
     /// these can be used to overrides the defaults given above
     pub profiles: Option<HashMap<String, MorseProfile>>,
