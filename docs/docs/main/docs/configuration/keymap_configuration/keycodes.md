@@ -298,6 +298,8 @@ For simple keycodes with shift active you can use `SHIFTED(key)` in your [layout
 | `ComboOff`       |         | Disable combos                                                        |
 | `ComboToggle`    |         | Toggle combos                                                         |
 | `CapsWordToggle` |         | Toggle [Caps Word](./special_keys#caps-word)                          |
+| `OutputUsb`      |         | Prefer USB as the host transport on release                           |
+| `OutputBluetooth`|         | Prefer BLE as the host transport on release                           |
 
 ## Not yet implemented keys
 

@@ -4,13 +4,14 @@
 use bt_hci::{cmd::le::LeSetPhy, controller::ControllerCmdAsync};
 use embassy_futures::select::{Either3, select3};
 use embassy_sync::signal::Signal;
+use rmk_types::connection::ConnectionType;
 use trouble_host::prelude::*;
 use trouble_host::{BondInformation, LongTermKey};
 
 use super::ble_server::CCCD_TABLE_SIZE;
 use crate::NUM_BLE_PROFILE;
 use crate::channel::BLE_PROFILE_CHANNEL;
-use crate::state::{current_profile, set_ble_bonded, set_ble_profile};
+use crate::state::{current_profile, set_ble_bonded, set_ble_profile, set_preferred};
 #[cfg(feature = "storage")]
 use crate::storage::{StorageItem, StorageKey, StorageValue, read, store};
 
@@ -367,12 +368,14 @@ where
                 Either3::First(action) => {
                     match action {
                         BleProfileAction::Switch(profile) => {
+                            set_preferred(ConnectionType::Ble).await;
                             if !self.switch_profile(profile).await {
                                 // If the profile is the same as the current profile, do nothing
                                 continue;
                             }
                         }
                         BleProfileAction::Previous => {
+                            set_preferred(ConnectionType::Ble).await;
                             let mut profile = current_profile();
                             profile = if profile == 0 {
                                 NUM_BLE_PROFILE as u8 - 1
@@ -383,6 +386,7 @@ where
                             self.switch_profile(profile).await;
                         }
                         BleProfileAction::Next => {
+                            set_preferred(ConnectionType::Ble).await;
                             // Cycling stays within the host profiles. The dongle slot sits past
                             // the last one, so wrap there too instead of landing on profile 1.
                             let next = current_profile() + 1;
