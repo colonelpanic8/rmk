@@ -21,8 +21,8 @@ pub use lighting::{
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::constants::RYNK_BUFFER_SIZE;
 use rmk_types::protocol::rynk::{
-    BuildInfo, Cmd, DeviceDataDescriptor, DeviceDataRecord, Deframer, FirmwareVersion, RYNK_HEADER_SIZE, RynkError, RynkMessage, command, encode_frame,
-    max_wire_size,
+    BuildInfo, Cmd, Deframer, DeviceDataDescriptor, DeviceDataRecord, FirmwareVersion, RYNK_HEADER_SIZE, RynkError,
+    RynkMessage, command, encode_frame, max_wire_size,
 };
 
 use self::handlers::{serve, serve_bulk};
@@ -286,7 +286,9 @@ impl<'a> RynkService<'a> {
             | Cmd::GetLayerState
             | Cmd::GetModifierState
             | Cmd::GetPointingConfig
-            | Cmd::GetPointingCapabilities => Some(false),
+            | Cmd::GetPointingCapabilities
+            | Cmd::GetDeviceDataDescriptor
+            | Cmd::GetDeviceDataRecord => Some(false),
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::GetSplitCentralLatency => Some(false),
             #[cfg(feature = "lighting")]
