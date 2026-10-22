@@ -16,16 +16,16 @@ use serde::de::DeserializeOwned;
 use super::BleName;
 use super::message::{RynkHeader, encode_frame};
 use super::{
-    AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, BuildInfo, DeviceCapabilities, DeviceInfo,
-    GetComboBulkRequest, GetComboBulkResponse, GetComboDefinitionBulkResponse, GetEncoderRequest, GetKeymapBulkRequest,
-    GetKeymapBulkResponse, GetMorseBulkRequest, GetMorseBulkResponse, GetMorseProfileBulkRequest,
-    GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerState, LayoutChunk, LockStatus,
-    MaintenanceMode, MatrixState, MorseHoldTriggerPositionState, MorseProfileState, PointingCapabilities,
-    PointingConfig, ProtocolVersion, RynkError, SetAutoMouseLayerConfigsRequest, SetComboBulkRequest,
-    SetComboDefinitionBulkRequest, SetComboDefinitionRequest, SetComboRequest, SetEncoderRequest, SetForkRequest,
-    SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest, SetMorseHoldTriggerPositionsRequest,
-    SetMorseProfileBulkRequest, SetMorseProfileEntryRequest, SetMorseProfileRequest, SetMorseRequest,
-    SetPointingConfigRequest, StorageResetMode,
+    AutoMouseLayerConfigState, BehaviorConfig, BehaviorOptions, BuildInfo, DeviceCapabilities, DeviceDataDescriptor,
+    DeviceDataRecord, DeviceInfo, GetComboBulkRequest, GetComboBulkResponse, GetComboDefinitionBulkResponse,
+    GetEncoderRequest, GetKeymapBulkRequest, GetKeymapBulkResponse, GetMorseBulkRequest, GetMorseBulkResponse,
+    GetMorseProfileBulkRequest, GetMorseProfileBulkResponse, GetMorseProfileStateRequest, KeyPosition, LayerState,
+    LayoutChunk, LockStatus, MaintenanceMode, MatrixState, MorseHoldTriggerPositionState, MorseProfileState,
+    PointingCapabilities, PointingConfig, ProtocolVersion, RynkError, SetAutoMouseLayerConfigsRequest,
+    SetComboBulkRequest, SetComboDefinitionBulkRequest, SetComboDefinitionRequest, SetComboRequest, SetEncoderRequest,
+    SetForkRequest, SetKeyRequest, SetKeymapBulkRequest, SetMacroRequest, SetMorseBulkRequest,
+    SetMorseHoldTriggerPositionsRequest, SetMorseProfileBulkRequest, SetMorseProfileEntryRequest,
+    SetMorseProfileRequest, SetMorseRequest, SetPointingConfigRequest, StorageResetMode,
 };
 use crate::action::{EncoderAction, KeyAction};
 #[cfg(feature = "_ble")]
@@ -329,6 +329,10 @@ endpoints! {
     PeripheralBootloaderJump = 0x000C: u8 => ();
     /// Read the live gate for host maintenance operations.
     GetMaintenanceMode = 0x000D: () => MaintenanceMode;
+    /// Describe the board-defined, machine-readable device-data namespace.
+    GetDeviceDataDescriptor = 0x000E: () => DeviceDataDescriptor;
+    /// Read one typed record from the board-defined device-data namespace.
+    GetDeviceDataRecord = 0x000F: u8 => DeviceDataRecord;
 
     // Keymap (0x01xx) — includes encoder.
     GetKeyAction = 0x0101: KeyPosition => KeyAction;
