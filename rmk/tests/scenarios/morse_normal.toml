@@ -1,11 +1,15 @@
-# Morse and tap-hold in the default Normal mode.
+# Morse and tap-hold in Normal mode, where the decision waits for the hold
+# timeout. Normal is no longer the default, so this file asks for it.
 #
 # The fixture sits on the shared split board's home row: A@(1,0),
 # MT(B, LShift)@(1,1), TD(0)@(1,2), MT(C, LGui)@(1,7), LT(1, D)@(1,8), with
-# keypad digits behind them on layer 1. No mode flags are set, so the defaults
-# apply: Normal mode, 250 ms hold/gap timeouts.
+# keypad digits behind them on layer 1. Timings are the 250 ms hold/gap
+# defaults.
 
 keyboard = "boards/split.toml"
+
+[behavior.morse]
+normal_mode = true
 
 [[test]]
 name = "tap"

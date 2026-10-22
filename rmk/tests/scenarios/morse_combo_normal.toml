@@ -1,10 +1,13 @@
-# Combos whose members are morse keys, resolved in the default Normal mode.
+# Combos whose members are morse keys, resolved in Normal mode.
 #
 # One of four `morse_combo_*` files — see `morse_combo_permissive_hold.toml`
-# for the shared fixture and timeline names. No mode flags are set, so the
-# defaults apply: Normal mode, 250 ms hold/gap timeouts.
+# for the shared fixture and timeline names. Timings are the 250 ms hold/gap
+# defaults.
 
 keyboard = "boards/split.toml"
+
+[behavior.morse]
+normal_mode = true
 
 [behavior.combo]
 timeout = "50ms"
