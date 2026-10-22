@@ -22,12 +22,12 @@ use super::driver::{SplitReader, SplitWriter};
 use crate::dfu::{DfuCmd, DfuTarget, SPLIT_RESPONSE_CHANNEL, SplitResponse};
 #[cfg(feature = "dfu_split")]
 use crate::event::DfuCmdEvent;
+#[cfg(feature = "display")]
+use crate::event::WpmUpdateEvent;
 use crate::event::{
     KeyboardEvent, LayerChangeEvent, LedIndicatorEvent, PointingEvent, SleepStateEvent, SubscribableEvent,
     publish_event,
 };
-#[cfg(feature = "display")]
-use crate::event::WpmUpdateEvent;
 #[cfg(not(feature = "_ble"))]
 use crate::split::serial::SerialSplitDriver;
 use crate::state::update_status;
@@ -168,8 +168,12 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                 publish_event(LedIndicatorEvent::new(indicator));
             }
             SplitMessage::Layer(layer) => {
-                // Publish Layer event
+                super::update_legacy_effective_layer(layer);
                 publish_event(LayerChangeEvent::new(layer));
+            }
+            SplitMessage::LayerState(state) => {
+                super::update_layer_state(state);
+                publish_event(LayerChangeEvent::new(state.effective));
             }
             #[cfg(feature = "display")]
             SplitMessage::Wpm(wpm) => publish_event(WpmUpdateEvent::new(wpm)),
