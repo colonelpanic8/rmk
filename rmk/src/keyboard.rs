@@ -855,7 +855,7 @@ impl<'a> Keyboard<'a> {
                     if event.pressed {
                         // Under the macro identity, so the tap doesn't replace the held modifier.
                         let tap_event = KeyboardEvent {
-                            pos: KeyboardEventPos::Macro,
+                            source: KeyboardEventSource::Macro,
                             pressed: true,
                         };
                         self.process_key_action_tap(Action::Key(KeyCode::Hid(tap)), tap_event)
