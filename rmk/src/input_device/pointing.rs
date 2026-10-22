@@ -163,6 +163,7 @@ impl<S: PointingDriver> PointingDevice<S> {
 
         Some(PointingEvent {
             device_id: self.id,
+            buttons: 0,
             axes: [
                 AxisEvent {
                     typ: AxisValType::Rel,
@@ -637,6 +638,8 @@ pub struct PointingProcessor<'a> {
     scroll_acceleration_rest: (i64, i64),
     /// When the previous event arrived, to measure the speed for acceleration
     last_event_at: Instant,
+    /// Device-originated button state from the last processed event
+    device_buttons: u8,
 }
 
 impl<'a> PointingProcessor<'a> {
@@ -652,6 +655,7 @@ impl<'a> PointingProcessor<'a> {
             acceleration_rest: (0, 0),
             scroll_acceleration_rest: (0, 0),
             last_event_at: Instant::MIN,
+            device_buttons: 0,
         }
     }
 
@@ -715,6 +719,9 @@ impl<'a> PointingProcessor<'a> {
         let dt_ms = now.saturating_duration_since(self.last_event_at).as_millis();
         self.last_event_at = now;
 
+        let device_buttons_changed = event.buttons != self.device_buttons;
+        self.device_buttons = event.buttons;
+        let buttons = self.keymap.mouse_buttons() | event.buttons;
         // The device's own scrolling, in every mode.
         if (h, v) != (0, 0) {
             let (wheel, pan) = calculate_scroll_delta(
@@ -726,7 +733,7 @@ impl<'a> PointingProcessor<'a> {
             );
             if (wheel, pan) != (0, 0) {
                 send_hid_report(Report::MouseReport(MouseReport {
-                    buttons: self.keymap.mouse_buttons(),
+                    buttons,
                     x: 0,
                     y: 0,
                     wheel,
@@ -734,12 +741,11 @@ impl<'a> PointingProcessor<'a> {
                 }))
                 .await;
             }
-            if x == 0 && y == 0 {
+            if x == 0 && y == 0 && !device_buttons_changed {
                 return;
             }
         }
 
-        let buttons = self.keymap.mouse_buttons();
         match self.current_mode {
             PointingMode::Cursor(_) | PointingMode::Scroll(_) | PointingMode::Sniper(_) => {
                 // modes that generate mouse reports
@@ -762,7 +768,7 @@ impl<'a> PointingProcessor<'a> {
                             &mut accumulator.remainder_y,
                         );
                         // Motion too small to move the cursor yet, as in sniper mode.
-                        if out_x == 0 && out_y == 0 && (x, y) != (0, 0) {
+                        if out_x == 0 && out_y == 0 && (x, y) != (0, 0) && !device_buttons_changed {
                             return;
                         }
                         let out_x = if cursor_config.invert_x { -out_x } else { out_x };
@@ -784,7 +790,7 @@ impl<'a> PointingProcessor<'a> {
                             &mut self.accumulator,
                             &mut self.scroll_acceleration_rest,
                         );
-                        if (wheel, pan) == (0, 0) {
+                        if (wheel, pan) == (0, 0) && !device_buttons_changed {
                             return;
                         }
                         MouseReport {
@@ -802,7 +808,7 @@ impl<'a> PointingProcessor<'a> {
                             (sniper_config.multiplier, sniper_config.divisor),
                             (sniper_config.multiplier, sniper_config.divisor),
                         );
-                        if sx == 0 && sy == 0 {
+                        if sx == 0 && sy == 0 && !device_buttons_changed {
                             return;
                         }
                         let out_x = if sniper_config.invert_x { -sx } else { sx };
@@ -1723,6 +1729,7 @@ mod tests {
             );
             let scroll = |h, v| PointingEvent {
                 device_id: 0,
+                buttons: 0,
                 axes: [rel(Axis::H, h), rel(Axis::V, v), rel(Axis::Z, 0)],
             };
 
@@ -1799,6 +1806,7 @@ mod tests {
             pointing.set_pointing_mode(PointingMode::Caret(CaretConfig::default()));
             let motion = PointingEvent {
                 device_id: 0,
+                buttons: 0,
                 axes: [
                     AxisEvent {
                         typ: AxisValType::Rel,

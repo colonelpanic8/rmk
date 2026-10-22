@@ -480,6 +480,7 @@ where
                         };
                         return TouchpadEvent::Pointing(PointingEvent {
                             device_id: self.pointing_device_id,
+                            buttons: 0,
                             axes: [rel(Axis::X, dx), rel(Axis::Y, dy), rel(Axis::Z, 0)],
                         });
                     }
