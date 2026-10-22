@@ -915,21 +915,6 @@ fn remap_primary_button(buttons: u8, primary_button: u8) -> u8 {
         }
 }
 
-/// Whether drag mode holds its button after this button transition.
-///
-/// The latch toggles on the press, not the release, so the tap that starts
-/// a drag has the button down for the whole gesture and the tap that ends
-/// one does not re-latch when the finger lifts.
-fn drag_latch_after(latched: bool, previous: u8, current: u8, toggled_by: u8) -> bool {
-    let pressed_now = current & toggled_by != 0;
-    let pressed_before = previous & toggled_by != 0;
-    if pressed_now && !pressed_before {
-        !latched
-    } else {
-        latched
-    }
-}
-
 /// Keypad mode treats the primary device button as a tap gesture and emits
 /// only on its rising edge.
 fn keypad_tap_key(previous: u8, current: u8, cfg: &KeypadConfig) -> Option<HidKeyCode> {
