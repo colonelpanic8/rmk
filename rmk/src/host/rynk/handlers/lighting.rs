@@ -3298,7 +3298,7 @@ mod tests {
                     &service,
                     &session,
                     &SetLightingWakeLayersRequest {
-                        expected_revision: 8,
+                        expected_revision: 9,
                         layers: 1 << 2,
                     },
                 )
