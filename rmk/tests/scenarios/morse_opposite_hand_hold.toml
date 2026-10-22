@@ -1,0 +1,103 @@
+# Strict hand-aware home-row modifiers.
+#
+# The fixture intentionally mirrors the reported J/I and J/K behavior:
+#   A@(0,0) and F/LCtrl@(0,1) are Left;
+#   J/RShift@(0,3), K/RCtrl@(0,4), and I@(0,5) are Right;
+#   Space@(0,6) is Bilateral.
+
+[behavior.morse]
+opposite_hand_hold = true
+normal_mode = true
+hold_timeout = "200ms"
+gap_timeout = "200ms"
+
+[layout]
+rows = 1
+cols = 7
+map = "(0,0,L) (0,1,L) (0,2,L) (0,3,R) (0,4,R) (0,5,R) (0,6,*)"
+
+[[keymap.layer]]
+keys = "A MT(F, LCtrl) B MT(J, RShift) MT(K, RCtrl) I Space"
+
+# Regression: the timeout must arm J rather than emit RShift. A later I press
+# is same-hand ordinary input, so it resolves J as a tap and I stays lowercase.
+[[test]]
+name = "opposite_hand_hold_same_hand_letter_after_timeout_stays_lowercase"
+steps = [
+  { press = [0, 3] },
+  { no_report = 250 },
+  { tap = { pos = [0, 5], duration = 10 } },
+  { release = [0, 3] },
+]
+expect = [["J"], ["J", "I"], ["J"], []]
+
+# An opposite-hand key activates the armed hold before the triggering key is
+# reported, so the left-hand A receives Right Shift.
+[[test]]
+name = "opposite_hand_hold_cross_hand_letter_is_shifted"
+steps = [
+  { press = [0, 3] },
+  { no_report = 250 },
+  { press = [0, 0] },
+  { release = [0, 0] },
+  { release = [0, 3] },
+]
+expect = [["RShift"], ["RShift", "A"], ["RShift"], []]
+
+# Before the timeout, even an opposite-hand key must resolve the HRM as a tap.
+# This makes hold_timeout a real lower bound for hold activation.
+[[test]]
+name = "opposite_hand_hold_cross_hand_letter_before_timeout_types_taps"
+steps = [
+  { press = [0, 3] },
+  { tap = { pos = [0, 0], duration = 10 } },
+  { release = [0, 3] },
+]
+expect = [["J"], ["J", "A"], ["J"], []]
+
+# A second same-hand HRM whose hold is a modifier does not prematurely tap J.
+# The opposite-hand A activates both pending modifiers as one Ctrl+Shift chord.
+[[test]]
+name = "opposite_hand_hold_same_hand_hrms_form_modifier_chord"
+steps = [
+  { press = [0, 3] },
+  { press = [0, 4] },
+  { no_report = 250 },
+  { press = [0, 0] },
+  { release = [0, 0] },
+  { release = [0, 4] },
+  { release = [0, 3] },
+]
+expect = [
+  ["RShift"],
+  ["RShift", "RCtrl"],
+  ["RShift", "RCtrl", "A"],
+  ["RShift", "RCtrl"],
+  ["RShift"],
+  [],
+]
+
+# The modifier exemption must not turn an ordinary same-hand roll into a hold:
+# releasing K without an opposite-hand trigger settles J then K as taps.
+[[test]]
+name = "opposite_hand_hold_same_hand_hrm_tap_still_types"
+steps = [
+  { press = [0, 3] },
+  { press = [0, 4] },
+  { release = [0, 4] },
+  { release = [0, 3] },
+]
+expect = [["J"], ["J", "K"], ["J"], []]
+
+# Bilateral keys are explicit hold triggers after the timeout, regardless of
+# the held key's hand.
+[[test]]
+name = "opposite_hand_hold_bilateral_key_activates_hold"
+steps = [
+  { press = [0, 3] },
+  { no_report = 250 },
+  { press = [0, 6] },
+  { release = [0, 6] },
+  { release = [0, 3] },
+]
+expect = [["RShift"], ["RShift", "Space"], ["RShift"], []]

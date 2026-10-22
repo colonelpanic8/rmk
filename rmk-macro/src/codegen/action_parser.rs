@@ -174,6 +174,12 @@ pub(crate) fn expand_profile(profile: &MorseProfile) -> proc_macro2::TokenStream
         quote! { ::core::option::Option::None }
     };
 
+    let opposite_hand_hold = if let Some(enable) = profile.opposite_hand_hold {
+        quote! { ::core::option::Option::Some(#enable) }
+    } else {
+        quote! { ::core::option::Option::None }
+    };
+
     let enable_flow_tap = if let Some(enable) = profile.enable_flow_tap {
         quote! { ::core::option::Option::Some(#enable) }
     } else {
@@ -205,6 +211,7 @@ pub(crate) fn expand_profile(profile: &MorseProfile) -> proc_macro2::TokenStream
             .with_retro_tap(#retro_tap)
             .with_prior_idle_time_ms(#prior_idle_time_ms)
             .with_hold_trigger_on_release(#hold_trigger_on_release)
+            .with_opposite_hand_hold(#opposite_hand_hold)
     }
 }
 
@@ -654,6 +661,7 @@ mod tests {
         MorseProfile {
             enable_flow_tap,
             unilateral_tap: Some(true),
+            opposite_hand_hold: None,
             permissive_hold: None,
             hold_on_other_press: None,
             tap_unless_interrupted: None,
