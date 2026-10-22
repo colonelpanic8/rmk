@@ -50,6 +50,19 @@ fn main() {
 fn generate_constants(bc: &BuildConstants, config: &KeyboardTomlConfig) -> String {
     let mut lines = Vec::new();
 
+    lines.push(format!(
+        "pub const BLE_ADVERTISING_FAST_INTERVAL_MS: u16 = {};",
+        bc.advertising.fast_interval_ms
+    ));
+    lines.push(format!(
+        "pub const BLE_ADVERTISING_SLOW_INTERVAL_MS: u16 = {};",
+        bc.advertising.slow_interval_ms
+    ));
+    lines.push(format!(
+        "pub const BLE_ADVERTISING_FAST_TIMEOUT_SECS: u32 = {};",
+        bc.advertising.fast_timeout_secs
+    ));
+
     // Direct constants
     lines.push(format!(
         "pub const MOUSE_KEY_INTERVAL: u16 = {};",
