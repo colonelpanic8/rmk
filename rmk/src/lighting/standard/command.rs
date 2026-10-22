@@ -37,6 +37,9 @@ pub(super) struct RuntimeConditionalSceneReplace<const CAP: usize> {
     pub(super) last_activity_ms: u64,
 }
 
+// The chunk-carrying variants are the payload of a bounded no_std channel;
+// there is no allocator to box them behind.
+#[allow(clippy::large_enum_variant)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StandardCommand<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
     SetOutputEnabled(bool),
@@ -207,7 +210,9 @@ pub struct StandardState {
 ///
 /// Recorded at render time and promoted when the output acknowledges the
 /// write, so it describes what the LEDs show rather than what the engine now
-/// holds. On a split renderer replica the context is the *replicated* one, so
+/// holds. While a released wake layer lingers this is the linger-adjusted
+/// context the sources rendered from, not the snapshot the engine was handed.
+/// On a split renderer replica the context is the *replicated* one, so
 /// comparing it against the authority's is how a stale replica becomes
 /// visible instead of merely suspected.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -477,31 +482,25 @@ pub enum ReplicaSlotError {
 /// [`StandardCommand`] prevents command-channel capacity from multiplying its
 /// RAM cost on small MCUs.
 pub struct StandardReplicaSlot<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
-    value: BlockingMutex<RawMutex, RefCell<Option<StandardReplicaState<OVERLAY_CAP, SCENE_CAP>>>>,
+    // An empty Vec has no payload niche tag, allowing static storage in BSS.
+    value: BlockingMutex<RawMutex, RefCell<heapless::Vec<StandardReplicaState<OVERLAY_CAP, SCENE_CAP>, 1>>>,
 }
 
 impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize> StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP> {
     pub const fn new() -> Self {
         Self {
-            value: BlockingMutex::new(RefCell::new(None)),
+            value: BlockingMutex::new(RefCell::new(heapless::Vec::new())),
         }
     }
 
     pub fn put(&self, state: StandardReplicaState<OVERLAY_CAP, SCENE_CAP>) -> Result<(), ReplicaSlotError> {
-        self.value.lock(|value| {
-            let mut value = value.borrow_mut();
-            if value.is_some() {
-                Err(ReplicaSlotError::Busy)
-            } else {
-                *value = Some(state);
-                Ok(())
-            }
-        })
+        self.value
+            .lock(|value| value.borrow_mut().push(state).map_err(|_| ReplicaSlotError::Busy))
     }
 
     pub fn take(&self) -> Result<StandardReplicaState<OVERLAY_CAP, SCENE_CAP>, ReplicaSlotError> {
         self.value
-            .lock(|value| value.borrow_mut().take().ok_or(ReplicaSlotError::Empty))
+            .lock(|value| value.borrow_mut().pop().ok_or(ReplicaSlotError::Empty))
     }
 }
 
