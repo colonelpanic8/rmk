@@ -177,7 +177,11 @@ impl<'a> RynkService<'a> {
     /// `every_endpoint_has_a_maintenance_policy` test keeps that set empty).
     fn maintenance_policy(cmd: Cmd) -> Option<bool> {
         match cmd {
-            Cmd::Reboot | Cmd::BootloaderJump | Cmd::PeripheralBootloaderJump | Cmd::StorageReset | Cmd::GetMatrixState => Some(true),
+            Cmd::Reboot
+            | Cmd::BootloaderJump
+            | Cmd::PeripheralBootloaderJump
+            | Cmd::StorageReset
+            | Cmd::GetMatrixState => Some(true),
             #[cfg(feature = "lighting")]
             Cmd::GetLightingFrame => Some(true),
             // Deleting a bond opens a re-pair hijack window; BLE-only command.
@@ -244,6 +248,48 @@ impl<'a> RynkService<'a> {
             Cmd::GetBleStatus | Cmd::SwitchBleProfile | Cmd::GetBatteryStatus => Some(false),
             #[cfg(feature = "split")]
             Cmd::GetPeripheralStatus => Some(false),
+            Cmd::SetMorseProfileEntry | Cmd::DeleteMorseProfile => Some(true),
+            Cmd::GetBuildInfo
+            | Cmd::GetMorseHoldTriggerPositions
+            | Cmd::GetMorseProfileCount
+            | Cmd::GetMorseProfile
+            | Cmd::GetMorseProfileBulk
+            | Cmd::GetMorseProfileState
+            | Cmd::GetBehaviorOptions
+            | Cmd::GetAutoMouseLayerConfigs
+            | Cmd::GetLayerState
+            | Cmd::GetModifierState
+            | Cmd::GetPointingConfig
+            | Cmd::GetPointingCapabilities => Some(false),
+            #[cfg(all(feature = "_ble", feature = "split"))]
+            Cmd::GetSplitCentralLatency => Some(false),
+            #[cfg(feature = "lighting")]
+            Cmd::GetLightingCapabilities
+            | Cmd::GetLightingState
+            | Cmd::GetLightingPhysicalKeys
+            | Cmd::GetLightingLeds
+            | Cmd::GetLightingZones
+            | Cmd::GetLightingZoneMemberships
+            | Cmd::GetLightingOutputs
+            | Cmd::GetLightingRoutes
+            | Cmd::GetLightingKeys
+            | Cmd::GetLightingSceneStatus
+            | Cmd::GetLightingScenes
+            | Cmd::GetLightingOverlay
+            | Cmd::GetLightingCompiledSceneStatus
+            | Cmd::GetLightingCompiledScenes
+            | Cmd::GetLightingConditionalSceneStatus
+            | Cmd::GetLightingConditionalScenes
+            | Cmd::GetLightingOutputMode
+            | Cmd::GetLightingExtension
+            | Cmd::GetLightingExtensionNames
+            | Cmd::GetLightingExtensionParams
+            | Cmd::GetLightingExtensionLayers
+            | Cmd::GetLightingReplicaStatus
+            | Cmd::GetLightingRuntimeConditionalSceneStatus
+            | Cmd::GetLightingRuntimeConditionalScenes
+            | Cmd::GetLightingExtendedRuntimeConditionalSceneStatus
+            | Cmd::GetLightingExtendedRuntimeConditionalScenes => Some(false),
             _ => None,
         }
     }

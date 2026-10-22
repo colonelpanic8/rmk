@@ -1810,15 +1810,7 @@ mod tests {
             .len();
         let req_len = RYNK_HEADER_SIZE + payload_len;
         let mut message = RynkMessage::from_decoded(&mut buffer[..], req_len);
-        // Same gate `run_session` builds, derived from the service under test so
-        // the lock tier is exercised exactly as it is in production.
-        let locker = crate::host::lock::HostLock::new(
-            service.lock_config.unlock_keys,
-            service.ctx.keymap,
-            service.lock_config.insecure,
-            crate::host::rynk::RYNK_UNLOCK_WINDOW,
-        );
-        service.dispatch(&locker, session, &mut message).await.unwrap();
+        service.dispatch(session, &mut message).await.unwrap();
         // The reply is COBS-framed in place; deframe it back to [cmd, seq, payload].
         let mut reply = message.frame().to_vec();
         let framed_len = reply.len();
@@ -1868,8 +1860,7 @@ mod tests {
             let positional: PositionalConfig<1, 3> = PositionalConfig::default();
             let mut data: KeymapData<1, 3, 1, 0> = KeymapData::new([[[KeyAction::No; 3]]]);
             let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-            let mut config = RmkConfig::default();
-            config.lock_config.insecure = true;
+            let config = RmkConfig::default();
             let unbound = RynkService::new(&keymap, &config);
             let unbound_session = session();
             let device_caps = call::<GetCapabilities>(&unbound, &unbound_session, &()).await.unwrap();
@@ -1899,8 +1890,7 @@ mod tests {
             let positional: PositionalConfig<1, 3> = PositionalConfig::default();
             let mut data: KeymapData<1, 3, 1, 0> = KeymapData::new([[[KeyAction::No; 3]]]);
             let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-            let mut config = RmkConfig::default();
-            config.lock_config.insecure = true;
+            let config = RmkConfig::default();
             let mailbox = RynkLightingMailbox::new();
             let service = RynkService::new(&keymap, &config).with_lighting(RynkLightingController::new(
                 &mailbox,
@@ -1951,8 +1941,7 @@ mod tests {
             let positional: PositionalConfig<1, 3> = PositionalConfig::default();
             let mut data: KeymapData<1, 3, 1, 0> = KeymapData::new([[[KeyAction::No; 3]]]);
             let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-            let mut config = RmkConfig::default();
-            config.lock_config.insecure = true;
+            let config = RmkConfig::default();
             let mailbox = RynkLightingMailbox::new();
             let service = RynkService::new(&keymap, &config).with_lighting(RynkLightingController::new(
                 &mailbox,
@@ -2003,8 +1992,7 @@ mod tests {
             let positional: PositionalConfig<1, 3> = PositionalConfig::default();
             let mut data: KeymapData<1, 3, 1, 0> = KeymapData::new([[[KeyAction::No; 3]]]);
             let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-            let mut config = RmkConfig::default();
-            config.lock_config.insecure = true;
+            let config = RmkConfig::default();
             let mailbox = RynkLightingMailbox::new();
             let service = RynkService::new(&keymap, &config).with_lighting(RynkLightingController::new(
                 &mailbox,
@@ -2143,8 +2131,7 @@ mod tests {
             let positional: PositionalConfig<1, 3> = PositionalConfig::default();
             let mut data: KeymapData<1, 3, 1, 0> = KeymapData::new([[[KeyAction::No; 3]]]);
             let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-            let mut config = RmkConfig::default();
-            config.lock_config.insecure = true;
+            let config = RmkConfig::default();
             let mailbox = RynkLightingMailbox::new();
             let service = RynkService::new(&keymap, &config).with_lighting(RynkLightingController::new(
                 &mailbox,
@@ -2197,8 +2184,7 @@ mod tests {
             let positional: PositionalConfig<1, 3> = PositionalConfig::default();
             let mut data: KeymapData<1, 3, 1, 0> = KeymapData::new([[[KeyAction::No; 3]]]);
             let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-            let mut config = RmkConfig::default();
-            config.lock_config.insecure = true;
+            let config = RmkConfig::default();
             let mailbox = RynkLightingMailbox::new();
             let service = RynkService::new(&keymap, &config).with_lighting(RynkLightingController::new(
                 &mailbox,
@@ -2263,8 +2249,7 @@ mod tests {
             let positional: PositionalConfig<1, 3> = PositionalConfig::default();
             let mut data: KeymapData<1, 3, 1, 0> = KeymapData::new([[[KeyAction::No; 3]]]);
             let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-            let mut config = RmkConfig::default();
-            config.lock_config.insecure = true;
+            let config = RmkConfig::default();
             let mailbox = RynkLightingMailbox::new();
             // Lighting is bound, but the board wired no runtime scene table.
             let service = RynkService::new(&keymap, &config).with_lighting(RynkLightingController::new(
@@ -2329,8 +2314,7 @@ mod tests {
             let positional: PositionalConfig<1, 3> = PositionalConfig::default();
             let mut data: KeymapData<1, 3, 2, 0> = KeymapData::new([[[KeyAction::No; 3]]; 2]);
             let keymap = KeyMap::new(&mut data, &mut behavior, &positional).await;
-            let mut config = RmkConfig::default();
-            config.lock_config.insecure = true;
+            let config = RmkConfig::default();
             let mailbox = RynkLightingMailbox::new();
             let controls = LightingControls {
                 output_toggle_user_action: Some(13),
