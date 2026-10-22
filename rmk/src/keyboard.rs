@@ -202,7 +202,7 @@ pub struct Keyboard<'a> {
     user_hold: Option<(Instant, u8)>,
 
     #[cfg(feature = "_ble")]
-    profile_tap: Option<(Instant, u8, KeyboardEventPos, bool)>,
+    profile_tap: Option<(Instant, u8, KeyboardEventSource, bool)>,
 
     /// Caps Word state machine
     caps_word: CapsWordState,
@@ -381,7 +381,7 @@ impl<'a> Keyboard<'a> {
     pub async fn process_inner(&mut self, event: KeyboardEvent) {
         #[cfg(feature = "_ble")]
         if let Some((at, id, pos, second_pressed)) = self.profile_tap {
-            if Instant::now() <= at && event.pos == pos && event.pressed != second_pressed {
+            if Instant::now() <= at && event.source == pos && event.pressed != second_pressed {
                 if event.pressed {
                     self.profile_tap = Some((Instant::now() + Duration::from_millis(300), id, pos, true));
                 } else {
@@ -401,7 +401,11 @@ impl<'a> Keyboard<'a> {
                 .send(crate::ble::profile::BleProfileAction::Switch(id))
                 .await;
             if second_pressed {
-                self.process_event(KeyboardEvent { pos, pressed: true }).await;
+                self.process_event(KeyboardEvent {
+                    source: pos,
+                    pressed: true,
+                })
+                .await;
             }
         }
     }
@@ -1704,7 +1708,7 @@ impl<'a> Keyboard<'a> {
                 // Other user keys are processed when released.
                 if id < NUM_BLE_PROFILE as u8 {
                     if id != crate::state::current_profile() {
-                        self.profile_tap = Some((Instant::now() + Duration::from_millis(300), id, event.pos, false));
+                        self.profile_tap = Some((Instant::now() + Duration::from_millis(300), id, event.source, false));
                     } else {
                         BLE_PROFILE_CHANNEL.send(BleProfileAction::Switch(id)).await;
                     }
