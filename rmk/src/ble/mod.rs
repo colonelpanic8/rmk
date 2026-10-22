@@ -48,8 +48,6 @@ pub(crate) mod device_info;
 pub(crate) mod host;
 pub(crate) mod led;
 pub(crate) mod name;
-#[cfg(feature = "_nrf_ble")]
-pub(crate) mod nrf;
 pub mod passkey;
 pub(crate) mod profile;
 #[cfg(any(feature = "split", feature = "dongle"))]
@@ -243,10 +241,6 @@ async fn run_ble_keyboard<
     {
         name::restore(saved);
     }
-    #[cfg(feature = "_nrf_ble")]
-    let serial_number = crate::ble::nrf::get_serial_number();
-    #[cfg(not(feature = "_nrf_ble"))]
-    let serial_number = device_config.serial_number;
 
     info!("Starting advertising and GATT service");
     let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
@@ -269,7 +263,7 @@ async fn run_ble_keyboard<
     server
         .set(
             &server.device_config_service.serial_number,
-            &heapless::String::try_from(serial_number).expect("serial_number is too long for BLE"),
+            &device_config.serial_number,
         )
         .unwrap();
     server
