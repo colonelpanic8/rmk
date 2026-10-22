@@ -57,6 +57,8 @@ GetLockStatus reply Ok(LockStatus{true,false,2,[(1,2),(3,4)]})                  
 GetLockStatus request ()                                                        02 06 02 01 00
 GetMacro reply Ok(Macro{[Tap(A),Delay(300),Char(a),Pause]})                     04 01 02 01 02 04 02 01 08 04 03 ac 02 04 61 05 00
 GetMacro request 2                                                              05 01 02 01 02 00
+GetMaintenanceMode reply Ok(MaintenanceMode{true,false})                        02 0d 02 01 02 01 01 00
+GetMaintenanceMode request ()                                                   02 0d 02 01 00
 GetMatrixState reply Ok(MatrixState{[0x05,0x00,0x20]})                          04 02 08 01 03 03 05 02 20 00
 GetMatrixState request ()                                                       04 02 08 01 00
 GetModifierState reply Ok(ModifierCombination(LShift|RAlt))                     04 09 08 01 02 42 00
