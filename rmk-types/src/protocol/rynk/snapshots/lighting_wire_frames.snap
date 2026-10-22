@@ -9,6 +9,8 @@ AbortLightingAdvancedRuntimeConditionalSceneReplace reply     04 45 09 01 01 01 
 AbortLightingAdvancedRuntimeConditionalSceneReplace request   05 45 09 01 1f 00
 AbortLightingOverlayReplace reply                             04 10 09 01 01 01 00
 AbortLightingOverlayReplace request                           05 10 09 01 0d 00
+AbortLightingRuleReplace reply                                04 55 09 01 01 01 00
+AbortLightingRuleReplace request                              05 55 09 01 1f 00
 AbortLightingRuntimeConditionalSceneReplace reply             04 2a 09 01 01 01 00
 AbortLightingRuntimeConditionalSceneReplace request           05 2a 09 01 1f 00
 AbortLightingSceneReplace reply                               04 19 09 01 01 01 00
@@ -17,6 +19,8 @@ BeginLightingAdvancedRuntimeConditionalSceneReplace reply     04 42 09 01 01 03 
 BeginLightingAdvancedRuntimeConditionalSceneReplace request   06 42 09 01 09 01 00
 BeginLightingOverlayReplace reply                             04 0d 09 01 01 03 0d 01 00
 BeginLightingOverlayReplace request                           06 0d 09 01 0c 01 00
+BeginLightingRuleReplace reply                                04 52 09 01 01 03 1f 01 00
+BeginLightingRuleReplace request                              06 52 09 01 09 01 00
 BeginLightingRuntimeConditionalSceneReplace reply             04 27 09 01 01 03 1f 01 00
 BeginLightingRuntimeConditionalSceneReplace request           06 27 09 01 09 01 00
 BeginLightingSceneReplace reply                               04 16 09 01 01 03 15 01 00
@@ -27,6 +31,8 @@ CommitLightingAdvancedRuntimeConditionalSceneReplace reply    04 44 09 01 01 0b 
 CommitLightingAdvancedRuntimeConditionalSceneReplace request  05 44 09 01 1f 00
 CommitLightingOverlayReplace reply                            04 0f 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
 CommitLightingOverlayReplace request                          05 0f 09 01 0d 00
+CommitLightingRuleReplace reply                               04 54 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
+CommitLightingRuleReplace request                             05 54 09 01 1f 00
 CommitLightingRuntimeConditionalSceneReplace reply            04 29 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
 CommitLightingRuntimeConditionalSceneReplace request          05 29 09 01 1f 00
 CommitLightingSceneReplace reply                              04 18 09 01 01 0b 09 01 c8 01 0a 14 1e 28 01 01 00
@@ -35,7 +41,7 @@ GetLightingAdvancedRuntimeConditionalSceneStatus reply        04 40 09 01 01 05 
 GetLightingAdvancedRuntimeConditionalSceneStatus request      04 40 09 01 00
 GetLightingAdvancedRuntimeConditionalScenes reply             04 41 09 01 01 0e 09 01 01 01 02 01 01 01 01 14 01 50 02 02 2a 18 07 08 09 01 01 01 01 03 01 01 01 02 01 01 01 01 01 01 24 08 01 01 01 02 01 01 00
 GetLightingAdvancedRuntimeConditionalScenes request           05 41 09 01 09 01 00
-GetLightingCapabilities reply                                 04 01 09 01 01 10 01 02 03 04 05 06 07 08 09 08 08 bf ab 01 07 00
+GetLightingCapabilities reply                                 04 01 09 01 01 10 01 02 03 04 05 06 07 08 09 08 08 bf ab 09 07 00
 GetLightingCapabilities request                               04 01 09 01 00
 GetLightingCompiledSceneStatus reply                          04 1c 09 01 01 03 01 01 02 08 00
 GetLightingCompiledSceneStatus request                        04 1c 09 01 00
@@ -69,6 +75,10 @@ GetLightingReplicaStatus reply                                04 37 09 01 01 08 
 GetLightingReplicaStatus request                              04 37 09 01 00
 GetLightingRoutes reply                                       04 09 09 01 01 08 01 01 01 2a 01 02 07 00
 GetLightingRoutes request                                     05 09 09 01 01 01 00
+GetLightingRuleStatus reply                                   04 50 09 01 01 09 09 40 02 e0 01 08 fe 07 00
+GetLightingRuleStatus request                                 04 50 09 01 00
+GetLightingRules reply every predicate tag                    04 51 09 01 01 03 09 02 35 02 44 2a 01 0a 14 1e e8 07 fa 01 32 08 01 02 02 01 02 06 01 01 14 01 50 02 03 01 02 04 0b 01 01 01 03 01 01 01 02 01 01 01 05 01 01 06 02 24 08 07 05 01 01 02 01 05 08 01 01 2b 08 28 32 3c 01 09 04 01 02 01 01 00
+GetLightingRules request                                      05 51 09 01 09 01 00
 GetLightingRuntimeConditionalSceneStatus reply                04 25 09 01 01 05 09 40 01 07 00
 GetLightingRuntimeConditionalSceneStatus request              04 25 09 01 00
 GetLightingRuntimeConditionalScenes reply                     04 26 09 01 01 0e 09 01 01 01 02 01 01 01 01 14 01 50 02 02 2a 04 07 08 09 00
@@ -89,6 +99,8 @@ PutLightingAdvancedRuntimeConditionalSceneChunk request       05 43 09 01 1f 0c 
 PutLightingOverlayChunk inner Err(TransactionExpired)         04 0e 09 01 03 01 0a 00
 PutLightingOverlayChunk reply                                 04 0e 09 01 01 01 00
 PutLightingOverlayChunk request                               05 0e 09 01 0d 0f 01 2a 01 01 02 03 e8 07 fa 01 32 01 88 27 00
+PutLightingRuleChunk reply                                    04 53 09 01 01 01 00
+PutLightingRuleChunk request every predicate tag              05 53 09 01 1f 35 02 44 2a 01 0a 14 1e e8 07 fa 01 32 08 01 02 02 01 02 06 01 01 14 01 50 02 03 01 02 04 0b 01 01 01 03 01 01 01 02 01 01 01 05 01 01 06 02 24 08 07 05 01 01 02 01 05 08 01 01 2b 08 28 32 3c 01 09 04 01 02 01 01 00
 PutLightingRuntimeConditionalSceneChunk reply                 04 28 09 01 01 01 00
 PutLightingRuntimeConditionalSceneChunk request               05 28 09 01 1f 0c 01 01 02 01 01 01 01 14 01 50 02 02 2a 04 07 08 09 00
 PutLightingSceneChunk reply                                   04 17 09 01 01 01 00
