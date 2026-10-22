@@ -76,6 +76,8 @@ pub struct RynkService<'a> {
     ctx: KeyboardContext<'a>,
     /// Device identity served by `GetDeviceInfo`.
     device: DeviceConfig<'static>,
+    /// Compiled fallback metadata; persistent per-slot records override it.
+    layer_names: &'static [Option<&'static str>],
     /// Optional board-defined, machine-readable data source.
     device_data: Option<DeviceDataSource>,
     #[cfg(feature = "lighting")]
@@ -122,6 +124,7 @@ impl<'a> RynkService<'a> {
             },
             peripheral_bootloader: None,
             device_data: None,
+            layer_names: config.layer_names,
         }
     }
 
@@ -158,6 +161,7 @@ impl<'a> RynkService<'a> {
         matches!(
             cmd,
             Cmd::SetKeyAction
+                | Cmd::SetLayerMetadata
                 | Cmd::SetDefaultLayer
                 | Cmd::SetEncoderAction
                 | Cmd::SetMacro
@@ -362,6 +366,8 @@ impl<'a> RynkService<'a> {
             Cmd::SetEncoderAction => serve::<command::SetEncoderAction, _>(self, msg).await,
             Cmd::GetKeymapBulk => serve_bulk::<command::GetKeymapBulk, _>(self, msg).await,
             Cmd::SetKeymapBulk => serve_bulk::<command::SetKeymapBulk, _>(self, msg).await,
+            Cmd::GetLayerMetadata => serve::<command::GetLayerMetadata, _>(self, msg).await,
+            Cmd::SetLayerMetadata => serve::<command::SetLayerMetadata, _>(self, msg).await,
 
             Cmd::GetMacro => serve::<command::GetMacro, _>(self, msg).await,
             Cmd::SetMacro => serve::<command::SetMacro, _>(self, msg).await,
