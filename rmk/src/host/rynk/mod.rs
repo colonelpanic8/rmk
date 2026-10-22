@@ -21,7 +21,7 @@ pub use lighting::{
 use postcard::experimental::max_size::MaxSize;
 use rmk_types::constants::RYNK_BUFFER_SIZE;
 use rmk_types::protocol::rynk::{
-    BuildInfo, Cmd, Deframer, FirmwareVersion, RYNK_HEADER_SIZE, RynkError, RynkMessage, command, encode_frame,
+    BuildInfo, Cmd, DeviceDataDescriptor, DeviceDataRecord, Deframer, FirmwareVersion, RYNK_HEADER_SIZE, RynkError, RynkMessage, command, encode_frame,
     max_wire_size,
 };
 
@@ -68,11 +68,16 @@ fn truncated<const N: usize>(s: &str) -> heapless::String<N> {
     out
 }
 
+/// A board's device-data namespace and the record reader behind it.
+type DeviceDataSource = (DeviceDataDescriptor, fn(u8) -> Option<DeviceDataRecord>);
+
 /// Transport-agnostic Rynk service.
 pub struct RynkService<'a> {
     ctx: KeyboardContext<'a>,
     /// Device identity served by `GetDeviceInfo`.
     device: DeviceConfig<'static>,
+    /// Optional board-defined, machine-readable data source.
+    device_data: Option<DeviceDataSource>,
     #[cfg(feature = "lighting")]
     lighting: Option<RynkLightingController<'a>>,
     /// Human-readable firmware identity served by `GetBuildInfo`.
@@ -116,6 +121,7 @@ impl<'a> RynkService<'a> {
                 label: truncated(DEFAULT_BUILD_LABEL),
             },
             peripheral_bootloader: None,
+            device_data: None,
         }
     }
 
@@ -171,6 +177,16 @@ impl<'a> RynkService<'a> {
                 | Cmd::SetBehaviorOptions
                 | Cmd::SetAutoMouseLayerConfigs
         )
+    }
+
+    /// Attach one board-defined device-data namespace.
+    pub fn with_device_data(
+        mut self,
+        descriptor: DeviceDataDescriptor,
+        record: fn(u8) -> Option<DeviceDataRecord>,
+    ) -> Self {
+        self.device_data = Some((descriptor, record));
+        self
     }
 
     /// Whether the maintenance lock covers `cmd`. A command missing from both
@@ -333,6 +349,8 @@ impl<'a> RynkService<'a> {
             Cmd::GetBuildInfo => serve::<command::GetBuildInfo, _>(self, msg).await,
             Cmd::PeripheralBootloaderJump => serve::<command::PeripheralBootloaderJump, _>(self, msg).await,
             Cmd::GetMaintenanceMode => serve::<command::GetMaintenanceMode, _>(self, msg).await,
+            Cmd::GetDeviceDataDescriptor => serve::<command::GetDeviceDataDescriptor, _>(self, msg).await,
+            Cmd::GetDeviceDataRecord => serve::<command::GetDeviceDataRecord, _>(self, msg).await,
 
             Cmd::GetKeyAction => serve::<command::GetKeyAction, _>(self, msg).await,
             Cmd::SetKeyAction => serve::<command::SetKeyAction, _>(self, msg).await,
