@@ -510,6 +510,18 @@ fn wire_values_locked() {
     let opposite_profile = ex.profile.with_opposite_hand_hold(Some(true));
 
     let entries: alloc::vec::Vec<(&str, alloc::vec::Vec<u8>)> = alloc::vec![
+        ("SplitTransportForce::Auto", encode(&SplitTransportForce::Auto)),
+        ("SplitTransportForce::Wired", encode(&SplitTransportForce::Wired)),
+        ("SplitTransportForce::Ble", encode(&SplitTransportForce::Ble)),
+        (
+            "SplitTransportState{true,Ble,true,false}",
+            encode(&SplitTransportState {
+                auto: true,
+                forced: SplitTransportForce::Ble,
+                cable_detected: true,
+                wired_active: false,
+            })
+        ),
         // --- Response envelope + connection ---
         ("ConnectionType::Ble", encode(&ConnectionType::Ble)),
         ("ConnectionType::Usb", encode(&ConnectionType::Usb)),
@@ -1470,6 +1482,40 @@ fn wire_frames_locked() {
                 SEQ,
                 &Ok::<PointingCapabilities, RynkError>(ex.pointing_capabilities),
             ),
+        ),
+        (
+            "GetSplitTransport request ()",
+            encode_frame(Cmd::GetSplitTransport, SEQ, &())
+        ),
+        (
+            "SetSplitTransportForce request Wired",
+            encode_frame(Cmd::SetSplitTransportForce, SEQ, &SplitTransportForce::Wired)
+        ),
+        (
+            "GetSplitTransport reply Ok(state)",
+            encode_frame(
+                Cmd::GetSplitTransport,
+                SEQ,
+                &Ok::<_, RynkError>(SplitTransportState {
+                    auto: true,
+                    forced: SplitTransportForce::Ble,
+                    cable_detected: true,
+                    wired_active: false,
+                })
+            )
+        ),
+        (
+            "SetSplitTransportForce reply Ok(state)",
+            encode_frame(
+                Cmd::SetSplitTransportForce,
+                SEQ,
+                &Ok::<_, RynkError>(SplitTransportState {
+                    auto: true,
+                    forced: SplitTransportForce::Wired,
+                    cable_detected: true,
+                    wired_active: true,
+                })
+            )
         ),
         // Topics (0x80xx, server→host push, SEQ 0).
         ("LayerChange topic 3", encode_frame(Cmd::LayerChange, 0, &3u8)),

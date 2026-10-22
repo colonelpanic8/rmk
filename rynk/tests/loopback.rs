@@ -135,6 +135,23 @@ async fn client_against_run_session() {
         // Client consumes the firmware-advertised payload limit.
         assert_eq!(caps.max_payload_size as usize, RYNK_MAX_PAYLOAD_SIZE);
 
+        rmk::split::selector::initialize(false);
+        let state = client.get_split_transport().await.unwrap();
+        assert!(state.auto);
+        assert!(!state.cable_detected);
+        assert!(!state.wired_active);
+        let forced = client
+            .set_split_transport_force(rmk_types::protocol::rynk::SplitTransportForce::Wired)
+            .await
+            .unwrap();
+        assert!(forced.wired_active);
+        assert_eq!(client.get_split_transport().await.unwrap(), forced);
+        let automatic = client
+            .set_split_transport_force(rmk_types::protocol::rynk::SplitTransportForce::Auto)
+            .await
+            .unwrap();
+        assert!(!automatic.wired_active);
+
         let info = client.get_device_info().await.unwrap();
         assert_eq!(info.manufacturer.as_str(), "RMK");
         assert_eq!(info.product_name.as_str(), "RMK Keyboard");
