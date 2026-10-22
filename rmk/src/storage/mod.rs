@@ -2240,6 +2240,14 @@ mod tests {
             StorageValue::BleName(BleName {
                 template: heapless::String::new(),
             }),
+            #[cfg(feature = "host")]
+            StorageValue::PositionCombo(rmk_types::combo::PositionCombo::new(
+                core::iter::empty(),
+                rmk_types::action::KeyAction::No,
+                None,
+            )),
+            #[cfg(all(feature = "lighting", feature = "rynk"))]
+            StorageValue::LightingWakeLayers(0),
             #[cfg(feature = "rynk")]
             StorageValue::LayerMetadata(LayerMetadata::vacant()),
         ];
