@@ -1773,8 +1773,9 @@ impl<'a> Keyboard<'a> {
 
         if let Some(report) = report {
             let scale = self.keymap.mouse_layer_scale();
-            let report = self.mouse.scale_report(report, scale);
+            let mut report = self.mouse.scale_report(report, scale);
             self.keymap.set_mouse_buttons(self.mouse.report.buttons);
+            report.buttons |= crate::input_device::pointing::device_held_buttons();
             self.send_report(Report::MouseReport(report)).await;
             yield_now().await;
         }
@@ -2056,7 +2057,8 @@ impl<'a> Keyboard<'a> {
     pub(crate) async fn send_mouse_report(&mut self) {
         let report = self.mouse.get_report();
         let scale = self.keymap.mouse_layer_scale();
-        let report = self.mouse.scale_report(report, scale);
+        let mut report = self.mouse.scale_report(report, scale);
+        report.buttons |= crate::input_device::pointing::device_held_buttons();
         self.send_report(Report::MouseReport(report)).await;
         yield_now().await;
     }
@@ -2489,6 +2491,32 @@ mod test {
             assert_eq!(keyboard.held_keycodes()[0], HidKeyCode::A);
         };
         block_on(main);
+    }
+
+    #[test]
+    fn virtual_keys_compose_with_held_keys() {
+        block_on(async {
+            let mut keyboard = create_test_keyboard();
+            keyboard.process_inner(KeyboardEvent::key(0, 0, true)).await;
+            keyboard.register_key(
+                HidKeyCode::LShift,
+                ModifierCombination::new(),
+                KeyboardEvent::key(3, 0, true),
+            );
+            keyboard
+                .process_inner(KeyboardEvent::keycode(HidKeyCode::Right, true))
+                .await;
+            let shift = ModifierCombination::new().with_left_shift(true);
+            assert_eq!(keyboard.held_modifiers(), shift);
+            assert!(keyboard.held_keycodes().contains(&HidKeyCode::Grave));
+            assert!(keyboard.held_keycodes().contains(&HidKeyCode::Right));
+            keyboard
+                .process_inner(KeyboardEvent::keycode(HidKeyCode::Right, false))
+                .await;
+            assert_eq!(keyboard.held_modifiers(), shift);
+            assert!(keyboard.held_keycodes().contains(&HidKeyCode::Grave));
+            assert!(!keyboard.held_keycodes().contains(&HidKeyCode::Right));
+        });
     }
 
     #[test]
