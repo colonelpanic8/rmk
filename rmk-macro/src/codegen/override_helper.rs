@@ -8,6 +8,7 @@ pub enum Overwritten {
     Usb,
     ChipConfig,
     ChipInit,
+    HostService,
     Entry,
     /// `#[Override(bind_interrupt)]` — the form the stm32h7 example documents. Selected by
     /// `bind_interrupt.rs` through this shared matcher; the legacy bare `#[bind_interrupt]`
