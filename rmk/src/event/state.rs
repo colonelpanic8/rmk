@@ -19,6 +19,12 @@ impl LayerChangeEvent {
 
 impl_payload_wrapper!(LayerChangeEvent, u8);
 
+/// The runtime auto mouse layer table changed and its runner must reload it.
+#[event(channel_size = 1, pubs = 1, subs = 1)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct AutoMouseLayerConfigChangeEvent;
+
 /// WPM updated event
 #[event(channel_size = crate::WPM_UPDATE_EVENT_CHANNEL_SIZE, pubs = crate::WPM_UPDATE_EVENT_PUB_SIZE, subs = crate::WPM_UPDATE_EVENT_SUB_SIZE)]
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, MaxSize)]
