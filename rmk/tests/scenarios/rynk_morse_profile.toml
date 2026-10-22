@@ -121,9 +121,16 @@ steps = [
 [[test]]
 name = "deleting_a_profile_vacates_without_compacting"
 steps = [
+  { rynk = { cmd = "SetMorseHoldTriggerPositions", payload = { positions = [
+    { profile = 0, row = 0, col = 0 },
+    { profile = 1, row = 0, col = 1 },
+  ] } } },
   { rynk = { cmd = "DeleteMorseProfile", payload = 0 } },
   { rynk = { cmd = "GetMorseProfileState", payload = { offset = 0 }, reply = { capacity = 16, total = 1, entries = [
     { index = 1, name = "pinky", profile = { mode = "Normal", hold_timeout_ms = 300, gap_timeout_ms = 300 } },
   ] } } },
   { rynk = { cmd = "GetMorseProfile", payload = 0, reply = { enable_flow_tap = false, hold_timeout_ms = 250, gap_timeout_ms = 250 } } },
+  { rynk = { cmd = "GetMorseHoldTriggerPositions", reply = { capacity = 16, positions = [
+    { profile = 1, row = 0, col = 1 },
+  ] } } },
 ]

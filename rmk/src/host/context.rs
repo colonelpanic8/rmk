@@ -302,6 +302,8 @@ impl<'a> KeyboardContext<'a> {
             return Ok(false);
         }
         #[cfg(feature = "storage")]
+        let hold_trigger_positions = self.keymap.morse_hold_trigger_positions();
+        #[cfg(feature = "storage")]
         {
             store(StorageItem::MorseProfile {
                 idx,
@@ -313,6 +315,7 @@ impl<'a> KeyboardContext<'a> {
                 name: MorseProfileName::new(),
             })
             .await?;
+            store(StorageItem::MorseHoldTriggerPositions(hold_trigger_positions)).await?;
         }
         Ok(true)
     }
