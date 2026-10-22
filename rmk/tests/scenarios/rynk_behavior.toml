@@ -88,7 +88,7 @@ steps = [
   ], output = { Single = { Key = { Hid = "D" } } } } } }, error = "Invalid" } },
   { rynk = { cmd = "SetComboDefinition", payload = { index = 0, definition = { Positions = { positions = [
     { row = 0, col = 0 },
-  ], output = { Single = { Key = { Hid = "D" } } }, layer = 1 } } }, error = "Invalid" } },
+  ], output = { Single = { Key = { Hid = "D" } } }, layer = 3 } } }, error = "Invalid" } },
 ]
 
 # Two different writes, each read back: the read follows the write instead of
