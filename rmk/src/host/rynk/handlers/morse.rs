@@ -1,13 +1,16 @@
 //! Morse handlers.
 
 use rmk_types::constants::MORSE_PROFILE_MAX_NUM;
-use rmk_types::morse::Morse;
+use rmk_types::morse::{Morse, MorseProfile};
 use rmk_types::protocol::rynk::command::{
-    GetMorse, GetMorseBulk, GetMorseHoldTriggerPositions, SetMorse, SetMorseBulk, SetMorseHoldTriggerPositions,
+    DeleteMorseProfile, GetMorse, GetMorseBulk, GetMorseHoldTriggerPositions, GetMorseProfile, GetMorseProfileBulk,
+    GetMorseProfileCount, GetMorseProfileState, SetMorse, SetMorseBulk, SetMorseHoldTriggerPositions, SetMorseProfile,
+    SetMorseProfileBulk, SetMorseProfileEntry,
 };
 use rmk_types::protocol::rynk::{
-    GetMorseBulkRequest, MorseHoldTriggerPositionState, RynkError, RynkMessage, SetMorseHoldTriggerPositionsRequest,
-    SetMorseRequest, bulk_item_capacity,
+    GetMorseBulkRequest, GetMorseProfileBulkRequest, GetMorseProfileStateRequest, MorseHoldTriggerPositionState,
+    MorseProfileState, RynkError, RynkMessage, SetMorseHoldTriggerPositionsRequest, SetMorseProfileEntryRequest,
+    SetMorseProfileRequest, SetMorseRequest, bulk_item_capacity,
 };
 
 use super::super::RynkService;
@@ -75,5 +78,76 @@ impl Handle<SetMorseHoldTriggerPositions> for RynkService<'_> {
             .set_morse_hold_trigger_positions(request)
             .await
             .or(Err(RynkError::StorageFault))
+    }
+}
+impl Handle<GetMorseProfileCount> for RynkService<'_> {
+    async fn handle(&self, _: ()) -> Result<u8, RynkError> {
+        Ok(self.ctx.morse_profiles_capacity() as u8)
+    }
+}
+
+impl Handle<GetMorseProfile> for RynkService<'_> {
+    async fn handle(&self, idx: u8) -> Result<MorseProfile, RynkError> {
+        self.ctx.get_morse_profile(idx).ok_or(RynkError::Invalid)
+    }
+}
+
+impl Handle<SetMorseProfile> for RynkService<'_> {
+    async fn handle(&self, r: SetMorseProfileRequest) -> Result<(), RynkError> {
+        match self.ctx.set_morse_profile(r.index, r.profile).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(RynkError::Invalid),
+            Err(()) => Err(RynkError::StorageFault),
+        }
+    }
+}
+
+impl HandleBulk<GetMorseProfileBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+        let req = msg.decode_request::<GetMorseProfileBulkRequest>()?;
+        let cap = bulk_item_capacity(msg.capacity());
+        let page = bulk_page(req.start_index as usize, cap, self.ctx.morse_profiles_capacity())?;
+        msg.encode_bulk(page.map(|idx| self.ctx.get_morse_profile(idx as u8).unwrap_or_default()))
+    }
+}
+
+impl HandleBulk<SetMorseProfileBulk> for RynkService<'_> {
+    async fn handle_bulk(&self, msg: &mut RynkMessage<'_>) -> Result<(), RynkError> {
+        let mut cursor = msg.payload();
+        let start_index = take_element::<u8>(&mut cursor)? as usize;
+        let total = self.ctx.morse_profiles_capacity();
+        for (idx, profile) in take_bulk::<MorseProfile>(&mut cursor, start_index, total)? {
+            self.ctx
+                .set_morse_profile(idx as u8, profile)
+                .await
+                .or(Err(RynkError::StorageFault))?;
+        }
+        msg.encode_response(&())
+    }
+}
+
+impl Handle<GetMorseProfileState> for RynkService<'_> {
+    async fn handle(&self, request: GetMorseProfileStateRequest) -> Result<MorseProfileState, RynkError> {
+        Ok(self.ctx.morse_profile_state(request.offset))
+    }
+}
+
+impl Handle<SetMorseProfileEntry> for RynkService<'_> {
+    async fn handle(&self, request: SetMorseProfileEntryRequest) -> Result<(), RynkError> {
+        match self.ctx.set_morse_profile_entry(request).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(RynkError::Invalid),
+            Err(()) => Err(RynkError::StorageFault),
+        }
+    }
+}
+
+impl Handle<DeleteMorseProfile> for RynkService<'_> {
+    async fn handle(&self, index: u8) -> Result<(), RynkError> {
+        match self.ctx.delete_morse_profile(index).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(RynkError::Invalid),
+            Err(()) => Err(RynkError::StorageFault),
+        }
     }
 }
