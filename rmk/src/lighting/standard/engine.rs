@@ -6,7 +6,7 @@ use rmk_types::action::LightAction;
 use super::*;
 use crate::lighting::Rgb8;
 use crate::lighting::compositor::{Compositor, LightingSource, LogicalFrame, RenderPolicy};
-use crate::lighting::context::{LightingContext, LightingContextProvider};
+use crate::lighting::context::{LayerState, LightingContext, LightingContextProvider};
 use crate::lighting::effect::BuiltinEffect;
 use crate::lighting::output::BrightnessTransform;
 use crate::lighting::service::{CommandResult, Invalidation, LightingEngine, RenderInput, RenderOutcome};
@@ -89,6 +89,11 @@ pub struct StandardLightingEngine<
     output_mode: OutputMode,
     powered: bool,
     wake_active: bool,
+    /// Wake layers active at the last render, to notice a release.
+    wake_held: u64,
+    /// Released wake layers still rendering as active, until `linger_until_ms`.
+    linger_layers: u64,
+    linger_until_ms: Option<u64>,
     effective_output_enabled: bool,
     output_brightness: u8,
     /// Provenance of the frame currently on the LEDs.
@@ -132,6 +137,9 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
             output_mode: OutputMode::AlwaysOn,
             powered: false,
             wake_active: false,
+            wake_held: 0,
+            linger_layers: 0,
+            linger_until_ms: None,
             effective_output_enabled: true,
             output_brightness: u8::MAX,
             presented: None,
@@ -694,6 +702,134 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         }
         Err(self.runtime_conditional_scene_transaction_error(transaction_id))
     }
+
+    // Replica snapshots are large; keep their temporaries out of ordinary command frames.
+    #[inline(never)]
+    fn export_replica_command<Context>(
+        &self,
+        now_ms: u64,
+        snapshot: &Context,
+        slot: &StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP>,
+    ) -> Result<(), StandardError>
+    where
+        Context: LightingContextProvider,
+        Extension: LightingSource<Rgb8, Context>,
+    {
+        let mut replica = self.replica_state(now_ms, snapshot)?;
+        replica.extension = self.extension.extension_state();
+        replica.extension_layers = self.extension.extension_layer_state();
+        replica.extension_params = replica.extension.and_then(|state| {
+            // A source with no descriptor, an active effect the
+            // descriptor does not know, or an effect without
+            // parameters all export nothing to replicate.
+            let specs = extension_param_specs::<Rgb8, Context, _>(&self.extension, state.effect).ok()?;
+            let len = specs.len().min(EXTENSION_PARAM_CHUNK);
+            if len == 0 {
+                return None;
+            }
+            let mut values = [0u8; EXTENSION_PARAM_CHUNK];
+            for (value, (index, spec)) in values.iter_mut().zip(specs[..len].iter().enumerate()) {
+                *value = self
+                    .extension
+                    .extension_param(state.effect, index as u8)
+                    .unwrap_or(spec.default);
+            }
+            Some(ExtensionReplicaParams {
+                effect: state.effect,
+                len: len as u8,
+                values,
+            })
+        });
+        replica.extension_overlay_params =
+            replica
+                .extension_layers
+                .and_then(|layers| layers.overlay)
+                .and_then(|effect| {
+                    let specs = extension_param_specs::<Rgb8, Context, _>(&self.extension, effect).ok()?;
+                    let len = specs.len().min(EXTENSION_PARAM_CHUNK);
+                    if len == 0 {
+                        return None;
+                    }
+                    let mut values = [0u8; EXTENSION_PARAM_CHUNK];
+                    for (value, (index, spec)) in values.iter_mut().zip(specs[..len].iter().enumerate()) {
+                        *value = self
+                            .extension
+                            .extension_param(effect, index as u8)
+                            .unwrap_or(spec.default);
+                    }
+                    Some(ExtensionReplicaParams {
+                        effect,
+                        len: len as u8,
+                        values,
+                    })
+                });
+        slot.put(replica)?;
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn apply_replica_command<Context>(
+        &mut self,
+        now_ms: u64,
+        slot: &StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP>,
+    ) -> Result<(), StandardError>
+    where
+        Context: LightingContextProvider,
+        Extension: LightingSource<Rgb8, Context>,
+    {
+        let replica = slot.take()?;
+        let overlay = Self::replica_overlay(&replica)?;
+        // Parameter addresses and ranges are checked against the
+        // static descriptor before anything is applied, so a
+        // malformed snapshot cannot leave the selection updated and
+        // the tuning behind -- the same guarantee the overlay gets.
+        if let Some(params) = replica.extension_params {
+            for (index, value) in params.values().iter().copied().enumerate() {
+                check_extension_param::<Rgb8, Context, _>(&self.extension, params.effect, index as u8, value)?;
+            }
+        }
+        if let Some(params) = replica.extension_overlay_params {
+            for (index, value) in params.values().iter().copied().enumerate() {
+                check_extension_param::<Rgb8, Context, _>(&self.extension, params.effect, index as u8, value)?;
+            }
+        }
+        match (replica.extension, self.extension.extension_state()) {
+            (None, None) => {}
+            (Some(extension), Some(_)) if self.extension.apply_extension_state(extension) => {}
+            _ => return Err(StandardError::ExtensionUnsupported),
+        }
+        match (replica.extension_layers, self.extension.extension_layer_state()) {
+            (None, None) => {}
+            (Some(layers), Some(_)) if self.extension.apply_extension_layer_state(layers) => {}
+            _ => return Err(StandardError::ExtensionUnsupported),
+        }
+        // Parameters follow the selection so the addressed effect is
+        // already active. Values go through the same validated path a
+        // host set uses; only the revision pin is skipped, matching
+        // how replica extension state is applied.
+        if let Some(params) = replica.extension_params {
+            for (index, value) in params.values().iter().copied().enumerate() {
+                apply_extension_param_checked::<Rgb8, Context, _>(
+                    &mut self.extension,
+                    params.effect,
+                    index as u8,
+                    value,
+                )?;
+            }
+        }
+        if let Some(params) = replica.extension_overlay_params {
+            for (index, value) in params.values().iter().copied().enumerate() {
+                apply_extension_param_checked::<Rgb8, Context, _>(
+                    &mut self.extension,
+                    params.effect,
+                    index as u8,
+                    value,
+                )?;
+            }
+        }
+        self.apply_replica(now_ms, replica, overlay);
+        Ok(())
+    }
 }
 
 impl<'scenes, Context, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const SCENE_CAP: usize>
@@ -718,6 +854,7 @@ where
         }
     }
 
+    #[inline(never)]
     fn handle_command(
         &mut self,
         now_ms: u64,
@@ -1023,109 +1160,11 @@ where
                 (Invalidation::Render, true)
             }
             StandardCommand::ExportReplica(slot) => {
-                let mut replica = self.replica_state(now_ms, snapshot)?;
-                replica.extension = self.extension.extension_state();
-                replica.extension_layers = self.extension.extension_layer_state();
-                replica.extension_params = replica.extension.and_then(|state| {
-                    // A source with no descriptor, an active effect the
-                    // descriptor does not know, or an effect without
-                    // parameters all export nothing to replicate.
-                    let specs = extension_param_specs::<Rgb8, Context, _>(&self.extension, state.effect).ok()?;
-                    let len = specs.len().min(EXTENSION_PARAM_CHUNK);
-                    if len == 0 {
-                        return None;
-                    }
-                    let mut values = [0u8; EXTENSION_PARAM_CHUNK];
-                    for (value, (index, spec)) in values.iter_mut().zip(specs[..len].iter().enumerate()) {
-                        *value = self
-                            .extension
-                            .extension_param(state.effect, index as u8)
-                            .unwrap_or(spec.default);
-                    }
-                    Some(ExtensionReplicaParams {
-                        effect: state.effect,
-                        len: len as u8,
-                        values,
-                    })
-                });
-                replica.extension_overlay_params =
-                    replica
-                        .extension_layers
-                        .and_then(|layers| layers.overlay)
-                        .and_then(|effect| {
-                            let specs = extension_param_specs::<Rgb8, Context, _>(&self.extension, effect).ok()?;
-                            let len = specs.len().min(EXTENSION_PARAM_CHUNK);
-                            if len == 0 {
-                                return None;
-                            }
-                            let mut values = [0u8; EXTENSION_PARAM_CHUNK];
-                            for (value, (index, spec)) in values.iter_mut().zip(specs[..len].iter().enumerate()) {
-                                *value = self
-                                    .extension
-                                    .extension_param(effect, index as u8)
-                                    .unwrap_or(spec.default);
-                            }
-                            Some(ExtensionReplicaParams {
-                                effect,
-                                len: len as u8,
-                                values,
-                            })
-                        });
-                slot.put(replica)?;
+                self.export_replica_command(now_ms, snapshot, slot)?;
                 (Invalidation::None, false)
             }
             StandardCommand::ApplyReplica(slot) => {
-                let replica = slot.take()?;
-                let overlay = Self::replica_overlay(&replica)?;
-                // Parameter addresses and ranges are checked against the
-                // static descriptor before anything is applied, so a
-                // malformed snapshot cannot leave the selection updated and
-                // the tuning behind -- the same guarantee the overlay gets.
-                if let Some(params) = replica.extension_params {
-                    for (index, value) in params.values().iter().copied().enumerate() {
-                        check_extension_param::<Rgb8, Context, _>(&self.extension, params.effect, index as u8, value)?;
-                    }
-                }
-                if let Some(params) = replica.extension_overlay_params {
-                    for (index, value) in params.values().iter().copied().enumerate() {
-                        check_extension_param::<Rgb8, Context, _>(&self.extension, params.effect, index as u8, value)?;
-                    }
-                }
-                match (replica.extension, self.extension.extension_state()) {
-                    (None, None) => {}
-                    (Some(extension), Some(_)) if self.extension.apply_extension_state(extension) => {}
-                    _ => return Err(StandardError::ExtensionUnsupported),
-                }
-                match (replica.extension_layers, self.extension.extension_layer_state()) {
-                    (None, None) => {}
-                    (Some(layers), Some(_)) if self.extension.apply_extension_layer_state(layers) => {}
-                    _ => return Err(StandardError::ExtensionUnsupported),
-                }
-                // Parameters follow the selection so the addressed effect is
-                // already active. Values go through the same validated path a
-                // host set uses; only the revision pin is skipped, matching
-                // how replica extension state is applied.
-                if let Some(params) = replica.extension_params {
-                    for (index, value) in params.values().iter().copied().enumerate() {
-                        apply_extension_param_checked::<Rgb8, Context, _>(
-                            &mut self.extension,
-                            params.effect,
-                            index as u8,
-                            value,
-                        )?;
-                    }
-                }
-                if let Some(params) = replica.extension_overlay_params {
-                    for (index, value) in params.values().iter().copied().enumerate() {
-                        apply_extension_param_checked::<Rgb8, Context, _>(
-                            &mut self.extension,
-                            params.effect,
-                            index as u8,
-                            value,
-                        )?;
-                    }
-                }
-                self.apply_replica(now_ms, replica, overlay);
+                self.apply_replica_command::<Context>(now_ms, slot)?;
                 (Invalidation::Render, false)
             }
             StandardCommand::SetSceneCellIfRevision {
@@ -1272,7 +1311,33 @@ where
         }
         let context = input.snapshot.lighting_context();
         let powered = self.scoped_power(context);
-        let wake_active = context.layers.active_bits() & self.controls.wake_layers != 0;
+        // A wake layer that just released keeps lighting awake, and keeps
+        // rendering as active, for the configured linger; holding it again
+        // simply makes it active. The linger runs on the effect clock, whose
+        // deadlines the render outcome already reports.
+        let held = context.layers.active_bits() & self.controls.wake_layers;
+        let released = self.wake_held & !held;
+        self.wake_held = held;
+        self.linger_layers &= !held;
+        if self.linger_layers == 0 || self.linger_until_ms.is_some_and(|until| effect_now_ms >= until) {
+            self.linger_layers = 0;
+            self.linger_until_ms = None;
+        }
+        if released != 0 && self.controls.wake_linger_ms > 0 {
+            self.linger_layers |= released;
+            self.linger_until_ms = Some(effect_now_ms.saturating_add(self.controls.wake_linger_ms as u64));
+        }
+        let lingered = (self.linger_layers != 0).then(|| {
+            let layers = context.layers;
+            let top = (u64::BITS - 1 - self.linger_layers.leading_zeros()) as u8;
+            input.snapshot.with_layers(LayerState::new(
+                layers.effective.max(top),
+                layers.default,
+                layers.active_bits() | self.linger_layers,
+            ))
+        });
+        let snapshot = lingered.as_ref().unwrap_or(input.snapshot);
+        let wake_active = held != 0 || self.linger_layers != 0;
         let effective_output_enabled = self.output_enabled_for(powered, wake_active);
         if self.powered != powered
             || self.wake_active != wake_active
@@ -1285,7 +1350,7 @@ where
         }
         self.rendered = PresentedFrame {
             revision: self.revision,
-            context: *context,
+            context: *snapshot.lighting_context(),
         };
         let indicator_cell = self.controls.output_mode_indicator.map(|indicator| SceneCell {
             slot: indicator.slot,
@@ -1313,6 +1378,9 @@ where
             output_mode: _,
             powered: _,
             wake_active: _,
+            wake_held: _,
+            linger_layers: _,
+            linger_until_ms,
             effective_output_enabled,
             output_brightness,
             scene_replace: _,
@@ -1327,7 +1395,7 @@ where
             presented: _,
             rendered: _,
         } = self;
-        let mut transaction = compositor.begin(effect_now_ms, input.snapshot, policy, Rgb8::BLACK, frame);
+        let mut transaction = compositor.begin(effect_now_ms, snapshot, policy, Rgb8::BLACK, frame);
         transaction.apply(priority::BACKGROUND, background)?;
         transaction.apply(priority::EXTENSION, extension)?;
         transaction.apply(priority::LAYER, layers)?;
@@ -1355,7 +1423,11 @@ where
             0
         });
         let result = transaction.finish_with(&mut transform);
-        let next_wake_in_ms = result.next_wake_ms.map(|deadline| {
+        let next_wake_ms = match (result.next_wake_ms, *linger_until_ms) {
+            (Some(deadline), Some(until)) => Some(deadline.min(until)),
+            (deadline, until) => deadline.or(until),
+        };
+        let next_wake_in_ms = next_wake_ms.map(|deadline| {
             let delay = deadline.saturating_sub(effect_now_ms).clamp(1, u32::MAX as u64);
             NonZeroU32::new(delay as u32).expect("clamped delay is nonzero")
         });

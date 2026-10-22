@@ -231,6 +231,7 @@ pub(crate) fn expand_lighting_renderer_config(lighting: Option<&Lighting>) -> To
         None => quote! { None },
     };
     let wake_layers = lighting.controls.wake_layers;
+    let wake_linger_ms = lighting.controls.wake_linger_ms;
     let initial_output_mode = match lighting.controls.initial_output_mode {
         LightingOutputMode::AlwaysOn => quote! { ::rmk::lighting::OutputMode::AlwaysOn },
         LightingOutputMode::AlwaysOff => quote! { ::rmk::lighting::OutputMode::AlwaysOff },
@@ -289,6 +290,7 @@ pub(crate) fn expand_lighting_renderer_config(lighting: Option<&Lighting>) -> To
                 output_toggle_user_action: #output_toggle_user_action,
                 output_mode_cycle_user_action: #output_mode_cycle_user_action,
                 wake_layers: #wake_layers,
+                wake_linger_ms: #wake_linger_ms,
                 initial_output_mode: #initial_output_mode,
                 powered_only_scope: #powered_only_scope,
                 output_mode_indicator: #output_mode_indicator,
@@ -369,6 +371,8 @@ fn expand_conditional_scene_cell(cell: &LightingConditionalSceneCell) -> TokenSt
                 output_mode: #output_mode,
                 connection: ::core::option::Option::None,
                 effects: ::core::option::Option::None,
+                layers: ::core::option::Option::None,
+                indicators: ::core::option::Option::None,
             },
             slot: ::rmk::lighting::LedSlot(#slot),
             effect: #effect,
