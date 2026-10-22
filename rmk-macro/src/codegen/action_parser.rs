@@ -411,7 +411,11 @@ pub(crate) fn parse_action(key: &str) -> TokenStream2 {
 
     // Check if it's a keyboard control, light control, or special key action
     // (case-insensitive), matching against each enum's variant names.
-    if let Some(action_ident) = match_variant(rmk_types::action::KeyboardAction::VARIANTS, &lower) {
+    let control_name = KEYCODE_ALIAS.get(lower.as_str()).copied().unwrap_or(&lower);
+    if let Some(action_ident) = match_variant(
+        rmk_types::action::KeyboardAction::VARIANTS,
+        &control_name.to_lowercase(),
+    ) {
         return quote! {
             ::rmk::types::action::Action::KeyboardControl(::rmk::types::action::KeyboardAction::#action_ident)
         };
