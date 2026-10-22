@@ -418,11 +418,7 @@ impl<'a> RynkLightingController<'a> {
 
     pub(super) fn output_mode_to_wire(&self, state: StandardState) -> LightingOutputModeState {
         LightingOutputModeState {
-            mode: match state.output_mode {
-                crate::lighting::OutputMode::AlwaysOn => WireLightingOutputMode::AlwaysOn,
-                crate::lighting::OutputMode::AlwaysOff => WireLightingOutputMode::AlwaysOff,
-                crate::lighting::OutputMode::PoweredOnly => WireLightingOutputMode::PoweredOnly,
-            },
+            mode: output_mode_to_wire(state.output_mode),
             powered: state.powered,
             wake_active: state.wake_active,
             effective_enabled: state.output_enabled,
@@ -988,6 +984,19 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
 
     #[cfg(not(feature = "storage"))]
     async fn persist_extension(&self) {}
+
+    /// Persist the records a lighting key can change: the extension selection
+    /// (`RgbTog` zeroes its value) and the output mode.
+    #[cfg(feature = "storage")]
+    async fn persist_key_lighting(&self) {
+        self.persist_extension().await;
+        if let Ok(state) = self.request_core_state(StandardCommand::ReadState).await {
+            crate::storage::send_unchecked(crate::storage::FlashOperationMessage::LightingOutputMode(
+                output_mode_to_wire(state.output_mode),
+            ))
+            .await;
+        }
+    }
 
     #[cfg(feature = "storage")]
     async fn persist_extension_params(&self, effect: u8, index: u8) {
@@ -2262,9 +2271,48 @@ pub fn install_lighting_rule<Extension, Status, const N: usize, const OVERLAY_CA
 impl<const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, const SCENE_CAP: usize> Runnable
     for StandardRynkLightingAdapter<'_, OVERLAY_CAPACITY, CORE_COMMAND_CAPACITY, SCENE_CAP>
 {
+    #[cfg(not(feature = "storage"))]
     async fn run(&mut self) -> ! {
         loop {
             self.process_next().await;
+        }
+    }
+
+    /// Key-originated lighting changes are saved once presses settle, so a
+    /// run of brightness steps costs one flash write and a toggle survives a
+    /// power cycle.
+    #[cfg(feature = "storage")]
+    async fn run(&mut self) -> ! {
+        use embassy_futures::select::{Either3, select3};
+        use embassy_time::{Duration, Instant, Timer};
+
+        const KEY_LIGHTING_PERSIST_DELAY: Duration = Duration::from_secs(1);
+
+        let mut persist_at: Option<Instant> = None;
+        loop {
+            let settled = async {
+                match persist_at {
+                    Some(at) => Timer::at(at).await,
+                    None => core::future::pending().await,
+                }
+            };
+            match select3(
+                self.protocol.receive(),
+                crate::lighting::wait_light_action_applied(),
+                settled,
+            )
+            .await
+            {
+                Either3::First(request) => {
+                    let result = self.dispatch(request.id, request.command).await;
+                    self.protocol.reply(request.id, result);
+                }
+                Either3::Second(()) => persist_at = Some(Instant::now() + KEY_LIGHTING_PERSIST_DELAY),
+                Either3::Third(()) => {
+                    persist_at = None;
+                    self.persist_key_lighting().await;
+                }
+            }
         }
     }
 }
@@ -2493,6 +2541,14 @@ fn connection_condition_from_wire(
             bonded: bonded.bonded,
         }),
         usb_connected: condition.usb_connected,
+    }
+}
+
+const fn output_mode_to_wire(mode: OutputMode) -> WireLightingOutputMode {
+    match mode {
+        OutputMode::AlwaysOn => WireLightingOutputMode::AlwaysOn,
+        OutputMode::AlwaysOff => WireLightingOutputMode::AlwaysOff,
+        OutputMode::PoweredOnly => WireLightingOutputMode::PoweredOnly,
     }
 }
 
@@ -3349,6 +3405,87 @@ mod tests {
         assert_eq!((record.effect, record.offset, record.len), (0, 0, 2));
         assert_eq!(&record.values[..2], &[3, 77]);
         assert_eq!(mode, Some(WireLightingOutputMode::PoweredOnly));
+    }
+
+    /// Lighting keys reach the engine without a Rynk mutation, so the adapter
+    /// saves what they changed once presses settle.
+    #[cfg(feature = "storage")]
+    #[test]
+    fn key_lighting_changes_persist_once_presses_settle() {
+        use embassy_futures::select::{Either3, select3};
+        use embassy_time::{Duration, Timer};
+        use rmk_types::action::LightAction;
+
+        use crate::lighting::{
+            BackgroundState, EmptySource, LayerPolicy, LayerScenes, LightingContext, LightingEngine, StandardInput,
+            StandardLightingEngine,
+        };
+        use crate::storage::FlashOperationMessage;
+
+        fn drain_output_mode() -> Option<WireLightingOutputMode> {
+            let mut mode = None;
+            while let Some(message) = crate::storage::try_receive_flash_message() {
+                if let FlashOperationMessage::LightingOutputMode(value) = message {
+                    mode = Some(value);
+                }
+            }
+            mode
+        }
+
+        while crate::storage::try_receive_flash_message().is_some() {}
+        block_on(async {
+            let protocol = RynkLightingMailbox::new();
+            let core = LightingMailbox::<StandardCommand<2>, StandardReply, StandardError, 1>::new();
+            let mut adapter = StandardRynkLightingAdapter::<2, 1>::new(&protocol, &core, topology());
+            let mut engine: StandardLightingEngine<'static, TestExtensionSource, EmptySource, 1, 2, 0> =
+                StandardLightingEngine::new(
+                    BackgroundState::default(),
+                    LayerScenes {
+                        scenes: &[],
+                        policy: LayerPolicy::EffectiveOnly,
+                    },
+                    TestExtensionSource {
+                        state: crate::lighting::compositor::ExtensionState {
+                            effect: 0,
+                            palette: 0,
+                            value: 128,
+                            speed: 20,
+                        },
+                        params: [3, 128],
+                    },
+                    EmptySource,
+                );
+            let keys: Channel<RawMutex, LightAction, 1> = Channel::new();
+            let context = LightingContext::default();
+            let engine_loop = async {
+                loop {
+                    match select(core.receive_request(), keys.receive()).await {
+                        Either::First((id, command)) => {
+                            let result = engine.handle_command(0, command, &context).map(|outcome| outcome.reply);
+                            core.publish_reply(id, result);
+                        }
+                        Either::Second(action) => {
+                            let _ = engine.on_input(StandardInput(action), &context);
+                            crate::lighting::light_action_applied();
+                        }
+                    }
+                }
+            };
+            let client = async {
+                keys.send(LightAction::BacklightToggle).await;
+                Timer::after(Duration::from_millis(600)).await;
+                keys.send(LightAction::BacklightToggle).await;
+                Timer::after(Duration::from_millis(600)).await;
+                assert_eq!(drain_output_mode(), None, "presses still settling");
+                keys.send(LightAction::BacklightToggle).await;
+                Timer::after(Duration::from_millis(1500)).await;
+                assert_eq!(drain_output_mode(), Some(WireLightingOutputMode::AlwaysOff));
+            };
+            match select3(client, adapter.run(), engine_loop).await {
+                Either3::First(()) => {}
+                _ => panic!("service loops must not finish"),
+            }
+        });
     }
 
     #[test]

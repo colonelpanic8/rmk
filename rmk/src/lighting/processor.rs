@@ -315,6 +315,7 @@ where
                         }
                         Either4::Fourth(Either3::Second(action)) => {
                             let _ = self.service.on_input(E::Input::from(action));
+                            super::light_action_applied();
                             self.publish_pending_lighting_change();
                         }
                         Either4::Fourth(Either3::Third(())) => {
@@ -341,6 +342,7 @@ where
                         }
                         Either3::Third(Either3::Second(action)) => {
                             let _ = self.service.on_input(E::Input::from(action));
+                            super::light_action_applied();
                             self.publish_pending_lighting_change();
                         }
                         Either3::Third(Either3::Third(())) => {
