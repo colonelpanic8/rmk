@@ -47,4 +47,33 @@ impl Hand {
     pub fn is_same_side(self, other: Hand) -> bool {
         matches!((self, other), (Hand::Left, Hand::Left) | (Hand::Right, Hand::Right))
     }
+
+    /// Whether `other` is allowed to activate an opposite-hand-only hold.
+    ///
+    /// Bilateral keys deliberately activate holds from either hand. Unknown
+    /// geometry is not treated as opposite: the policy promises not to emit a
+    /// hold unless the compiled layout proves the triggering relationship.
+    pub fn triggers_opposite_hand_hold(self, other: Hand) -> bool {
+        matches!(
+            (self, other),
+            (Hand::Left, Hand::Right) | (Hand::Right, Hand::Left) | (Hand::Left | Hand::Right, Hand::Bilateral)
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Hand;
+
+    #[test]
+    fn opposite_hand_hold_requires_proven_geometry() {
+        assert!(Hand::Left.triggers_opposite_hand_hold(Hand::Right));
+        assert!(Hand::Right.triggers_opposite_hand_hold(Hand::Left));
+        assert!(Hand::Left.triggers_opposite_hand_hold(Hand::Bilateral));
+        assert!(Hand::Right.triggers_opposite_hand_hold(Hand::Bilateral));
+        assert!(!Hand::Left.triggers_opposite_hand_hold(Hand::Left));
+        assert!(!Hand::Right.triggers_opposite_hand_hold(Hand::Right));
+        assert!(!Hand::Left.triggers_opposite_hand_hold(Hand::Unknown));
+        assert!(!Hand::Unknown.triggers_opposite_hand_hold(Hand::Right));
+    }
 }
