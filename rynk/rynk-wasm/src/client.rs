@@ -39,7 +39,7 @@ use rynk::rmk_types::protocol::rynk::{
     LightingRuntimeConditionalSceneStatus, LightingRuntimeConditionalSceneTransaction,
     LightingRuntimeConditionalScenesPage, LightingScenePageRequest, LightingSceneStatus, LightingSceneTransaction,
     LightingScenesPage, LightingState, LightingZoneMembershipsPage, LightingZonesPage, LockStatus, MatrixState,
-    MorseHoldTriggerPositionState, PeripheralStatus, ProtocolVersion,
+    MorseHoldTriggerPositionState, PeripheralStatus, PointingCapabilities, PointingConfig, ProtocolVersion,
     PutLightingExtendedRuntimeConditionalSceneChunkRequest, PutLightingOverlayChunkRequest,
     PutLightingRuntimeConditionalSceneChunkRequest, PutLightingSceneChunkRequest, SetComboBulkRequest,
     SetKeymapBulkRequest, SetLightingExtensionLayersRequest, SetLightingExtensionParamRequest,
@@ -186,6 +186,10 @@ endpoints! {
     get_morse_hold_trigger_positions() -> MorseHoldTriggerPositionState,
     set_morse_hold_trigger_positions(request: SetMorseHoldTriggerPositionsRequest) -> (),
     read_macro(index: u8) -> Vec<MacroOp>,
+    // pointing
+    get_pointing_capabilities() -> PointingCapabilities,
+    get_pointing_config() -> PointingConfig,
+    set_pointing_config(config: PointingConfig) -> PointingConfig,
     // behavior
     get_behavior() -> BehaviorConfig,
     set_behavior(config: BehaviorConfig) -> (),
