@@ -7,8 +7,27 @@ use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Not};
 
 use bitfield_struct::bitfield;
 use postcard::experimental::max_size::MaxSize;
+use serde::{Deserialize, Serialize};
+use strum::FromRepr;
 
 use crate::keycode::HidKeyCode;
+
+/// One USB HID modifier key.
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, FromRepr, MaxSize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum ModifierKey {
+    LCtrl = 0,
+    LShift = 1,
+    LAlt = 2,
+    LGui = 3,
+    RCtrl = 4,
+    RShift = 5,
+    RAlt = 6,
+    RGui = 7,
+}
 
 /// The bit representation of the modifier combination.
 #[bitfield(u8, order = Lsb, debug = false)]

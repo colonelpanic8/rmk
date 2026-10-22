@@ -50,11 +50,11 @@ steps = [
   { rynk = { cmd = "SetCombo", payload = { index = 1, config = { actions = [
     { Single = { Key = { Hid = "A" } } },
     { Single = { Key = { Hid = "B" } } },
-  ], output = { Single = { Key = { Hid = "C" } } }, layer = 0 } } } },
+  ], output = { LayerModTap = [1, "LAlt", "Tab"] }, layer = 0 } } } },
   { rynk = { cmd = "GetCombo", payload = 1, reply = { actions = [
     { Single = { Key = { Hid = "A" } } },
     { Single = { Key = { Hid = "B" } } },
-  ], output = { Single = { Key = { Hid = "C" } } }, layer = 0 } } },
+  ], output = { LayerModTap = [1, "LAlt", "Tab"] }, layer = 0 } } },
   { rynk = { cmd = "SetCombo", payload = { index = 1, config = { actions = [
     { Single = { Key = { Hid = "B" } } },
   ], output = { Single = { Key = { Hid = "D" } } }, layer = 1 } } } },
