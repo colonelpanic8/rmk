@@ -1,0 +1,90 @@
+# Unicode codepoint input.
+#
+# The shared split board carries no unicode keys, so this file brings its own
+# single layer: (0,0) is UNICODE(0) = U+00E9, (0,1) is UNICODE(1) = U+1F44D, and
+# (0,2) cycles the input mode. Everything else is `No`.
+
+keyboard = "boards/split.toml"
+
+[behavior.unicode]
+codepoints = ["00E9", "1F44D"]
+
+[[keymap.layer]]
+keys = """
+UNICODE(0)  UNICODE(1)  UnicodeModeCycle  No  No  No  No  No  No  No  No  No  No  No
+No          No          No                No  No  No  No  No  No  No  No  No  No  No
+No          No          No                No  No  No  No  No  No  No  No  No  No  No
+No          No          No                No  No  No  No  No  No  No  No  No  No  No
+No          No          No                No  No  No  No  No  No  No  No  No  No  No
+"""
+
+# IBus reads Ctrl+Shift+U, then the hex digits as ordinary keystrokes, then Enter.
+[[test]]
+name = "linux_brackets_the_hex_digits_with_ctrl_shift_u_and_enter"
+behavior.unicode = { default_mode = "linux" }
+steps = [{ tap = { pos = [0, 0], duration = 100 } }]
+expect = [
+  ["LCtrl", "LShift", "U"], [],
+  ["Kc0"], [], ["Kc0"], [], ["E"], [], ["Kc9"], [],
+  ["Enter"], [],
+]
+
+# The macOS Unicode Hex Input layout reads four hex digits typed under a held
+# Option, with no opener or terminator.
+[[test]]
+name = "macos_types_four_hex_digits_under_a_held_alt"
+behavior.unicode = { default_mode = "macos" }
+steps = [{ tap = { pos = [0, 0], duration = 100 } }]
+expect = [
+  ["LAlt"],
+  ["LAlt", "Kc0"], ["LAlt"], ["LAlt", "Kc0"], ["LAlt"],
+  ["LAlt", "E"], ["LAlt"], ["LAlt", "Kc9"], ["LAlt"],
+  [],
+]
+
+# macOS takes exactly four digits per UTF-16 code unit, so U+1F44D is typed as
+# its surrogate pair D83D DC4D rather than as five digits it would misread.
+[[test]]
+name = "macos_types_an_astral_codepoint_as_a_surrogate_pair"
+behavior.unicode = { default_mode = "macos" }
+steps = [{ tap = { pos = [0, 1], duration = 100 } }]
+expect = [
+  ["LAlt"],
+  ["LAlt", "D"], ["LAlt"], ["LAlt", "Kc8"], ["LAlt"], ["LAlt", "Kc3"], ["LAlt"], ["LAlt", "D"], ["LAlt"],
+  ["LAlt", "D"], ["LAlt"], ["LAlt", "C"], ["LAlt"], ["LAlt", "Kc4"], ["LAlt"], ["LAlt", "D"], ["LAlt"],
+  [],
+]
+
+# WinCompose opens on RightAlt followed by `u`, and commits on Enter. Above the
+# BMP it takes the codepoint itself, so U+1F44D is five digits, not a pair.
+[[test]]
+name = "windows_opens_with_right_alt_u"
+behavior.unicode = { default_mode = "windows" }
+steps = [{ tap = { pos = [0, 1], duration = 100 } }]
+expect = [
+  ["RAlt"], [], ["U"], [],
+  ["Kc1"], [], ["F"], [], ["Kc4"], [], ["Kc4"], [], ["D"], [],
+  ["Enter"], [],
+]
+
+# The cycle key rotates linux -> macos -> windows, so the same key emits a
+# different sequence after it. Nothing is reported for the cycle key itself.
+[[test]]
+name = "cycling_the_mode_changes_what_a_unicode_key_emits"
+behavior.unicode = { default_mode = "linux" }
+steps = [
+  { tap = { pos = [0, 0], duration = 10 } },
+  { tap = { pos = [0, 2], duration = 10 } },
+  { tap = { pos = [0, 0], duration = 10 } },
+]
+expect = [
+  # Linux
+  ["LCtrl", "LShift", "U"], [],
+  ["Kc0"], [], ["Kc0"], [], ["E"], [], ["Kc9"], [],
+  ["Enter"], [],
+  # macOS
+  ["LAlt"],
+  ["LAlt", "Kc0"], ["LAlt"], ["LAlt", "Kc0"], ["LAlt"],
+  ["LAlt", "E"], ["LAlt"], ["LAlt", "Kc9"], ["LAlt"],
+  [],
+]
