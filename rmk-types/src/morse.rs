@@ -38,12 +38,13 @@ pub enum MorseMode {
 ///
 /// Bit layout of the inner `u64`:
 /// ```text
-/// 63     48 | 47  46    | 45      | 44           32 | 31  30 | 29       17 | 16  15 | 14  13   | 12       0
-/// reserved  | retro_tap | qt_set  | quick_tap_tm    | mode   | gap_timeout | uni_tap| flow_tap | hold_timeout
-///   (16b)   |   (2b)    |  (1b)   |   (13b ms)      |  (2b)  |   (13b ms)  |  (2b)  |   (2b)   |  (13b ms)
+/// 63    61 | 60           48 | 47  46    | 45      | 44           32 | 31  30 | 29       17 | 16  15 | 14  13   | 12       0
+/// reserved | prior_idle_time | retro_tap | qt_set  | quick_tap_tm    | mode   | gap_timeout | uni_tap| flow_tap | hold_timeout
+///   (3b)   |    (13b ms)     |   (2b)    |  (1b)   |   (13b ms)      |  (2b)  |   (13b ms)  |  (2b)  |   (2b)   |  (13b ms)
 /// ```
 ///
 /// - `retro_tap` (bits 47, 46): `00`/`01` = None, `10` = Some(false), `11` = Some(true)
+/// - `prior_idle_time` (bits 60-48): flow-tap idle window in ms (0 = None, max 8191).
 /// - `qt_set` (bit 45): when set, `quick_tap_timeout` is explicitly configured
 ///   (even if 0, which means "disabled"). When clear, the field is unset and
 ///   callers should fall back to the global default.
@@ -74,6 +75,8 @@ const QT_SET_BIT: u64 = 1 << 45;
 const RETRO_TAP_LOW_BIT: u64 = 1 << 46;
 const RETRO_TAP_HIGH_BIT: u64 = 1 << 47;
 const RETRO_TAP_MASK: u64 = RETRO_TAP_LOW_BIT | RETRO_TAP_HIGH_BIT;
+const PRIOR_IDLE_SHIFT: u32 = 48;
+const PRIOR_IDLE_MASK: u64 = TIMEOUT_MASK << PRIOR_IDLE_SHIFT;
 
 const fn encode_timeout_ms(t: u16) -> u64 {
     if t > TIMEOUT_MAX_MS {
@@ -209,6 +212,22 @@ impl MorseProfile {
         }
     }
 
+    /// Per-profile override for the flow-tap idle window. When the previous key was released
+    /// within this period, the key resolves as a tap. `None` inherits the global
+    /// `[behavior.morse] prior_idle_time`. Only effective when flow tap is enabled.
+    pub const fn prior_idle_time_ms(self) -> Option<u16> {
+        let t = ((self.0 & PRIOR_IDLE_MASK) >> PRIOR_IDLE_SHIFT) as u16;
+        if t == 0 { None } else { Some(t) }
+    }
+
+    pub const fn with_prior_idle_time_ms(self, t: Option<u16>) -> Self {
+        if let Some(t) = t {
+            Self((self.0 & !PRIOR_IDLE_MASK) | (encode_timeout_ms(t) << PRIOR_IDLE_SHIFT))
+        } else {
+            Self(self.0 & !PRIOR_IDLE_MASK)
+        }
+    }
+
     pub const fn quick_tap_timeout_ms(self) -> Option<u16> {
         if self.0 & QT_SET_BIT != 0 {
             Some(((self.0 >> 32) & TIMEOUT_MASK) as u16)
@@ -287,6 +306,7 @@ impl Serialize for MorseProfile {
                 gap_timeout_ms: Option<u16>,
                 quick_tap_timeout_ms: Option<u16>,
                 retro_tap: Option<bool>,
+                prior_idle_time_ms: Option<u16>,
             }
             Repr {
                 unilateral_tap: self.unilateral_tap(),
@@ -296,6 +316,7 @@ impl Serialize for MorseProfile {
                 gap_timeout_ms: self.gap_timeout_ms(),
                 quick_tap_timeout_ms: self.quick_tap_timeout_ms(),
                 retro_tap: self.retro_tap(),
+                prior_idle_time_ms: self.prior_idle_time_ms(),
             }
             .serialize(serializer)
         } else {
@@ -318,13 +339,15 @@ impl<'de> Deserialize<'de> for MorseProfile {
                 // Added after the shape shipped; absent in older payloads.
                 #[serde(default)]
                 retro_tap: Option<bool>,
+                prior_idle_time_ms: Option<u16>,
             }
             let r = Repr::deserialize(deserializer)?;
             Ok(
                 MorseProfile::new(r.unilateral_tap, r.mode, r.hold_timeout_ms, r.gap_timeout_ms)
                     .with_enable_flow_tap(r.enable_flow_tap)
                     .with_quick_tap_timeout_ms(r.quick_tap_timeout_ms)
-                    .with_retro_tap(r.retro_tap),
+                    .with_retro_tap(r.retro_tap)
+                    .with_prior_idle_time_ms(r.prior_idle_time_ms),
             )
         } else {
             Ok(MorseProfile(u64::deserialize(deserializer)?))
@@ -336,7 +359,7 @@ impl<'de> Deserialize<'de> for MorseProfile {
 #[cfg(feature = "wasm")]
 const _: () = {
     #[::wasm_bindgen::prelude::wasm_bindgen(typescript_custom_section)]
-    const TS_APPEND_CONTENT: &'static str = "export type MorseProfile = { unilateral_tap: boolean | undefined; enable_flow_tap: boolean | undefined; mode: MorseMode | undefined; hold_timeout_ms: number | undefined; gap_timeout_ms: number | undefined; quick_tap_timeout_ms: number | undefined; retro_tap: boolean | undefined; };";
+    const TS_APPEND_CONTENT: &'static str = "export type MorseProfile = { unilateral_tap: boolean | undefined; enable_flow_tap: boolean | undefined; mode: MorseMode | undefined; hold_timeout_ms: number | undefined; gap_timeout_ms: number | undefined; quick_tap_timeout_ms: number | undefined; retro_tap: boolean | undefined; prior_idle_time_ms: number | undefined; };";
 };
 crate::wasm_object_abi!(MorseProfile, "MorseProfile");
 
@@ -881,6 +904,33 @@ mod tests {
         assert_eq!(profile.mode(), Some(MorseMode::PermissiveHold));
     }
 
+    #[test]
+    fn prior_idle_time_accessors_preserve_packed_fields() {
+        assert_eq!(MorseProfile::const_default().prior_idle_time_ms(), None);
+
+        let base = MorseProfile::new(Some(true), Some(MorseMode::PermissiveHold), Some(1000), Some(2000))
+            .with_enable_flow_tap(Some(true))
+            .with_quick_tap_timeout_ms(Some(150));
+
+        for value in [Some(1), Some(120), Some(TIMEOUT_MAX_MS), None] {
+            let p = base.with_prior_idle_time_ms(value);
+            assert_eq!(p.prior_idle_time_ms(), value);
+            assert_eq!(p.hold_timeout_ms(), Some(1000));
+            assert_eq!(p.gap_timeout_ms(), Some(2000));
+            assert_eq!(p.unilateral_tap(), Some(true));
+            assert_eq!(p.enable_flow_tap(), Some(true));
+            assert_eq!(p.quick_tap_timeout_ms(), Some(150));
+            assert_eq!(p.mode(), Some(MorseMode::PermissiveHold));
+        }
+
+        assert_eq!(base.with_prior_idle_time_ms(Some(0)).prior_idle_time_ms(), None);
+        assert_eq!(
+            base.with_prior_idle_time_ms(Some(0xFFFF)).prior_idle_time_ms(),
+            Some(TIMEOUT_MAX_MS)
+        );
+        assert_eq!(core::mem::size_of::<MorseProfile>(), 8);
+    }
+
     /// The human-readable serde goes `MorseProfile` -> decoded parts -> `new()`.
     /// Every occupied bit is covered by the decoded fields, so that path must be lossless.
     #[test]
@@ -897,13 +947,15 @@ mod tests {
             MorseProfile::new(Some(true), Some(MorseMode::Normal), Some(200), Some(150))
                 .with_enable_flow_tap(Some(true))
                 .with_quick_tap_timeout_ms(Some(180))
-                .with_retro_tap(Some(true)),
+                .with_retro_tap(Some(true))
+                .with_prior_idle_time_ms(Some(90)),
             MorseProfile::const_default(),
         ] {
             let parts = MorseProfile::new(p.unilateral_tap(), p.mode(), p.hold_timeout_ms(), p.gap_timeout_ms())
                 .with_enable_flow_tap(p.enable_flow_tap())
                 .with_quick_tap_timeout_ms(p.quick_tap_timeout_ms())
-                .with_retro_tap(p.retro_tap());
+                .with_retro_tap(p.retro_tap())
+                .with_prior_idle_time_ms(p.prior_idle_time_ms());
             assert_eq!(p, parts);
         }
     }
