@@ -7,7 +7,7 @@ pub type ComboConfig = rmk_types::combo::Combo;
 /// Position-combo config instantiated with firmware's combo Vec capacity.
 pub type PositionComboConfig = rmk_types::combo::PositionCombo;
 
-use crate::event::{KeyboardEvent, KeyboardEventPos};
+use crate::event::{KeyboardEvent, KeyboardEventSource};
 
 // Combo.state is a u16 bitmask, so combos are limited to 16 keys.
 // Use core::assert! explicitly — the crate-level `assert!` macro dispatches to
@@ -77,36 +77,38 @@ impl Combo {
     fn definition_input_index(
         definition: &ComboDefinition,
         key_action: &KeyAction,
-        position: KeyboardEventPos,
+        position: KeyboardEventSource,
     ) -> Option<usize> {
         match definition {
             ComboDefinition::Actions(config) => config.find_key_action_index(key_action),
             ComboDefinition::Positions(config) => match position {
-                KeyboardEventPos::Key(position) => config.find_position_index(&MatrixPosition {
+                KeyboardEventSource::Key(position) => config.find_position_index(&MatrixPosition {
                     row: position.row,
                     col: position.col,
                 }),
-                KeyboardEventPos::RotaryEncoder(_)
-                | KeyboardEventPos::Combo(_)
-                | KeyboardEventPos::Macro
-                | KeyboardEventPos::Virtual(_) => None,
+                KeyboardEventSource::RotaryEncoder(_)
+                | KeyboardEventSource::Combo(_)
+                | KeyboardEventSource::Macro
+                | KeyboardEventSource::Virtual(_)
+                | KeyboardEventSource::Touch(_)
+                | KeyboardEventSource::KeyCode(_) => None,
             },
         }
     }
 
-    fn input_index(&self, key_action: &KeyAction, position: KeyboardEventPos) -> Option<usize> {
+    fn input_index(&self, key_action: &KeyAction, position: KeyboardEventSource) -> Option<usize> {
         Self::definition_input_index(&self.definition, key_action, position)
     }
 
     pub(crate) fn definition_contains_input(
         definition: &ComboDefinition,
         key_action: &KeyAction,
-        position: KeyboardEventPos,
+        position: KeyboardEventSource,
     ) -> bool {
         Self::definition_input_index(definition, key_action, position).is_some()
     }
 
-    pub(crate) fn contains_input(&self, key_action: &KeyAction, position: KeyboardEventPos) -> bool {
+    pub(crate) fn contains_input(&self, key_action: &KeyAction, position: KeyboardEventSource) -> bool {
         self.input_index(key_action, position).is_some()
     }
 
@@ -124,7 +126,7 @@ impl Combo {
             return false;
         }
 
-        let action_idx = self.input_index(key_action, key_event.pos);
+        let action_idx = self.input_index(key_action, key_event.source);
         if let Some(i) = action_idx {
             self.state |= 1 << i;
         } else if !self.is_all_pressed() {
@@ -142,7 +144,7 @@ impl Combo {
     ///
     /// Returns true iff this combo is triggered and the action/position pair
     /// matches one of its inputs, i.e. the caller should swallow the press.
-    pub(crate) fn reassert_if_triggered(&mut self, key_action: &KeyAction, position: KeyboardEventPos) -> bool {
+    pub(crate) fn reassert_if_triggered(&mut self, key_action: &KeyAction, position: KeyboardEventSource) -> bool {
         if !self.is_triggered {
             return false;
         }
@@ -155,7 +157,7 @@ impl Combo {
 
     /// Update the combo's state when a key is released
     /// When the combo is fully released from triggered state, this function returns true
-    pub(crate) fn update_released(&mut self, key_action: &KeyAction, position: KeyboardEventPos) -> bool {
+    pub(crate) fn update_released(&mut self, key_action: &KeyAction, position: KeyboardEventSource) -> bool {
         if let Some(i) = self.input_index(key_action, position) {
             self.state &= !(1 << i);
         }
