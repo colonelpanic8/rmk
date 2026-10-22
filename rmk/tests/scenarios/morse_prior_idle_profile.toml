@@ -1,0 +1,54 @@
+# Per-profile `prior_idle_time`: a profile can run a narrower or wider flow-tap idle window
+# than the global `[behavior.morse] prior_idle_time`.
+#
+# The fixture uses the shared split board's A@(1,0) plus the two profile-carrying tap-holds
+# MT(B, LShift, p0)@(3,6) and MT(B, LShift, p1)@(3,7). Every case types A and then presses the
+# tap-hold roughly 90 ms later, so the same input lands inside a 120 ms window and outside a
+# 40 ms one.
+
+keyboard = "boards/split.toml"
+
+[behavior.morse]
+enable_flow_tap = true
+prior_idle_time = "120ms"
+
+[[test]]
+name = "prior_idle_time_inherited_when_profile_omits_it"
+steps = [
+  { delay = 300 },
+  { press = [1, 0] },
+  { release = [1, 0] },
+  { delay = 70 },
+  { press = [3, 6] },  # MT(B, LShift, p0) -- inside the global 120ms window
+  { delay = 300 },
+  { release = [3, 6] },
+]
+expect = [["A"], [], ["B"], []]
+
+[[test]]
+name = "prior_idle_time_profile_narrows_the_window"
+behavior.morse = { profiles = { p1 = { prior_idle_time = "40ms" } } }
+steps = [
+  { delay = 300 },
+  { press = [1, 0] },
+  { release = [1, 0] },
+  { delay = 70 },
+  { press = [3, 7] },  # MT(B, LShift, p1) -- outside its own 40ms window, so the hold stands
+  { delay = 300 },
+  { release = [3, 7] },
+]
+expect = [["A"], [], ["LShift"], []]
+
+[[test]]
+name = "prior_idle_time_profile_widens_the_window"
+behavior.morse = { prior_idle_time = "40ms", profiles = { p1 = { prior_idle_time = "300ms" } } }
+steps = [
+  { delay = 300 },
+  { press = [1, 0] },
+  { release = [1, 0] },
+  { delay = 70 },
+  { press = [3, 7] },  # MT(B, LShift, p1) -- inside its own 300ms window despite the 40ms global
+  { delay = 300 },
+  { release = [3, 7] },
+]
+expect = [["A"], [], ["B"], []]
