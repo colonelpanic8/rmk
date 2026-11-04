@@ -9,6 +9,7 @@ use crate::lighting::compositor::{Compositor, LightingSource, LogicalFrame, Rend
 use crate::lighting::context::{LayerState, LightingContext, LightingContextProvider};
 use crate::lighting::effect::BuiltinEffect;
 use crate::lighting::output::BrightnessTransform;
+use crate::lighting::packed::Matches;
 use crate::lighting::service::{CommandResult, Invalidation, LightingEngine, RenderInput, RenderOutcome};
 use crate::lighting::source::{
     BatteryStatusProvider, LayerPolicy, LayerScenes, LightingControls, OutputMode, OverlayUpdate, PoweredOnlyScope,
@@ -1406,8 +1407,11 @@ where
         // Status band, after the compiled rules: a runtime conditional cell is
         // the host's replacement for a compiled one, so it must reach the same
         // altitude and win on the slots the two share.
-        let mut runtime_conditional_source =
-            RuntimeConditionalSource::new(runtime_conditional_scenes, *battery_status, snapshot, policy);
+        let mut runtime_conditional_source = RuntimeConditionalSource {
+            table: runtime_conditional_scenes,
+            batteries: *battery_status,
+            matches: Matches::new(),
+        };
         transaction.apply(priority::STATUS, &mut runtime_conditional_source)?;
         if wake_active && let Some(indicator_cell) = indicator_cell.as_ref() {
             let mut indicator = SparseScene {

@@ -34,6 +34,10 @@ pub struct RenderInput<'a, Context> {
 /// Targets are exposed separately so the transaction can validate the whole
 /// source before changing the frame. That makes an invalid target atomic.
 pub trait LightingSource<C, Context> {
+    /// Called once per render transaction before the source is addressed, so
+    /// a source can evaluate per-frame state once instead of per index.
+    fn prepare(&mut self, _input: &RenderInput<'_, Context>) {}
+
     fn len(&self, input: &RenderInput<'_, Context>) -> usize;
     fn slot(&self, index: usize, input: &RenderInput<'_, Context>) -> LedSlot;
     /// Sample one previously validated target.
@@ -300,6 +304,7 @@ impl<C: Copy + Eq, Context, const N: usize> RenderTransaction<'_, '_, C, Context
             });
         }
 
+        source.prepare(&self.input);
         // Validate every target before mutating anything.
         for index in 0..source.len(&self.input) {
             let slot = source.slot(index, &self.input);

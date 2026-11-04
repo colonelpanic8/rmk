@@ -36,6 +36,7 @@ use rmk_types::protocol::rynk::{
 
 use crate::RawMutex;
 use crate::core_traits::Runnable;
+use crate::lighting::packed::PackedRules;
 use crate::lighting::{
     BackgroundMode, BackgroundState, BuiltinEffect, ConditionalSceneCell, FramePage, LayerPolicy, LayerState, LedId,
     LightingControls, LightingMailbox, LightingNodeId, LightingRouting, LightingTopology, OVERLAY_CHUNK_SIZE,
@@ -267,7 +268,7 @@ pub struct RynkLightingController<'a> {
     /// with `Unsupported`.
     pub(super) scene_capacity: u16,
     pub(super) runtime_conditional_scene_capacity: u16,
-    pub(super) conditional_scenes: &'a [ConditionalSceneCell<BuiltinEffect>],
+    pub(super) conditional_scenes: PackedRules<'a>,
     pub(super) controls: LightingControls,
     /// Whether the board wired a host-selectable extension source; gates the
     /// `EXTENSION_EFFECTS` capability bit and the extension endpoints.
@@ -298,7 +299,7 @@ impl<'a> RynkLightingController<'a> {
             },
             scene_capacity: 0,
             runtime_conditional_scene_capacity: 0,
-            conditional_scenes: &[],
+            conditional_scenes: PackedRules::EMPTY,
             controls: LightingControls {
                 output_toggle_user_action: None,
                 output_mode_cycle_user_action: None,
@@ -399,7 +400,7 @@ impl<'a> RynkLightingController<'a> {
     }
 
     /// Advertise immutable conditional scenes compiled from board config.
-    pub const fn with_conditional_scenes(mut self, scenes: &'a [ConditionalSceneCell<BuiltinEffect>]) -> Self {
+    pub const fn with_conditional_scenes(mut self, scenes: PackedRules<'a>) -> Self {
         self.conditional_scenes = scenes;
         self
     }
