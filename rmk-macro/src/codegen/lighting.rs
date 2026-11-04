@@ -282,9 +282,24 @@ pub(crate) fn expand_lighting_renderer_config(lighting: Option<&Lighting>) -> To
                 scenes: &LIGHTING_LAYER_SCENE_TABLE,
                 policy: ::rmk::lighting::LayerPolicy::ActiveStack,
             };
-        pub static LIGHTING_CONDITIONAL_SCENE_CELLS:
+        /// The compiled rules as written. Only const evaluation reads this: the
+        /// firmware carries them packed, as `LIGHTING_CONDITIONAL_RULES`.
+        pub const LIGHTING_CONDITIONAL_SCENE_CELLS:
             [::rmk::lighting::ConditionalSceneCell<::rmk::lighting::BuiltinEffect>; #conditional_cell_count] =
             [#(#conditional_cells),*];
+        pub const LIGHTING_CONDITIONAL_RULE_COUNT: usize = #conditional_cell_count;
+        pub static LIGHTING_CONDITIONAL_RULE_BYTES:
+            [u8; ::rmk::lighting::packed_rule_bytes_len(&LIGHTING_CONDITIONAL_SCENE_CELLS)] =
+            ::rmk::lighting::pack_rule_bytes(&LIGHTING_CONDITIONAL_SCENE_CELLS);
+        pub static LIGHTING_CONDITIONAL_RULE_EFFECTS:
+            [::rmk::lighting::BuiltinEffect; ::rmk::lighting::packed_rule_effect_count(&LIGHTING_CONDITIONAL_SCENE_CELLS)] =
+            ::rmk::lighting::pack_rule_effects(&LIGHTING_CONDITIONAL_SCENE_CELLS);
+        pub const LIGHTING_CONDITIONAL_RULES: ::rmk::lighting::PackedRules<'static> =
+            ::rmk::lighting::PackedRules::new(
+                &LIGHTING_CONDITIONAL_RULE_BYTES,
+                &LIGHTING_CONDITIONAL_RULE_EFFECTS,
+                #conditional_cell_count,
+            );
         pub const LIGHTING_CONTROLS: ::rmk::lighting::LightingControls =
             ::rmk::lighting::LightingControls {
                 output_toggle_user_action: #output_toggle_user_action,

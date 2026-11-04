@@ -185,7 +185,7 @@ fn context(layer: u8) -> LightingContext {
 
 #[test]
 fn replica_snapshot_preserves_state_scenes_context_ttl_and_animation_phase() {
-    type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4>;
+    type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4, 4>;
     fn scene_engine() -> SceneEngine {
         SceneEngine::new(
             BackgroundState {
@@ -240,7 +240,7 @@ fn replica_snapshot_preserves_state_scenes_context_ttl_and_animation_phase() {
         )
         .unwrap();
 
-    static EXPORT: StandardReplicaSlot<2, 4> = StandardReplicaSlot::new();
+    static EXPORT: StandardReplicaSlot<2, 4, 4> = StandardReplicaSlot::new();
     authority
         .handle_command(120, StandardCommand::ExportReplica(&EXPORT), &authority_context)
         .unwrap();
@@ -261,7 +261,7 @@ fn replica_snapshot_preserves_state_scenes_context_ttl_and_animation_phase() {
         )
         .unwrap();
 
-    static APPLY: StandardReplicaSlot<2, 4> = StandardReplicaSlot::new();
+    static APPLY: StandardReplicaSlot<2, 4, 4> = StandardReplicaSlot::new();
     APPLY.put(snapshot).unwrap();
     let mut replica = scene_engine();
     replica
@@ -1118,7 +1118,7 @@ fn expired_overlay_capacity_is_reclaimed_and_light_actions_are_scoped() {
 
 const BLUE: Rgb8 = Rgb8::new(0, 0, 200);
 
-type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4>;
+type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4, 4>;
 
 fn scene_engine() -> SceneEngine {
     StandardLightingEngine::new(
@@ -2245,7 +2245,7 @@ fn wake_layers_accept_any_layer_set_and_are_settable() {
 /// the driver re-renders the moment it expires.
 #[test]
 fn a_released_wake_layer_lingers_for_the_configured_time() {
-    type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4>;
+    type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4, 4>;
     let mut engine: SceneEngine = StandardLightingEngine::new(
         BackgroundState::default(),
         LayerScenes {
@@ -2306,7 +2306,7 @@ fn a_released_wake_layer_lingers_for_the_configured_time() {
 /// presented frame must record.
 #[test]
 fn a_lingered_frame_records_the_context_it_was_rendered_from() {
-    type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4>;
+    type SceneEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4, 4>;
     let mut engine: SceneEngine = StandardLightingEngine::new(
         BackgroundState::default(),
         LayerScenes {
@@ -2368,7 +2368,7 @@ fn output_mode_conditions_select_between_runtime_rules() {
         effect: BuiltinEffect::Solid { color },
     };
 
-    type ConditionalEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4>;
+    type ConditionalEngine = StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4, 4>;
     let mut engine: ConditionalEngine = StandardLightingEngine::new(
         BackgroundState::default(),
         LayerScenes {
@@ -2464,8 +2464,15 @@ fn compiled_output_mode_conditions_observe_the_engine_policy() {
     static COMPILED: [ConditionalSceneCell<BuiltinEffect>; 2] =
         [rule(OutputMode::AlwaysOn, GREEN), rule(OutputMode::PoweredOnly, RED)];
 
-    type CompiledEngine =
-        StandardLightingEngine<'static, EmptySource, ConditionalScenes<'static, BuiltinEffect, NoBatteries>, 2, 2, 4>;
+    type CompiledEngine = StandardLightingEngine<
+        'static,
+        EmptySource,
+        ConditionalScenes<'static, BuiltinEffect, NoBatteries>,
+        2,
+        2,
+        4,
+        4,
+    >;
     let mut engine: CompiledEngine = StandardLightingEngine::new(
         BackgroundState::default(),
         LayerScenes {
@@ -2543,7 +2550,7 @@ fn layer_mask_and_indicator_rules_read_the_context() {
         ..ConditionSet::default()
     };
 
-    type ConditionalEngine = StandardLightingEngine<'static, ReplicaExtension, EmptySource, 2, 2, 4>;
+    type ConditionalEngine = StandardLightingEngine<'static, ReplicaExtension, EmptySource, 2, 2, 4, 4>;
     let mut engine: ConditionalEngine = StandardLightingEngine::new(
         BackgroundState::default(),
         LayerScenes {
@@ -2612,7 +2619,7 @@ fn effects_conditions_follow_the_extension_value() {
         effect: BuiltinEffect::Solid { color },
     };
 
-    type ConditionalEngine = StandardLightingEngine<'static, ReplicaExtension, EmptySource, 2, 2, 4>;
+    type ConditionalEngine = StandardLightingEngine<'static, ReplicaExtension, EmptySource, 2, 2, 4, 4>;
     let mut engine: ConditionalEngine = StandardLightingEngine::new(
         BackgroundState::default(),
         LayerScenes {
@@ -2720,6 +2727,7 @@ fn runtime_conditional_cells_outrank_layer_scenes_and_compiled_conditional_rules
         ConditionalScenes<'static, BuiltinEffect, NoBatteries>,
         2,
         2,
+        4,
         4,
     > = StandardLightingEngine::new(
         BackgroundState {
@@ -2870,4 +2878,180 @@ fn state_round_trip_preserves_powered_only_and_future_power_transitions() {
             .unwrap();
         assert_eq!(engine.state().output_enabled, !powered);
     }
+}
+
+#[test]
+fn packed_conditional_rules_round_trip_every_predicate() {
+    use rmk_types::ble::BleState;
+
+    use crate::lighting::source::{
+        ActiveTransport, BatteryCondition, BondedSlotCondition, ChargeCondition, ConnectionCondition,
+        MaintenanceCondition, SplitLink, SplitTransportCondition,
+    };
+    use crate::lighting::{LayerCondition, SplitForce};
+
+    let everything = ConditionSet {
+        layer: Some(LayerCondition {
+            layer: 31,
+            active: false,
+        }),
+        battery: Some(BatteryCondition {
+            node: 1,
+            min_level: Some(0),
+            max_level: Some(255),
+            charge: ChargeCondition::Unknown,
+        }),
+        connection: Some(ConnectionCondition {
+            transport: Some(ActiveTransport::NoneActive),
+            profile: Some(254),
+            ble_state: Some(BleState::Inactive),
+            bonded: Some(BondedSlotCondition { slot: 7, bonded: false }),
+            usb_connected: Some(true),
+        }),
+        output_mode: Some(OutputMode::PoweredOnly),
+        effects: Some(EffectsCondition { enabled: false }),
+        layers: Some(LayersCondition {
+            active: 0x8000_0001,
+            inactive: u32::MAX,
+        }),
+        indicators: Some(IndicatorCondition {
+            num_lock: Some(false),
+            caps_lock: None,
+            scroll_lock: Some(true),
+        }),
+        maintenance: Some(MaintenanceCondition { unlocked: true }),
+        split_transport: Some(SplitTransportCondition {
+            link: Some(SplitLink::Ble),
+            force: Some(SplitForce::Auto),
+        }),
+    };
+    let partial = ConditionSet {
+        battery: Some(BatteryCondition {
+            node: 0,
+            min_level: None,
+            max_level: Some(20),
+            charge: ChargeCondition::Discharging,
+        }),
+        connection: Some(ConnectionCondition {
+            profile: Some(0),
+            bonded: Some(BondedSlotCondition { slot: 0, bonded: true }),
+            ..ConnectionCondition::default()
+        }),
+        ..ConditionSet::default()
+    };
+    let rules = [everything, partial, ConditionSet::default()].map(|conditions| RuntimeConditionalSceneCell {
+        conditions,
+        slot: LedSlot(300),
+        effect: BuiltinEffect::solid(RED),
+    });
+
+    let mut table = RuntimeConditionalSceneTable::<8>::new();
+    for rule in rules {
+        table.push(rule).unwrap();
+    }
+    assert!(table.iter().eq(rules));
+
+    table
+        .amend_last_conditions(|conditions| *conditions = everything)
+        .unwrap();
+    let amended = [rules[0], rules[1], rules[0]];
+    assert!(table.iter().eq(amended), "amending rewrites only the last rule");
+}
+
+#[test]
+fn conditional_rules_that_overflow_the_byte_budget_leave_the_table_unchanged() {
+    let everything = ConditionSet {
+        layer: Some(crate::lighting::LayerCondition { layer: 1, active: true }),
+        layers: Some(LayersCondition { active: 1, inactive: 2 }),
+        indicators: Some(IndicatorCondition::default()),
+        effects: Some(EffectsCondition { enabled: true }),
+        output_mode: Some(OutputMode::AlwaysOn),
+        ..ConditionSet::default()
+    };
+    let rule = |shade: u8| RuntimeConditionalSceneCell {
+        conditions: everything,
+        slot: LedSlot(0),
+        effect: BuiltinEffect::solid(Rgb8::new(shade, 0, 0)),
+    };
+    // Each of these records is wider than the per-rule average, so a table
+    // with room for two rules by count runs out of bytes on the second.
+    let mut table = RuntimeConditionalSceneTable::<2>::new();
+    table.push(rule(1)).unwrap();
+    let before = table;
+    assert_eq!(
+        table.push(rule(2)),
+        Err(StandardError::ConditionalSceneFull { capacity: 2 })
+    );
+    assert_eq!(table, before);
+    assert_eq!(table.pool.len(), 1, "a rejected rule interns no style");
+    assert_eq!(
+        table.amend_last_conditions(|conditions| {
+            conditions.battery = Some(crate::lighting::BatteryCondition {
+                node: 0,
+                min_level: None,
+                max_level: None,
+                charge: crate::lighting::ChargeCondition::Any,
+            });
+            conditions.connection = Some(crate::lighting::ConnectionCondition::default());
+        }),
+        Err(StandardError::ConditionalSceneFull { capacity: 2 })
+    );
+    assert_eq!(table, before);
+    assert_eq!(table.bytes_used(), before.bytes_used());
+}
+
+#[test]
+fn scene_replacement_keeps_the_layer_policy() {
+    let mut engine = scene_engine();
+    let snapshot = context(0);
+    let revision = engine
+        .handle_command(
+            0,
+            StandardCommand::SetLayerPolicyIfRevision {
+                expected_revision: 0,
+                policy: LayerPolicy::EffectiveOnly,
+            },
+            &snapshot,
+        )
+        .unwrap()
+        .reply
+        .state()
+        .unwrap()
+        .revision;
+    let id = match engine
+        .handle_command(
+            1,
+            StandardCommand::BeginSceneReplace {
+                expected_revision: revision,
+                cell_count: 1,
+            },
+            &snapshot,
+        )
+        .unwrap()
+        .reply
+    {
+        StandardReply::SceneTransaction { id, .. } => id,
+        other => panic!("expected transaction, got {other:?}"),
+    };
+    let mut chunk = SceneChunk::new();
+    chunk.push(scene_cell(0, 1, GREEN)).unwrap();
+    engine
+        .handle_command(
+            2,
+            StandardCommand::PutSceneChunk {
+                transaction_id: id,
+                offset: 0,
+                cells: chunk,
+            },
+            &snapshot,
+        )
+        .unwrap();
+    let state = engine
+        .handle_command(3, StandardCommand::CommitSceneReplace { transaction_id: id }, &snapshot)
+        .unwrap()
+        .reply
+        .state()
+        .unwrap();
+    assert_eq!(state.scene_policy, LayerPolicy::EffectiveOnly);
+    assert!(engine.scenes().iter().eq([scene_cell(0, 1, GREEN)]));
 }
