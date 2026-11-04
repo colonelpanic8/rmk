@@ -366,6 +366,9 @@ pub struct LightingControls {
 }
 
 impl ConditionSet {
+    // Both the compiled and the runtime rule sources call this; inlined into
+    // each, it costs flash a board may not have.
+    #[inline(never)]
     pub(crate) fn matches<Context, Batteries>(
         &self,
         context: &Context,

@@ -2640,13 +2640,13 @@ mod tests {
             );
             let session = session();
 
-            let core = LightingMailbox::<StandardCommand<2, 4>, StandardReply, StandardError, 1>::new();
-            let mut adapter = super::super::super::lighting::StandardRynkLightingAdapter::<2, 1, 4>::new(
+            let core = LightingMailbox::<StandardCommand<2, 4, 4>, StandardReply, StandardError, 1>::new();
+            let mut adapter = super::super::super::lighting::StandardRynkLightingAdapter::<2, 1, 4, 4>::new(
                 &mailbox,
                 &core,
                 descriptor().topology,
             );
-            let mut engine: StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4> =
+            let mut engine: StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4, 4> =
                 StandardLightingEngine::new(
                     BackgroundState::default(),
                     LayerScenes {

@@ -65,22 +65,23 @@ pub struct StandardLightingEngine<
     const N: usize,
     const OVERLAY_CAP: usize,
     const SCENE_CAP: usize = 0,
+    const RULE_CAP: usize = 0,
 > {
     compositor: Compositor<Rgb8, N>,
     background: UniformBackground<N>,
     extension: Extension,
     layers: LayerScenes<'scenes, BuiltinEffect>,
     scenes: SceneTable<SCENE_CAP>,
-    runtime_conditional_scenes: RuntimeConditionalSceneTable<SCENE_CAP>,
+    runtime_conditional_scenes: RuntimeConditionalSceneTable<RULE_CAP>,
     battery_status: &'scenes dyn BatteryStatusProvider,
     overlay: TtlOverlay<BuiltinEffect, OVERLAY_CAP>,
     status: Status,
     animation_clock: AnimationClock,
-    scene_replace: Option<SceneReplace<SCENE_CAP>>,
+    scene_replace: SceneReplace<SCENE_CAP>,
     scene_next_transaction: u32,
     scene_expired_transaction: Option<u32>,
     scene_committed_transaction: Option<u32>,
-    runtime_conditional_scene_replace: Option<RuntimeConditionalSceneReplace<SCENE_CAP>>,
+    runtime_conditional_scene_replace: RuntimeConditionalSceneReplace<RULE_CAP>,
     runtime_conditional_scene_next_transaction: u32,
     runtime_conditional_scene_expired_transaction: Option<u32>,
     runtime_conditional_scene_committed_transaction: Option<u32>,
@@ -104,8 +105,15 @@ pub struct StandardLightingEngine<
     rendered: PresentedFrame,
 }
 
-impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const SCENE_CAP: usize>
-    StandardLightingEngine<'scenes, Extension, Status, N, OVERLAY_CAP, SCENE_CAP>
+impl<
+    'scenes,
+    Extension,
+    Status,
+    const N: usize,
+    const OVERLAY_CAP: usize,
+    const SCENE_CAP: usize,
+    const RULE_CAP: usize,
+> StandardLightingEngine<'scenes, Extension, Status, N, OVERLAY_CAP, SCENE_CAP, RULE_CAP>
 {
     pub fn new(
         background: BackgroundState,
@@ -124,11 +132,11 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
             overlay: TtlOverlay::new(),
             status,
             animation_clock: AnimationClock::local(),
-            scene_replace: None,
+            scene_replace: SceneReplace::new(),
             scene_next_transaction: 1,
             scene_expired_transaction: None,
             scene_committed_transaction: None,
-            runtime_conditional_scene_replace: None,
+            runtime_conditional_scene_replace: RuntimeConditionalSceneReplace::new(),
             runtime_conditional_scene_next_transaction: 1,
             runtime_conditional_scene_expired_transaction: None,
             runtime_conditional_scene_committed_transaction: None,
@@ -217,11 +225,15 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         SCENE_CAP
     }
 
+    pub const fn rule_capacity() -> usize {
+        RULE_CAP
+    }
+
     pub const fn scenes(&self) -> &SceneTable<SCENE_CAP> {
         &self.scenes
     }
 
-    pub const fn runtime_conditional_scenes(&self) -> &RuntimeConditionalSceneTable<SCENE_CAP> {
+    pub const fn runtime_conditional_scenes(&self) -> &RuntimeConditionalSceneTable<RULE_CAP> {
         &self.runtime_conditional_scenes
     }
 
@@ -348,7 +360,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         &self,
         local_now_ms: u64,
         context: &Context,
-    ) -> Result<StandardReplicaState<OVERLAY_CAP, SCENE_CAP>, StandardError> {
+    ) -> Result<StandardReplicaState<OVERLAY_CAP, SCENE_CAP, RULE_CAP>, StandardError> {
         let sample_time_ms = self.animation_clock.sample_time(local_now_ms);
         let mut overlay = OverlayBatch::new();
         for update in self.overlay.active_updates() {
@@ -385,7 +397,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
     }
 
     fn replica_overlay(
-        replica: &StandardReplicaState<OVERLAY_CAP, SCENE_CAP>,
+        replica: &StandardReplicaState<OVERLAY_CAP, SCENE_CAP, RULE_CAP>,
     ) -> Result<TtlOverlay<BuiltinEffect, OVERLAY_CAP>, StandardError> {
         let mut updates = [OverlayUpdate {
             slot: LedSlot(0),
@@ -412,7 +424,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
     fn apply_replica(
         &mut self,
         local_now_ms: u64,
-        replica: StandardReplicaState<OVERLAY_CAP, SCENE_CAP>,
+        replica: StandardReplicaState<OVERLAY_CAP, SCENE_CAP, RULE_CAP>,
         overlay: TtlOverlay<BuiltinEffect, OVERLAY_CAP>,
     ) {
         self.overlay = overlay;
@@ -451,13 +463,10 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
     }
 
     fn expire_scene_replace(&mut self, now_ms: u64) {
-        if self
-            .scene_replace
-            .as_ref()
-            .is_some_and(|replace| now_ms.saturating_sub(replace.last_activity_ms) >= SCENE_TRANSACTION_TIMEOUT_MS)
-        {
-            self.scene_expired_transaction = self.scene_replace.as_ref().map(|replace| replace.id);
-            self.scene_replace = None;
+        let replace = &mut self.scene_replace;
+        if replace.open && now_ms.saturating_sub(replace.last_activity_ms) >= SCENE_TRANSACTION_TIMEOUT_MS {
+            replace.open = false;
+            self.scene_expired_transaction = Some(replace.id);
         }
     }
 
@@ -469,6 +478,16 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         }
     }
 
+    fn open_scene_replace(&mut self, transaction_id: u32) -> Result<&mut SceneReplace<SCENE_CAP>, StandardError> {
+        let error = self.scene_transaction_error(transaction_id);
+        let replace = &mut self.scene_replace;
+        if replace.open && replace.id == transaction_id {
+            Ok(replace)
+        } else {
+            Err(error)
+        }
+    }
+
     fn begin_scene_replace(
         &mut self,
         now_ms: u64,
@@ -476,7 +495,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         cell_count: u16,
     ) -> Result<u32, StandardError> {
         self.expire_scene_replace(now_ms);
-        if self.scene_replace.is_some() {
+        if self.scene_replace.open {
             return Err(StandardError::SceneTransactionBusy);
         }
         if cell_count as usize > SCENE_CAP {
@@ -485,14 +504,13 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         let id = self.scene_next_transaction;
         self.scene_next_transaction = self.scene_next_transaction.wrapping_add(1).max(1);
         self.scene_expired_transaction = None;
-        self.scene_replace = Some(SceneReplace {
-            id,
-            expected_revision,
-            expected_count: cell_count,
-            cells: [EMPTY_SCENE_CELL; SCENE_CAP],
-            len: 0,
-            last_activity_ms: now_ms,
-        });
+        let replace = &mut self.scene_replace;
+        replace.open = true;
+        replace.id = id;
+        replace.expected_revision = expected_revision;
+        replace.expected_count = cell_count;
+        replace.table.clear();
+        replace.last_activity_ms = now_ms;
         Ok(id)
     }
 
@@ -507,24 +525,21 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         for cell in cells.as_slice() {
             Self::check_scene_slot(cell.slot)?;
         }
-        let error = self.scene_transaction_error(transaction_id);
-        let replace = self
-            .scene_replace
-            .as_mut()
-            .filter(|replace| replace.id == transaction_id)
-            .ok_or(error)?;
-        if offset as usize != replace.len || replace.len + cells.as_slice().len() > replace.expected_count as usize {
+        let replace = self.open_scene_replace(transaction_id)?;
+        if offset as usize != replace.table.len()
+            || replace.table.len() + cells.as_slice().len() > replace.expected_count as usize
+        {
             return Err(StandardError::InvalidSceneRequest);
         }
         for cell in cells.as_slice() {
-            if replace.cells[..replace.len]
+            if replace
+                .table
                 .iter()
                 .any(|staged| staged.layer == cell.layer && staged.slot == cell.slot)
             {
                 return Err(StandardError::InvalidSceneRequest);
             }
-            replace.cells[replace.len] = *cell;
-            replace.len += 1;
+            replace.table.set(*cell)?;
         }
         replace.last_activity_ms = now_ms;
         Ok(())
@@ -535,27 +550,21 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
     /// `changed == false` so a retried commit over a lossy link converges.
     fn commit_scene_replace(&mut self, now_ms: u64, transaction_id: u32) -> Result<bool, StandardError> {
         self.expire_scene_replace(now_ms);
-        if self.scene_committed_transaction == Some(transaction_id) && self.scene_replace.is_none() {
+        if self.scene_committed_transaction == Some(transaction_id) && !self.scene_replace.open {
             return Ok(false);
         }
-        let error = self.scene_transaction_error(transaction_id);
-        let replace = self
-            .scene_replace
-            .as_ref()
-            .filter(|replace| replace.id == transaction_id)
-            .ok_or(error)?;
-        if replace.len != replace.expected_count as usize {
+        let replace = self.open_scene_replace(transaction_id)?;
+        if replace.table.len() != replace.expected_count as usize {
             return Err(StandardError::SceneTransactionIncomplete {
                 expected: replace.expected_count,
-                received: replace.len as u16,
+                received: replace.table.len() as u16,
             });
         }
-        self.check_revision(replace.expected_revision)?;
-        let replace = self.scene_replace.take().expect("checked above");
-        self.scenes.clear();
-        for cell in &replace.cells[..replace.len] {
-            self.scenes.set(*cell).expect("staged length is table-bounded");
-        }
+        self.check_revision(self.scene_replace.expected_revision)?;
+        // The layer policy is not part of a replacement.
+        self.scene_replace.table.set_policy(self.scenes.policy());
+        core::mem::swap(&mut self.scenes, &mut self.scene_replace.table);
+        self.scene_replace.open = false;
         self.scene_committed_transaction = Some(transaction_id);
         self.scene_expired_transaction = None;
         Ok(true)
@@ -563,28 +572,15 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
 
     fn abort_scene_replace(&mut self, now_ms: u64, transaction_id: u32) -> Result<(), StandardError> {
         self.expire_scene_replace(now_ms);
-        if self
-            .scene_replace
-            .as_ref()
-            .is_some_and(|replace| replace.id == transaction_id)
-        {
-            self.scene_replace = None;
-            return Ok(());
-        }
-        Err(self.scene_transaction_error(transaction_id))
+        self.open_scene_replace(transaction_id)?.open = false;
+        Ok(())
     }
 
     fn expire_runtime_conditional_scene_replace(&mut self, now_ms: u64) {
-        if self
-            .runtime_conditional_scene_replace
-            .as_ref()
-            .is_some_and(|replace| now_ms.saturating_sub(replace.last_activity_ms) >= SCENE_TRANSACTION_TIMEOUT_MS)
-        {
-            self.runtime_conditional_scene_expired_transaction = self
-                .runtime_conditional_scene_replace
-                .as_ref()
-                .map(|replace| replace.id);
-            self.runtime_conditional_scene_replace = None;
+        let replace = &mut self.runtime_conditional_scene_replace;
+        if replace.open && now_ms.saturating_sub(replace.last_activity_ms) >= SCENE_TRANSACTION_TIMEOUT_MS {
+            replace.open = false;
+            self.runtime_conditional_scene_expired_transaction = Some(replace.id);
         }
     }
 
@@ -596,6 +592,19 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         }
     }
 
+    fn open_runtime_conditional_scene_replace(
+        &mut self,
+        transaction_id: u32,
+    ) -> Result<&mut RuntimeConditionalSceneReplace<RULE_CAP>, StandardError> {
+        let error = self.runtime_conditional_scene_transaction_error(transaction_id);
+        let replace = &mut self.runtime_conditional_scene_replace;
+        if replace.open && replace.id == transaction_id {
+            Ok(replace)
+        } else {
+            Err(error)
+        }
+    }
+
     fn begin_runtime_conditional_scene_replace(
         &mut self,
         now_ms: u64,
@@ -603,23 +612,23 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         cell_count: u16,
     ) -> Result<u32, StandardError> {
         self.expire_runtime_conditional_scene_replace(now_ms);
-        if self.runtime_conditional_scene_replace.is_some() {
+        if self.runtime_conditional_scene_replace.open {
             return Err(StandardError::ConditionalSceneTransactionBusy);
         }
-        if cell_count as usize > SCENE_CAP {
-            return Err(StandardError::ConditionalSceneFull { capacity: SCENE_CAP });
+        if cell_count as usize > RULE_CAP {
+            return Err(StandardError::ConditionalSceneFull { capacity: RULE_CAP });
         }
         let id = self.runtime_conditional_scene_next_transaction;
         self.runtime_conditional_scene_next_transaction =
             self.runtime_conditional_scene_next_transaction.wrapping_add(1).max(1);
         self.runtime_conditional_scene_expired_transaction = None;
-        self.runtime_conditional_scene_replace = Some(RuntimeConditionalSceneReplace {
-            id,
-            expected_revision,
-            expected_count: cell_count,
-            table: RuntimeConditionalSceneTable::new(),
-            last_activity_ms: now_ms,
-        });
+        let replace = &mut self.runtime_conditional_scene_replace;
+        replace.open = true;
+        replace.id = id;
+        replace.expected_revision = expected_revision;
+        replace.expected_count = cell_count;
+        replace.table.clear();
+        replace.last_activity_ms = now_ms;
         Ok(id)
     }
 
@@ -634,12 +643,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         for cell in cells.as_slice() {
             Self::check_scene_slot(cell.slot)?;
         }
-        let error = self.runtime_conditional_scene_transaction_error(transaction_id);
-        let replace = self
-            .runtime_conditional_scene_replace
-            .as_mut()
-            .filter(|replace| replace.id == transaction_id)
-            .ok_or(error)?;
+        let replace = self.open_runtime_conditional_scene_replace(transaction_id)?;
         if offset as usize != replace.table.len()
             || replace.table.len() + cells.as_slice().len() > replace.expected_count as usize
         {
@@ -659,25 +663,23 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
     ) -> Result<bool, StandardError> {
         self.expire_runtime_conditional_scene_replace(now_ms);
         if self.runtime_conditional_scene_committed_transaction == Some(transaction_id)
-            && self.runtime_conditional_scene_replace.is_none()
+            && !self.runtime_conditional_scene_replace.open
         {
             return Ok(false);
         }
-        let error = self.runtime_conditional_scene_transaction_error(transaction_id);
-        let replace = self
-            .runtime_conditional_scene_replace
-            .as_ref()
-            .filter(|replace| replace.id == transaction_id)
-            .ok_or(error)?;
+        let replace = self.open_runtime_conditional_scene_replace(transaction_id)?;
         if replace.table.len() != replace.expected_count as usize {
             return Err(StandardError::ConditionalSceneTransactionIncomplete {
                 expected: replace.expected_count,
                 received: replace.table.len() as u16,
             });
         }
-        self.check_revision(replace.expected_revision)?;
-        let replace = self.runtime_conditional_scene_replace.take().expect("checked above");
-        self.runtime_conditional_scenes = replace.table;
+        self.check_revision(self.runtime_conditional_scene_replace.expected_revision)?;
+        core::mem::swap(
+            &mut self.runtime_conditional_scenes,
+            &mut self.runtime_conditional_scene_replace.table,
+        );
+        self.runtime_conditional_scene_replace.open = false;
         self.runtime_conditional_scene_committed_transaction = Some(transaction_id);
         self.runtime_conditional_scene_expired_transaction = None;
         Ok(true)
@@ -689,15 +691,8 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         transaction_id: u32,
     ) -> Result<(), StandardError> {
         self.expire_runtime_conditional_scene_replace(now_ms);
-        if self
-            .runtime_conditional_scene_replace
-            .as_ref()
-            .is_some_and(|replace| replace.id == transaction_id)
-        {
-            self.runtime_conditional_scene_replace = None;
-            return Ok(());
-        }
-        Err(self.runtime_conditional_scene_transaction_error(transaction_id))
+        self.open_runtime_conditional_scene_replace(transaction_id)?.open = false;
+        Ok(())
     }
 
     // Replica snapshots are large; keep their temporaries out of ordinary command frames.
@@ -706,7 +701,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
         &self,
         now_ms: u64,
         snapshot: &Context,
-        slot: &StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP>,
+        slot: &StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP, RULE_CAP>,
     ) -> Result<(), StandardError>
     where
         Context: LightingContextProvider,
@@ -768,7 +763,7 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
     fn apply_replica_command<Context>(
         &mut self,
         now_ms: u64,
-        slot: &StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP>,
+        slot: &StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP, RULE_CAP>,
     ) -> Result<(), StandardError>
     where
         Context: LightingContextProvider,
@@ -829,8 +824,16 @@ impl<'scenes, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const
     }
 }
 
-impl<'scenes, Context, Extension, Status, const N: usize, const OVERLAY_CAP: usize, const SCENE_CAP: usize>
-    LightingEngine<Context> for StandardLightingEngine<'scenes, Extension, Status, N, OVERLAY_CAP, SCENE_CAP>
+impl<
+    'scenes,
+    Context,
+    Extension,
+    Status,
+    const N: usize,
+    const OVERLAY_CAP: usize,
+    const SCENE_CAP: usize,
+    const RULE_CAP: usize,
+> LightingEngine<Context> for StandardLightingEngine<'scenes, Extension, Status, N, OVERLAY_CAP, SCENE_CAP, RULE_CAP>
 where
     Context: LightingContextProvider,
     Extension: LightingSource<Rgb8, Context>,
@@ -838,7 +841,7 @@ where
 {
     type Frame = LogicalFrame<Rgb8, N>;
     type Input = StandardInput;
-    type Command = StandardCommand<OVERLAY_CAP, SCENE_CAP>;
+    type Command = StandardCommand<OVERLAY_CAP, SCENE_CAP, RULE_CAP>;
     type Reply = StandardReply;
     type Error = StandardError;
 
@@ -1403,10 +1406,8 @@ where
         // Status band, after the compiled rules: a runtime conditional cell is
         // the host's replacement for a compiled one, so it must reach the same
         // altitude and win on the slots the two share.
-        let mut runtime_conditional_source = RuntimeConditionalSource {
-            table: runtime_conditional_scenes,
-            batteries: *battery_status,
-        };
+        let mut runtime_conditional_source =
+            RuntimeConditionalSource::new(runtime_conditional_scenes, *battery_status, snapshot, policy);
         transaction.apply(priority::STATUS, &mut runtime_conditional_source)?;
         if wake_active && let Some(indicator_cell) = indicator_cell.as_ref() {
             let mut indicator = SparseScene {

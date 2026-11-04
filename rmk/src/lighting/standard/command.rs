@@ -14,22 +14,43 @@ use crate::lighting::context::LightingContext;
 use crate::lighting::source::{LayerPolicy, OutputMode, OverlayError};
 use crate::lighting::topology::LedSlot;
 
-/// One in-progress, chunk-staged atomic scene replacement.
+/// The engine's one chunk-staged atomic scene replacement.
 ///
 /// The overlay replacement stages host-side because a whole overlay batch
 /// fits one mailbox command. A scene table is an order of magnitude larger,
 /// so its transaction stages inside the engine via bounded chunks instead of
 /// forcing kilobyte-sized command payloads through every mailbox.
+///
+/// The staging table is permanent engine storage that a transaction reopens
+/// and commits by swapping with the live table. Building it as a value per
+/// transaction put a whole table on the stack each time one began or
+/// committed, and that temporary was what overflowed the stack once the
+/// tables grew.
 pub(super) struct SceneReplace<const CAP: usize> {
+    pub(super) open: bool,
     pub(super) id: u32,
     pub(super) expected_revision: u32,
     pub(super) expected_count: u16,
-    pub(super) cells: [SceneTableCell; CAP],
-    pub(super) len: usize,
+    pub(super) table: SceneTable<CAP>,
     pub(super) last_activity_ms: u64,
 }
 
+impl<const CAP: usize> SceneReplace<CAP> {
+    pub(super) const fn new() -> Self {
+        Self {
+            open: false,
+            id: 0,
+            expected_revision: 0,
+            expected_count: 0,
+            table: SceneTable::new(),
+            last_activity_ms: 0,
+        }
+    }
+}
+
+/// [`SceneReplace`] for the runtime conditional rules.
 pub(super) struct RuntimeConditionalSceneReplace<const CAP: usize> {
+    pub(super) open: bool,
     pub(super) id: u32,
     pub(super) expected_revision: u32,
     pub(super) expected_count: u16,
@@ -37,11 +58,24 @@ pub(super) struct RuntimeConditionalSceneReplace<const CAP: usize> {
     pub(super) last_activity_ms: u64,
 }
 
+impl<const CAP: usize> RuntimeConditionalSceneReplace<CAP> {
+    pub(super) const fn new() -> Self {
+        Self {
+            open: false,
+            id: 0,
+            expected_revision: 0,
+            expected_count: 0,
+            table: RuntimeConditionalSceneTable::new(),
+            last_activity_ms: 0,
+        }
+    }
+}
+
 // The chunk-carrying variants are the payload of a bounded no_std channel;
 // there is no allocator to box them behind.
 #[allow(clippy::large_enum_variant)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum StandardCommand<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
+pub enum StandardCommand<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0, const RULE_CAP: usize = 0> {
     SetOutputEnabled(bool),
     SetOutputModeIfRevision {
         expected_revision: u32,
@@ -81,10 +115,10 @@ pub enum StandardCommand<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
     /// Atomically export all state needed by a renderer replica. The larger
     /// snapshot moves through the referenced slot so it does not inflate
     /// every element of the bounded command queue.
-    ExportReplica(&'static StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP>),
+    ExportReplica(&'static StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP, RULE_CAP>),
     /// Atomically install a snapshot previously placed in the referenced
     /// slot. Intended for a renderer replica, not a second authority.
-    ApplyReplica(&'static StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP>),
+    ApplyReplica(&'static StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP, RULE_CAP>),
     ReadState,
     /// Descriptor and current selection of the extension source, if any.
     ReadExtension,
@@ -446,13 +480,13 @@ impl StandardReply {
 /// host-configured per-layer scenes exactly like the authority, and they
 /// never receive the incremental scene mutation commands themselves.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct StandardReplicaState<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
+pub struct StandardReplicaState<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0, const RULE_CAP: usize = 0> {
     pub revision: u32,
     pub mutable: StandardMutableState,
     pub output_mode: OutputMode,
     pub overlay: OverlayBatch<OVERLAY_CAP>,
     pub scenes: SceneTable<SCENE_CAP>,
-    pub runtime_conditional_scenes: RuntimeConditionalSceneTable<SCENE_CAP>,
+    pub runtime_conditional_scenes: RuntimeConditionalSceneTable<RULE_CAP>,
     pub context: LightingContext,
     pub sample_time_ms: u64,
     /// Extension-source selection, carried so split renderer replicas track
@@ -479,48 +513,59 @@ pub enum ReplicaSlotError {
 /// The lighting mailbox serializes access. Keeping the large snapshot out of
 /// [`StandardCommand`] prevents command-channel capacity from multiplying its
 /// RAM cost on small MCUs.
-pub struct StandardReplicaSlot<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0> {
+pub struct StandardReplicaSlot<const OVERLAY_CAP: usize, const SCENE_CAP: usize = 0, const RULE_CAP: usize = 0> {
     // An empty Vec has no payload niche tag, allowing static storage in BSS.
-    value: BlockingMutex<RawMutex, RefCell<heapless::Vec<StandardReplicaState<OVERLAY_CAP, SCENE_CAP>, 1>>>,
+    value: BlockingMutex<RawMutex, RefCell<heapless::Vec<StandardReplicaState<OVERLAY_CAP, SCENE_CAP, RULE_CAP>, 1>>>,
 }
 
-impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize> StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP> {
+impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize, const RULE_CAP: usize>
+    StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP, RULE_CAP>
+{
     pub const fn new() -> Self {
         Self {
             value: BlockingMutex::new(RefCell::new(heapless::Vec::new())),
         }
     }
 
-    pub fn put(&self, state: StandardReplicaState<OVERLAY_CAP, SCENE_CAP>) -> Result<(), ReplicaSlotError> {
+    pub fn put(&self, state: StandardReplicaState<OVERLAY_CAP, SCENE_CAP, RULE_CAP>) -> Result<(), ReplicaSlotError> {
         self.value
             .lock(|value| value.borrow_mut().push(state).map_err(|_| ReplicaSlotError::Busy))
     }
 
-    pub fn take(&self) -> Result<StandardReplicaState<OVERLAY_CAP, SCENE_CAP>, ReplicaSlotError> {
+    pub fn take(&self) -> Result<StandardReplicaState<OVERLAY_CAP, SCENE_CAP, RULE_CAP>, ReplicaSlotError> {
         self.value
             .lock(|value| value.borrow_mut().pop().ok_or(ReplicaSlotError::Empty))
     }
 }
 
-impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize> Default for StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP> {
+impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize, const RULE_CAP: usize> Default
+    for StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP, RULE_CAP>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize> fmt::Debug for StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP> {
+impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize, const RULE_CAP: usize> fmt::Debug
+    for StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP, RULE_CAP>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StandardReplicaSlot").finish_non_exhaustive()
     }
 }
 
-impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize> PartialEq for StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP> {
+impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize, const RULE_CAP: usize> PartialEq
+    for StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP, RULE_CAP>
+{
     fn eq(&self, other: &Self) -> bool {
         core::ptr::eq(self, other)
     }
 }
 
-impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize> Eq for StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP> {}
+impl<const OVERLAY_CAP: usize, const SCENE_CAP: usize, const RULE_CAP: usize> Eq
+    for StandardReplicaSlot<OVERLAY_CAP, SCENE_CAP, RULE_CAP>
+{
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StandardError {
