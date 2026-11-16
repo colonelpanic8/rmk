@@ -301,6 +301,7 @@ impl<'a> RynkService<'a> {
             | Cmd::GetLightingExtendedRuntimeConditionalScenes => Some(false),
             #[cfg(feature = "_ble")]
             Cmd::GetBleName => Some(false),
+            Cmd::GetComboDefinition | Cmd::GetComboDefinitionBulk => Some(false),
             _ => None,
         }
     }
