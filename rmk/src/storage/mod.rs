@@ -565,6 +565,30 @@ impl<F: AsyncNorFlash> crate::core_traits::Runnable for Storage<F> {
         loop {
             let (message, reply_id) = FLASH_CHANNEL.receive().await;
             let result = match message {
+                // A host resending a row (a retry after `Busy`, Vial's whole-buffer write) leaves
+                // flash alone when every cell is already stored. Cells compare by their encoding:
+                // `KeyAction`'s `==` ignores the tap-hold profile, which flash must keep.
+                #[cfg(feature = "host")]
+                FlashOperationMessage::Store(StorageItem::KeymapSegment {
+                    layer,
+                    row,
+                    col,
+                    actions,
+                }) if matches!(
+                    self.fetch(StorageKey::KeymapSegment { layer, row, col }).await,
+                    Ok(Some(StorageValue::KeymapSegment(stored)))
+                        if stored.len() == actions.len()
+                            && stored.iter().zip(&actions).all(|(stored, action)| {
+                                let (mut a, mut b) = ([0u8; 16], [0u8; 16]);
+                                matches!(
+                                    (postcard::to_slice(stored, &mut a), postcard::to_slice(action, &mut b)),
+                                    (Ok(a), Ok(b)) if a == b
+                                )
+                            })
+                ) =>
+                {
+                    Ok(None)
+                }
                 FlashOperationMessage::Store(item) => {
                     self.put(item).await.map(|_| None).map_err(print_storage_error::<F>)
                 }
@@ -1064,6 +1088,47 @@ mod tests {
             row[KEYMAP_SEGMENT_KEYS] = a;
             assert_eq!(data.keymap[1][1], row);
             assert_eq!(data.keymap[1][0], [c; COLS - 1]);
+        });
+    }
+
+    /// Resending a stored row costs no flash write, but a row whose only change is a tap-hold
+    /// profile is written: `KeyAction`'s `==` cannot see that difference.
+    #[cfg(feature = "host")]
+    #[test]
+    fn an_unchanged_row_segment_is_not_stored_again() {
+        use rmk_types::action::Action;
+
+        use crate::core_traits::Runnable;
+
+        let tap_hold = |profile| KeyAction::TapHold(Action::No, Action::No, profile);
+        let segment = |profile| StorageItem::KeymapSegment {
+            layer: 0,
+            row: 0,
+            col: 0,
+            actions: heapless::Vec::from_iter([tap_hold(profile), KeyAction::No]),
+        };
+        assert_eq!(tap_hold(0), tap_hold(1));
+
+        block_on(async {
+            let part = Part::new();
+            let mut storage = new_storage(async_flash_wrapper(part.clone())).await;
+            crate::test_support::clear_flash_channel();
+            let writes = async {
+                store(segment(0)).await.unwrap();
+                let stored = part.writes();
+                store(segment(0)).await.unwrap();
+                assert_eq!(part.writes(), stored, "an unchanged row was written again");
+                store(segment(1)).await.unwrap();
+                assert!(part.writes() > stored, "a tap-hold profile change was not written");
+            };
+            match select(storage.run(), writes).await {
+                Either::First(never) => never,
+                Either::Second(()) => {}
+            }
+            assert!(matches!(
+                storage.fetch(StorageKey::KeymapSegment { layer: 0, row: 0, col: 0 }).await,
+                Ok(Some(StorageValue::KeymapSegment(saved))) if matches!(saved[0], KeyAction::TapHold(_, _, 1))
+            ));
         });
     }
 
