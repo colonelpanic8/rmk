@@ -141,8 +141,6 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
             }
         }
 
-        // The loop only exits on disconnect.
-        app_link.send(false);
     }
 
     async fn handle_central_message(&mut self, split_message: SplitMessage) {
@@ -165,9 +163,9 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
             }
             SplitMessage::KeyboardIndicator(indicator) => {
                 // Publish KeyboardIndicator event
-                publish_event(LedIndicatorEvent::new(
-                    rmk_types::led_indicator::LedIndicator::from_bits(indicator),
-                ));
+                let indicator = rmk_types::led_indicator::LedIndicator::from_bits(indicator);
+                crate::keyboard::set_current_led_indicator(indicator);
+                publish_event(LedIndicatorEvent::new(indicator));
             }
             SplitMessage::Layer(layer) => {
                 // Publish Layer event
@@ -177,11 +175,10 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
             SplitMessage::Wpm(wpm) => publish_event(WpmUpdateEvent::new(wpm)),
             #[cfg(feature = "display")]
             SplitMessage::Modifier(bits) => {
-                publish_event(ModifierEvent {
-                    modifier: rmk_types::modifier::ModifierCombination::from_bits(bits),
-                });
+                crate::state::set_modifier_state(rmk_types::modifier::ModifierCombination::from_bits(bits));
             }
             SplitMessage::SleepState(sleeping) => {
+                crate::state::set_sleeping(sleeping);
                 publish_event(SleepStateEvent::new(sleeping));
             }
             // --- dfu_split: firmware update handlers ---
