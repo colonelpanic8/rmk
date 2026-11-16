@@ -21,7 +21,7 @@ steps = [
   { rynk = { cmd = "GetAutoSwitchTransport", reply = true } },
 ]
 
-# Unplugging releases the USB report channel, which queues the all-up report
+# Unplugging releases the USB report channel, which queues the all-up reports
 # each of the cases below expects.
 [[test]]
 name = "the_cable_retargets_the_preference_while_auto_switch_is_on"
@@ -32,7 +32,7 @@ steps = [
   { usb = "Configured" },
   { rynk = { cmd = "GetConnectionType", reply = "Usb" } },
 ]
-expect = [[]]
+expect = [[], { mouse = {} }, { consumer = [] }, { system = [] }]
 
 [[test]]
 name = "the_cable_is_ignored_while_auto_switch_is_off"
@@ -44,7 +44,7 @@ steps = [
   { usb = "Configured" },
   { rynk = { cmd = "GetConnectionType", reply = "Ble" } },
 ]
-expect = [[]]
+expect = [[], { mouse = {} }, { consumer = [] }, { system = [] }]
 
 [[test]]
 name = "a_manual_switch_holds_until_the_cable_next_moves"
@@ -56,4 +56,4 @@ steps = [
   { usb = "Configured" },
   { rynk = { cmd = "GetConnectionType", reply = "Usb" } },
 ]
-expect = [[]]
+expect = [[], { mouse = {} }, { consumer = [] }, { system = [] }]
