@@ -183,6 +183,8 @@ mod force_tests {
                 row_offset: 0,
                 col_offset: 0,
             },
+            #[cfg(feature = "dfu_split")]
+            crate::split::dfu::UpdatePolicy::MatchHash,
         )
     }
 
