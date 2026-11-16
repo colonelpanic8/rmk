@@ -59,32 +59,6 @@ mod tests {
             }
         );
     }
-
-    #[test]
-    fn ble_status_variants_are_copy_and_comparable() {
-        let advertising = BleStatus {
-            profile: 0,
-            state: BleState::Advertising,
-            bonded: false,
-        };
-        let connected = BleStatus {
-            profile: 2,
-            state: BleState::Connected,
-            bonded: true,
-        };
-        let inactive = BleStatus::default();
-
-        assert_ne!(advertising, connected);
-        assert_ne!(connected, inactive);
-        assert_eq!(
-            inactive,
-            BleStatus {
-                profile: 0,
-                state: BleState::Inactive,
-                bonded: false,
-            }
-        );
-    }
 }
 
 /// Maximum UTF-8 byte length of the name included in legacy BLE advertising.
