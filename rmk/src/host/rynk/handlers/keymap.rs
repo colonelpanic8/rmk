@@ -11,7 +11,7 @@ use rmk_types::protocol::rynk::{
 };
 
 use super::super::RynkService;
-use super::bulk::{bulk_page, take_bulk, take_element};
+use super::bulk::{bulk_count, bulk_page, take_bulk, take_element};
 use super::{Handle, HandleBulk};
 
 impl Handle<GetKeyAction> for RynkService<'_> {
@@ -24,9 +24,13 @@ impl Handle<GetKeyAction> for RynkService<'_> {
 impl Handle<SetKeyAction> for RynkService<'_> {
     async fn handle(&self, set: SetKeyRequest) -> Result<(), RynkError> {
         self.check_key_position(&set.position)?;
+        let set_action = self
+            .ctx
+            .set_action(set.position.layer, set.position.row, set.position.col, set.action);
         self.ctx
-            .set_action(set.position.layer, set.position.row, set.position.col, set.action)
+            .persist_bounded(1, set_action)
             .await
+            .ok_or(RynkError::Busy)?
             .or(Err(RynkError::StorageFault))
     }
 }
@@ -182,16 +186,24 @@ impl HandleBulk<SetKeymapBulk> for RynkService<'_> {
         let [layer, start_row, start_col] = take_element::<[u8; 3]>(&mut cursor)?;
         let start = self.keymap_flat_start(layer, start_row, start_col)?;
         let (rows, cols, num_layers) = self.ctx.keymap_dimensions();
+        let count = bulk_count(cursor)?;
+        let cells = take_bulk::<KeyAction>(&mut cursor, start, num_layers * rows * cols)?;
         // Bulk order advances columns, then rows, then layers.
-        for (offset, action) in take_bulk::<KeyAction>(&mut cursor, start, num_layers * rows * cols)? {
-            let layer = (offset / (rows * cols)) as u8;
-            let row = (offset / cols % rows) as u8;
-            let col = (offset % cols) as u8;
-            self.ctx
-                .set_action(layer, row, col, action)
-                .await
-                .or(Err(RynkError::StorageFault))?;
-        }
+        let apply = async {
+            for (offset, action) in cells {
+                let layer = (offset / (rows * cols)) as u8;
+                let row = (offset / cols % rows) as u8;
+                let col = (offset % cols) as u8;
+                self.ctx
+                    .set_action(layer, row, col, action)
+                    .await
+                    .or(Err(RynkError::StorageFault))?;
+            }
+            Ok::<_, RynkError>(())
+        };
+        // Answer `Busy` rather than park this session on a flash queue the
+        // storage task may hold for a whole page migration.
+        self.ctx.persist_bounded(count, apply).await.ok_or(RynkError::Busy)??;
         msg.encode_response(&())
     }
 }
