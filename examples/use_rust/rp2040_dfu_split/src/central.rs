@@ -48,25 +48,26 @@ const PERIPHERAL1_BIN: &[u8] = include_bytes!(concat!(
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     info!("RMK start!");
-    let p = embassy_rp::init(Default::default());
+    let mut p = embassy_rp::init(Default::default());
+    let serial_number = rmk::config::rp2040_serial_number(p.FLASH.reborrow());
 
     let driver = Driver::new(p.USB, Irqs);
 
     let (row_pins, col_pins) = config_matrix_pins_rp!(peripherals: p, input: [PIN_6, PIN_7], output: [PIN_19, PIN_20]);
 
     let flash_mutex = FlashMutex::new(rmk::storage::async_flash_wrapper(Flash::<
-        _,
-        embassy_rp::flash::Blocking,
+        embassy_rp::mode::Blocking,
         { rmk::dfu::FLASH_SIZE },
     >::new_blocking(p.FLASH)));
     let (storage_partition, state_partition, dfu_partition) = partitions_from_linkerscript(&flash_mutex);
 
     let keyboard_device_config = DeviceConfig {
+        serial_number,
         vid: 0x4c4b,
         pid: 0x4643,
+        bcd_version: 0x0010,
         manufacturer: "Haobo",
         product_name: "RMK Keyboard RP2040 embassy-boot split use_rust example",
-        serial_number: "vial:f64c2b3c:000001",
     };
 
     let vial_config = VialConfig::new(VIAL_KEYBOARD_ID, VIAL_KEYBOARD_DEF, &[(0, 0), (1, 1)]);
