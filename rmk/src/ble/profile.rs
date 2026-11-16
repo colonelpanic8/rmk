@@ -5,13 +5,14 @@ use bt_hci::{cmd::le::LeSetPhy, controller::ControllerCmdAsync};
 use embassy_futures::select::{Either, select, select_array};
 use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
+use rmk_types::connection::ConnectionType;
 use trouble_host::prelude::*;
 use trouble_host::{BondInformation, LongTermKey};
 
 use super::ble_server::CCCD_TABLE_SIZE;
 use crate::NUM_BLE_PROFILE;
 use crate::channel::BLE_PROFILE_CHANNEL;
-use crate::state::{current_profile, set_ble_bonded, set_ble_profile};
+use crate::state::{current_profile, set_ble_bonded, set_ble_profile, set_preferred};
 #[cfg(feature = "storage")]
 use crate::storage::{StorageItem, StorageKey, StorageValue, read, store};
 
@@ -293,6 +294,12 @@ where
     pub(crate) async fn update_profile(&self) {
         loop {
             let action = BLE_PROFILE_CHANNEL.receive().await;
+            if matches!(
+                action,
+                BleProfileAction::Switch(_) | BleProfileAction::Previous | BleProfileAction::Next
+            ) {
+                set_preferred(ConnectionType::Ble).await;
+            }
             let current = current_profile();
             let profile = match action {
                 BleProfileAction::Switch(profile) if profile == current => continue,
