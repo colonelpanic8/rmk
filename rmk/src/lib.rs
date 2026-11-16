@@ -43,9 +43,13 @@ compile_error!(
      runs over the wired split transport. Disable `dfu_split` on BLE builds."
 );
 
-// The DFU features are layered: `dfu` is the base, and everything on top of
-// it needs a chip backend (`dfu_rp` or `dfu_nrf`) to provide the updater.
-#[cfg(all(feature = "_dfu", not(any(feature = "dfu_rp", feature = "dfu_nrf"))))]
+// Firmware DFU builds require a chip backend. Host tests use the generic
+// updater through the test-only `std` feature.
+#[cfg(all(
+    feature = "_dfu",
+    not(feature = "std"),
+    not(any(feature = "dfu_rp", feature = "dfu_nrf"))
+))]
 compile_error!("feature `_dfu` requires `dfu_rp` or `dfu_nrf`");
 #[cfg(all(feature = "dfu_split", not(feature = "_dfu")))]
 compile_error!("feature `dfu_split` requires the `_dfu` feature — enable `dfu_rp` or `dfu_nrf`");
@@ -118,6 +122,7 @@ pub mod layout_macro;
 pub mod light;
 pub mod matrix;
 pub mod processor;
+pub mod sleep;
 #[cfg(feature = "split")]
 pub mod split;
 pub mod state;
@@ -141,8 +146,9 @@ pub async fn initialize_keymap<
     const COL: usize,
     const NUM_LAYER: usize,
     const NUM_ENCODER: usize,
+    const NUM_TOUCHPAD: usize,
 >(
-    data: &'a mut KeymapData<ROW, COL, NUM_LAYER, NUM_ENCODER>,
+    data: &'a mut KeymapData<ROW, COL, NUM_LAYER, NUM_ENCODER, NUM_TOUCHPAD>,
     behavior_config: &'a mut config::BehaviorConfig,
     positional_config: &'a PositionalConfig<ROW, COL>,
 ) -> KeyMap<'a> {
@@ -157,13 +163,14 @@ pub async fn initialize_keymap_and_storage<
     const COL: usize,
     const NUM_LAYER: usize,
     const NUM_ENCODER: usize,
+    const NUM_TOUCHPAD: usize,
 >(
-    data: &'a mut KeymapData<ROW, COL, NUM_LAYER, NUM_ENCODER>,
+    data: &'a mut KeymapData<ROW, COL, NUM_LAYER, NUM_ENCODER, NUM_TOUCHPAD>,
     flash: F,
     storage_config: &config::StorageConfig,
     behavior_config: &'a mut config::BehaviorConfig,
     positional_config: &'a PositionalConfig<ROW, COL>,
-) -> (KeyMap<'a>, Storage<F, ROW, COL, NUM_LAYER, NUM_ENCODER>) {
+) -> (KeyMap<'a>, Storage<F>) {
     // `mut` is only taken by the host build's keymap restore below.
     #[cfg_attr(not(feature = "host"), allow(unused_mut))]
     let mut storage = Storage::new(flash, storage_config).await;

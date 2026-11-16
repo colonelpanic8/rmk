@@ -35,8 +35,8 @@ impl MatrixState {
         }
     }
     pub fn update(&mut self, event: &KeyboardEvent) {
-        use crate::event::{KeyPos, KeyboardEventPos};
-        if let KeyboardEventPos::Key(KeyPos { row, col }) = event.pos {
+        use crate::event::{KeyPos, KeyboardEventSource};
+        if let KeyboardEventSource::Key(KeyPos { row, col }) = event.source {
             if row as usize >= self.row || col as usize >= self.col {
                 warn!("Matrix read out of bounds");
                 return;
@@ -411,7 +411,8 @@ where
 
                     // If there's key still pressed, always refresh the self.scan_start
                     #[cfg(feature = "async_matrix")]
-                    if self.key_states[col_idx][row_idx].pressed {
+                    if self.key_states[col_idx][row_idx].pressed || matches!(debounce_state, DebounceState::InProgress)
+                    {
                         self.rescan_needed = true;
                     }
                 }

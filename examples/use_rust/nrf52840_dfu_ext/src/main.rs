@@ -37,7 +37,7 @@ bind_interrupts!(struct Irqs {
     TWISPI0 => spim::InterruptHandler<peripherals::TWISPI0>;
 });
 
-type ExternalFlash = W25qNorFlash<spim::Spim<'static>, Output<'static>>;
+type ExternalFlash = W25qNorFlash<spim::Spim<'static, embassy_nrf::mode::Async>, Output<'static>>;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -60,7 +60,7 @@ async fn main(_spawner: Spawner) {
     // External DFU flash via SPIM0 (TWISPI0) — nRF SPIM is natively async.
     let mut dfu_spi_cfg = spim::Config::default();
     dfu_spi_cfg.frequency = spim::Frequency::M8;
-    let dfu_spi = spim::Spim::new(p.TWISPI0, Irqs, p.P0_17, p.P0_20, p.P0_22, dfu_spi_cfg);
+    let dfu_spi = spim::Spim::new(p.TWISPI0, p.P0_17, p.P0_22, p.P0_20, Irqs, dfu_spi_cfg);
     let dfu_cs = Output::new(p.P0_24, Level::High, OutputDrive::Standard);
 
     let ext_flash = ExternalFlash::new(dfu_spi, dfu_cs, 8 * 1024 * 1024);
@@ -84,7 +84,7 @@ async fn main(_spawner: Spawner) {
         pid: 0x4643,
         manufacturer: "Haobo",
         product_name: "RMK Keyboard nRF52840 DFU ext",
-        serial_number: "vial:f64c2b3c:000001",
+        ..DeviceConfig::default()
     };
 
     let vial_config = VialConfig::new(VIAL_KEYBOARD_ID, VIAL_KEYBOARD_DEF, &[(0, 0), (1, 1)]);
