@@ -93,6 +93,7 @@ pub(crate) enum BleProfileAction {
     Previous,
     Next,
     ClearBond,
+    ClearAllBonds,
     /// Clear the bond for an explicit slot, regardless of which slot is
     /// currently active. Rynk's `Cmd::ClearBleProfile` issues this so a host
     /// tool can wipe any bond without first switching to it.
@@ -317,6 +318,12 @@ where
                 }
                 BleProfileAction::ClearBond => {
                     self.clear_bond(current);
+                    return;
+                }
+                BleProfileAction::ClearAllBonds => {
+                    for slot in 0..NUM_BLE_PROFILE as u8 {
+                        self.clear_bond(slot);
+                    }
                     return;
                 }
                 BleProfileAction::ClearSlot(slot) => {
