@@ -123,8 +123,8 @@ impl<'a> KeyboardContext<'a> {
 
     pub async fn set_action(&self, layer: u8, row: u8, col: u8, action: KeyAction) -> Result<(), ()> {
         let (rows, cols, _) = self.keymap_dimensions();
-        let start = (layer as usize * rows + row as usize) * cols + col as usize;
-        self.set_actions(start, &mut core::iter::once(action)).await
+        self.set_actions((layer as usize * rows + row as usize) * cols + col as usize, [action])
+            .await
     }
 
     /// Write `actions` into consecutive cells from flat index `start`, in the order
@@ -132,10 +132,9 @@ impl<'a> KeyboardContext<'a> {
     ///
     /// Each row segment the cells fall in is persisted whole as one flash item, so a
     /// caller that covers a segment in one call pays for one item rather than one per cell.
-    /// `actions` is a trait object so every caller shares one copy of this code.
-    pub async fn set_actions(&self, start: usize, actions: &mut dyn Iterator<Item = KeyAction>) -> Result<(), ()> {
+    pub async fn set_actions(&self, start: usize, actions: impl IntoIterator<Item = KeyAction>) -> Result<(), ()> {
         let (rows, cols, num_layers) = self.keymap_dimensions();
-        let mut actions = actions.peekable();
+        let mut actions = actions.into_iter().peekable();
         let mut offset = start;
         while offset < num_layers * rows * cols && actions.peek().is_some() {
             let (layer, row, col) = (offset / (rows * cols), offset / cols % rows, offset % cols);

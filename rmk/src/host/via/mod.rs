@@ -228,13 +228,13 @@ impl<'a> VialService<'a> {
                 let offset = BigEndian::read_u16(&report.output_data[1..3]);
                 // size <= 28
                 let size = report.output_data[3];
-                let mut keycodes = report.output_data[4..]
+                let keycodes = report.output_data[4..]
                     .as_chunks::<2>()
                     .0
                     .iter()
                     .take(size as usize)
                     .map(|keycode| from_via_keycode(LittleEndian::read_u16(keycode)));
-                let _ = self.ctx.set_actions(offset as usize, &mut keycodes).await;
+                let _ = self.ctx.set_actions(offset as usize, keycodes).await;
             }
             ViaCommand::DynamicKeymapGetEncoder => {
                 warn!("Keymap get encoder -- not supported");

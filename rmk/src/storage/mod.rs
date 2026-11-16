@@ -1019,9 +1019,7 @@ mod tests {
             // both of its segments and open row 1. Then one key in the last layer's last segment.
             crate::test_support::clear_flash_channel();
             let write = async {
-                ctx.set_actions(KEYMAP_SEGMENT_KEYS - 2, &mut [b; 8].into_iter())
-                    .await
-                    .unwrap();
+                ctx.set_actions(KEYMAP_SEGMENT_KEYS - 2, [b; 8]).await.unwrap();
                 ctx.set_action(1, 1, COLS as u8 - 1, c).await.unwrap();
             };
             match select(storage.run(), write).await {
