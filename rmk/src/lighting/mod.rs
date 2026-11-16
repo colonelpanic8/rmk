@@ -15,6 +15,7 @@ pub mod compositor;
 pub mod context;
 pub mod effect;
 pub mod output;
+pub mod packed;
 pub mod processor;
 pub mod rmk_state;
 pub mod selector;
@@ -31,6 +32,10 @@ pub use context::{
 pub use effect::{BuiltinEffect, EffectSample, LightingEffect};
 pub use output::{
     BrightnessTransform, OutputSelection, RouteError, RoutedFrameSink, RoutedPixel, ValidatedRouting, VisitSummary,
+};
+pub use packed::{
+    PackedConditionalScenes, PackedRules, pack_rule_bytes, pack_rule_effects, packed_rule_bytes_len,
+    packed_rule_effect_count,
 };
 pub use processor::{LightingMailbox, LightingProcessor};
 pub use rmk_state::{KeymapLightingState, TooManyLayers};

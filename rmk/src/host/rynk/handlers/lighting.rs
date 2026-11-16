@@ -400,14 +400,17 @@ impl Handle<GetLightingConditionalScenes> for RynkService<'_> {
         let result = controller(self).and_then(|controller| {
             check_topology_revision(controller, req.topology_revision)?;
             let total_count = count(controller.conditional_scenes.len());
-            let start = (req.offset as usize).min(controller.conditional_scenes.len());
-            let end = (start + LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE).min(controller.conditional_scenes.len());
             let mut items: Vec<LightingConditionalSceneCell, LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE> = Vec::new();
-            for cell in &controller.conditional_scenes[start..end] {
+            for cell in controller
+                .conditional_scenes
+                .iter()
+                .skip(req.offset as usize)
+                .take(LIGHTING_CONDITIONAL_SCENE_CHUNK_SIZE)
+            {
                 items
                     .push(
                         controller
-                            .conditional_scene_cell_to_wire(*cell)
+                            .conditional_scene_cell_to_wire(cell)
                             .ok_or(LightingError::InvalidRequest)?,
                     )
                     .map_err(|_| LightingError::InvalidRequest)?;
@@ -1931,7 +1934,8 @@ mod tests {
     use crate::lighting::{
         BatteryCondition, BuiltinEffect, ChargeCondition, ConditionSet, ConditionalSceneCell, LayerCondition,
         LayerScene, LedId, LedMetadata, LightingNodeId as CoreNodeId, LightingRouting, LightingTopology, MatrixSize,
-        OutputId, OutputMetadata, PhysicalRoute, Rgb8, SceneCell, ZoneSpan,
+        OutputId, OutputMetadata, PackedRules, PhysicalRoute, Rgb8, SceneCell, ZoneSpan, pack_rule_bytes,
+        pack_rule_effects, packed_rule_bytes_len, packed_rule_effect_count,
     };
     use crate::physical_layout::{
         Coordinate, Extent, KeyPosition, KeySize, PhysicalKey, PhysicalLayout, Point3, Rotation,
@@ -1998,7 +2002,7 @@ mod tests {
         layer: 0,
         cells: &COMPILED_CELLS,
     }];
-    static CONDITIONAL_CELLS: [ConditionalSceneCell<BuiltinEffect>; 1] = [ConditionalSceneCell {
+    const CONDITIONAL_CELLS: [ConditionalSceneCell<BuiltinEffect>; 1] = [ConditionalSceneCell {
         conditions: ConditionSet {
             layer: Some(LayerCondition { layer: 1, active: true }),
             battery: Some(BatteryCondition {
@@ -2020,6 +2024,15 @@ mod tests {
             color: Rgb8::new(9, 8, 7),
         },
     }];
+    static CONDITIONAL_RULE_BYTES: [u8; packed_rule_bytes_len(&CONDITIONAL_CELLS)] =
+        pack_rule_bytes(&CONDITIONAL_CELLS);
+    static CONDITIONAL_RULE_EFFECTS: [BuiltinEffect; packed_rule_effect_count(&CONDITIONAL_CELLS)] =
+        pack_rule_effects(&CONDITIONAL_CELLS);
+    const CONDITIONAL_RULES: PackedRules<'static> = PackedRules::new(
+        &CONDITIONAL_RULE_BYTES,
+        &CONDITIONAL_RULE_EFFECTS,
+        CONDITIONAL_CELLS.len(),
+    );
 
     fn descriptor() -> super::super::super::lighting::RynkLightingDescriptor<'static> {
         super::super::super::lighting::RynkLightingDescriptor {
@@ -2630,18 +2643,18 @@ mod tests {
                 RynkLightingController::new(&mailbox, descriptor(), 8)
                     .with_scene_capacity(4)
                     .with_runtime_conditional_scene_capacity(4)
-                    .with_conditional_scenes(&CONDITIONAL_CELLS)
+                    .with_conditional_scenes(CONDITIONAL_RULES)
                     .with_controls(controls),
             );
             let session = session();
 
-            let core = LightingMailbox::<StandardCommand<2, 4>, StandardReply, StandardError, 1>::new();
-            let mut adapter = super::super::super::lighting::StandardRynkLightingAdapter::<2, 1, 4>::new(
+            let core = LightingMailbox::<StandardCommand<2, 4, 4>, StandardReply, StandardError, 1>::new();
+            let mut adapter = super::super::super::lighting::StandardRynkLightingAdapter::<2, 1, 4, 4>::new(
                 &mailbox,
                 &core,
                 descriptor().topology,
             );
-            let mut engine: StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4> =
+            let mut engine: StandardLightingEngine<'static, EmptySource, EmptySource, 2, 2, 4, 4> =
                 StandardLightingEngine::new(
                     BackgroundState::default(),
                     LayerScenes {
