@@ -1,8 +1,8 @@
 use core::sync::atomic::Ordering;
 
 use embassy_usb::Handler;
-use embassy_usb::class::dfu::consts::{DfuAttributes, Status};
-use embassy_usb::class::dfu::dfu_mode::{self, DfuState};
+use embassy_usb::class::dfu::device::consts::{DfuAttributes, Status};
+use embassy_usb::class::dfu::device::dfu_mode::{self, DfuState};
 use embassy_usb::control::{InResponse, OutResponse, Recipient, Request, RequestType};
 use embassy_usb::driver::Direction;
 use embassy_usb::types::{InterfaceNumber, StringIndex};
@@ -15,7 +15,7 @@ use crate::event::{DfuCmdEvent, DfuStatusEvent, publish_event};
 /// Synchronous DFU handler for every alternate setting (alt 0 = central,
 /// alt 1..N = split peripherals).
 ///
-/// Runs inside the USB interrupt. It never touches flash: every download
+/// Runs in the USB device task. It never touches flash: every download
 /// `start`/`write`/`finish`/`system_reset` is forwarded to the async
 /// [`FlashDfuHandler`](crate::dfu::FlashDfuHandler) updater task through
 /// the event system ([`DfuCmdEvent`](crate::event::DfuCmdEvent)). The DFU
@@ -154,12 +154,6 @@ struct DfuStringProvider {
 }
 
 impl Handler for DfuStringProvider {
-    fn control_out(&mut self, _req: Request, _data: &[u8]) -> Option<OutResponse> {
-        None
-    }
-    fn control_in<'a>(&'a mut self, _req: Request, _buf: &'a mut [u8]) -> Option<InResponse<'a>> {
-        None
-    }
     fn get_string(&mut self, index: StringIndex, _lang_id: u16) -> Option<&'static str> {
         (index == self.string_idx).then_some(self.string_val)
     }

@@ -162,9 +162,10 @@ async fn main(_spawner: Spawner) {
     let keyboard_device_config = DeviceConfig {
         vid: 0x4c4b,
         pid: 0x4644,
+        bcd_version: 0x0010,
         manufacturer: "RMK & SiFli-rs",
         product_name: "RMK SF32LB52",
-        serial_number: "vial:f64c2b3c:000002",
+        serial_number: "000002",
     };
 
     let vial_config = VialConfig::new(VIAL_KEYBOARD_ID, VIAL_KEYBOARD_DEF, &[(0, 0), (0, 3)]);
@@ -254,7 +255,7 @@ async fn main(_spawner: Spawner) {
 
     info!("Starting RMK dual-mode (USB + BLE) runner...");
 
-    let mut usb_transport = UsbTransport::new(usb_driver, rmk_config.device_config);
+    let mut usb_transport = UsbTransport::new(usb_driver, rmk_config.device_config.clone());
     let mut ble_transport = BleTransport::new(&stack, rmk_config).await;
     let mut wpm_processor = WpmProcessor::new();
 

@@ -10,103 +10,12 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 resolver = "2"
 
-[dependencies]
-rmk-macro = { version = "=0.8.0", path = "../rmk-macro" }
-rmk-types = { version = "=0.4.0", path = "../rmk-types" }
-embedded-hal = { version = "1.0.0" }
-embedded-hal-async = { version = "1.0.0" }
-embedded-io-async = { version = "0.7" }
-embedded-storage = { version = "0.3", optional = true }
-embedded-storage-async = { version = "0.4", optional = true }
-
-embassy-embedded-hal = { version = "0.6", optional = true }
-embassy-time = { version = "0.5" }
-embassy-usb = { version = "0.6", features = [
-    "max-interface-count-8",
-    "max-handler-count-8",
-] }
-embassy-sync = { version = "0.8" }
-embassy-futures = { version = "0.1" }
-embassy-usb-logger = { version = "0.6", optional = true }
-
-futures = { version = "0.3", default-features = false, features = [
-    "async-await",
-] }
-
-heapless = "0.9"
-usbd-hid = "0.10"
-static_cell = "2"
-sequential-storage = { version = "8.0.1", features = ["postcard"] }
-
-defmt = { version = "1", optional = true }
-log = { version = "0.4", optional = true }
-byteorder = { version = "1", default-features = false, optional = true }
-serde = { version = "1", default-features = false, features = ["derive"] }
-postcard = { version = "1", features = ["experimental-derive"] }
-
-# Used in macro
-paste = "1"
-
-# Display dependencies
-ssd1306 = { version = "0.10", optional = true, features = ["async"] }
-oled_async = { version = "0.2.1", optional = true, features = ["i2c"] }
-lcd-async = { version = "0.1", optional = true, default-features = false }
-embedded-graphics = { version = "0.8", optional = true }
-display-interface = { version = "0.5", optional = true }
-display-interface-i2c = { version = "0.5", optional = true }
-
-# Optional dependencies
-# BLE dependencies
-trouble-host = { version = "0.8", default-features = false, features = [
-    "peripheral",
-    "gatt",
-    "derive",
-    "security",
-    "serde",
-    "default-packet-pool",
-    "default-packet-pool-size-32",
-], optional = true }
-bt-hci = { version = "0.10", optional = true }
-
-# nRF dependencies
-embassy-nrf = { version = "0.11", features = [
-    "unstable-pac",
-    "time",
-], optional = true }
-
-# RP2040 dependencies
-embassy-rp = { version = "0.10", optional = true }
-embassy-hal-internal = { version = "0.5.0", optional = true }
-pio = { version = "0.3.0", optional = true }
-fixed = { version = "1.28.0", optional = true }
-embassy-boot-rp = { version = "0.10.0", optional = true }
-embassy-boot = { version = "0.7", optional = true, default-features = false }
-
-# ESP32 dependencies
-esp-hal = { version = "1.2.0-rc.0", optional = true }
-
-# Document feature
-document-features = "0.2"
-
-[dev-dependencies]
-# A hack for enabling 'std' feature in testing, ref: https://github.com/rust-lang/cargo/issues/2911
-rmk = { path = ".", default-features = false, features = ["std", "log"] }
-# Same unification hack: turn on the `run_tests!` scenario macro for tests only
-rmk-macro = { path = "../rmk-macro", features = ["_simulator"] }
-critical-section = { version = "1.2", features = ["std"] }
-embedded-hal-mock = { version = "0.11.1", features = ["embedded-hal-async"] }
-# Scenario files spell Rynk payloads as data; `run_tests!` forwards them as JSON
-# for the test to deserialize into the real request type. Alloc-only: enabling
-# `serde/std` here would break `ssmarshal`, which implements `serde::de::Error`
-# without a `StdError` impl.
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
-
 [package.metadata.docs.rs]
 features = ["split", "vial", "async_matrix", "_ble"]
 
-# Architecture specific dependencies
-[target.'cfg(all(target_arch = "arm", target_os = "none"))'.dependencies]
-cortex-m = { version = "0.7" }
+[lib]
+# Don't run doctest for lib
+doctest = false
 
 [features]
 default = ["defmt", "storage", "vial", "host_lock", "watchdog"]
@@ -182,17 +91,24 @@ log = ["dep:log", "trouble-host?/log"]
 ## (Despite the historic name, this feature does NOT enable embassy-time/std —
 ## it swaps in the manually-advanced mock clock driven by
 ## `rmk::test_support::test_block_on`.)
-std = [
-    "embassy-time/mock-driver",
-    "embassy-time/generic-queue-128",
-]
+std = ["embassy-time/mock-driver", "embassy-time/generic-queue-128"]
 
 ## Enable display support (traits + processor)
 display = ["dep:embedded-graphics", "rmk-types/display"]
 ## Enable SSD1306 OLED driver
-ssd1306 = ["display", "dep:ssd1306", "dep:display-interface", "dep:display-interface-i2c"]
+ssd1306 = [
+    "display",
+    "dep:ssd1306",
+    "dep:display-interface",
+    "dep:display-interface-i2c",
+]
 ## Enable OLED drivers via oled_async (SH1106, SH1107, SH1108, SSD1309)
-oled_async = ["display", "dep:oled_async", "dep:display-interface", "dep:display-interface-i2c"]
+oled_async = [
+    "display",
+    "dep:oled_async",
+    "dep:display-interface",
+    "dep:display-interface-i2c",
+]
 sh1106 = ["oled_async"]
 sh1107 = ["oled_async"]
 sh1108 = ["oled_async"]
@@ -239,7 +155,7 @@ rp2040 = [
 ]
 
 ## Enable feature if you're using Adafruit nRF52 bootloader and want bootloader jumping key
-adafruit_bl = ["_nrf_ble"]
+adafruit_bl = ["_nrf"]
 
 ## Enable feature if you're using the ZSA Voyager ignition DFU bootloader
 zsa_voyager_bl = []
@@ -247,11 +163,24 @@ zsa_voyager_bl = []
 ## **Experimental.** Enable DFU firmware update support (USB DFU interface).
 ## The flash layout, config, and API can change in any release.
 ## Requires a chip backend (`dfu_rp` or `dfu_nrf`).
-_dfu = ["dep:embedded-storage", "dep:embedded-storage-async", "dep:embassy-embedded-hal", "dep:embassy-boot", "rmk-types/_dfu", "rmk-macro/_dfu"]
+_dfu = [
+    "dep:embedded-storage",
+    "dep:embedded-storage-async",
+    "dep:embassy-embedded-hal",
+    "dep:embassy-boot",
+    "rmk-types/_dfu",
+    "rmk-macro/_dfu",
+]
 ## **Experimental.** Enable RP2040-specific DFU with embassy-boot-rp (implies `dfu` and `rp2040`)
-dfu_rp = ["_dfu", "dep:embassy-boot-rp", "dep:embassy-boot", "rp2040", "rmk-macro/dfu_rp"]
+dfu_rp = [
+    "_dfu",
+    "dep:embassy-boot-rp",
+    "dep:embassy-boot",
+    "rp2040",
+    "rmk-macro/dfu_rp",
+]
 ## **Experimental.** Enable nRF DFU firmware update support (add a chip feature like `nrf52840` too)
-dfu_nrf = ["_dfu", "dep:embassy-boot", "dep:embassy-nrf", "rmk-macro/dfu_nrf"]
+dfu_nrf = ["_dfu", "dep:embassy-boot", "_nrf", "rmk-macro/dfu_nrf"]
 ## **Experimental.** Enable split firmware update support — forward firmware to peripherals over
 ## split link. Requires `dfu_rp` or `dfu_nrf`. Wired split only.
 dfu_split = ["rmk-macro/dfu_split", "rmk-types/dfu_split"]
@@ -261,8 +190,9 @@ dfu_split = ["rmk-macro/dfu_split", "rmk-types/dfu_split"]
 dfu_ext = ["rmk-macro/dfu_ext"]
 
 ## Enable Plover HID stenography support: adds the steno HID descriptor,
-## the steno USB writer endpoint, and the `Action::Steno` variant.
-steno = ["rmk-types/steno"]
+## the steno USB writer endpoint, the `Action::Steno` variant, and build-time
+## validation of `STN()` names in `keyboard.toml`.
+steno = ["rmk-types/steno", "rmk-macro/steno"]
 
 ## Internal feature that indicates no USB is used, this feature will be auto-activated for some chips
 _no_usb = []
@@ -278,49 +208,209 @@ subrating = ["split"]
 ## Internal feature that indicates that subrating is not supported, this will be auto-activated for some chips
 _no_subrating = []
 
+#! ### nRF hardware feature flags
+#!
+# Select the matching chip in the firmware's embassy-nrf dependency.
+## Enable hardware support for nrf54lm20.
+nrf54lm20 = ["_nrf", "_usb_high_speed"]
+## Enable hardware support for nrf54l15.
+nrf54l15 = ["_nrf", "_no_usb"]
+## Enable hardware support for nrf52840.
+nrf52840 = ["_nrf"]
+## Enable hardware support for nrf52833.
+nrf52833 = ["_nrf"]
+## Enable hardware support for nrf52820.
+nrf52820 = ["_nrf", "_no_saadc"]
+## Enable hardware support for nrf52832.
+nrf52832 = ["_nrf", "_no_usb"]
+## Enable hardware support for nrf52811.
+nrf52811 = ["_nrf", "_no_usb"]
+## Enable hardware support for nrf52810.
+nrf52810 = ["_nrf", "_no_usb"]
+_nrf = ["dep:embassy-nrf"]
+
+#! ### ESP hardware feature flags
+#!
+# Select the matching chip in the firmware's esp-hal dependency.
+## Enable hardware support for esp32c3.
+esp32c3 = ["_esp", "_no_usb"]
+## Enable hardware support for esp32c6.
+esp32c6 = ["_esp", "_no_usb"]
+## Enable hardware support for esp32h2.
+esp32h2 = ["_esp", "_no_usb"]
+## Enable hardware support for esp32s3.
+esp32s3 = ["_esp"]
+## Enable hardware support for esp32s31.
+esp32s31 = ["_esp", "_usb_high_speed"]
+_esp = ["dep:esp-hal"]
+
 #! ### BLE feature flags
 #!
 #! ⚠️ Due to the limitation of docs.rs, functions gated by BLE features won't show in docs.rs. You have to head to [`examples`](https://github.com/rmk-rs/rmk/tree/main/examples) folder of RMK repo for their usages.
 ## Enable feature if you want to use nRF54LM20 with BLE.
-nrf54lm20_ble = ["_nrf_ble", "_usb_high_speed"]
+nrf54lm20_ble = ["nrf54lm20", "_nrf_ble"]
 ## Enable feature if you want to use nRF54L15 with BLE.
-nrf54l15_ble = ["_nrf_ble", "_no_usb"]
+nrf54l15_ble = ["nrf54l15", "_nrf_ble"]
 ## Enable feature if you want to use nRF52840 with BLE.
-nrf52840_ble = ["_nrf_ble"]
+nrf52840_ble = ["nrf52840", "_nrf_ble"]
 ## Enable feature if you want to use nRF52833 with BLE.
-nrf52833_ble = ["_nrf_ble"]
+nrf52833_ble = ["nrf52833", "_nrf_ble"]
 ## Enable feature if you want to use nRF52820 with BLE. The chip has no SAADC, so `NrfAdc` is unavailable.
-nrf52820_ble = ["_nrf_ble", "_no_saadc"]
+nrf52820_ble = ["nrf52820", "_nrf_ble"]
 ## Enable feature if you want to use nRF52832 with BLE.
-nrf52832_ble = ["_nrf_ble", "_no_usb"]
+nrf52832_ble = ["nrf52832", "_nrf_ble"]
 ## Enable feature if you want to use nRF52811 with BLE.
-nrf52811_ble = ["_nrf_ble", "_no_usb"]
+nrf52811_ble = ["nrf52811", "_nrf_ble"]
 ## Enable feature if you want to use nRF52810 with BLE.
-nrf52810_ble = ["_nrf_ble", "_no_usb"]
-_nrf_ble = ["_ble", "dep:embassy-nrf", "trouble-host?/security-p256-cortex-m4"]
+nrf52810_ble = ["nrf52810", "_nrf_ble"]
+_nrf_ble = ["_nrf", "_ble", "dep:p256-cortex-m4", "dep:zeroize"]
 
 ## Enable feature if you want to use ESP32C3 with BLE.
-esp32c3_ble = ["_esp_ble", "_no_usb"]
+esp32c3_ble = ["esp32c3", "_esp_ble"]
 ## Enable feature if you want to use ESP32C6 with BLE.
-esp32c6_ble = ["_esp_ble", "_no_usb"]
+esp32c6_ble = ["esp32c6", "_esp_ble"]
 ## Enable feature if you want to use ESP32H2 with BLE.
-esp32h2_ble = ["_esp_ble", "_no_usb"]
+esp32h2_ble = ["esp32h2", "_esp_ble"]
 ## Enable feature if you want to use ESP32S3 with BLE.
-esp32s3_ble = ["_esp_ble"]
-_esp_ble = ["_ble", "dep:esp-hal"]
+esp32s3_ble = ["esp32s3", "_esp_ble"]
+## Enable feature if you want to use ESP32-S31 with BLE and high-speed USB.
+esp32s31_ble = ["esp32s31", "_esp_ble"]
+_esp_ble = ["_esp", "_ble", "embassy-crypto-rustcrypto/embassy-crypto-p256-ecdh"]
 
 ## Enable feature if you want to use RP2040W with BLE.
-pico_w_ble = ["_ble", "_no_subrating", "dep:embassy-rp"]
+pico_w_ble = ["_ble", "_no_subrating", "dep:embassy-rp", "embassy-crypto-rustcrypto/embassy-crypto-p256-ecdh"]
 
 ## Enable feature if you want to use SF32LB52x with BLE.
-sf32lb52x_ble = ["_ble"]
+sf32lb52x_ble = ["_ble", "embassy-crypto-rustcrypto/embassy-crypto-p256-ecdh"]
 
 ## Enable passkey entry support for BLE pairing
 passkey_entry = ["_ble", "rmk-types/passkey_entry"]
 
 ## Enable feature if you want to use trouble BLE stack
-_ble = ["dep:trouble-host", "dep:bt-hci", "storage", "rmk-types/_ble"]
+_ble = ["dep:trouble-host", "dep:bt-hci", "dep:embassy-crypto", "dep:embassy-crypto-rustcrypto", "dep:rand_chacha", "storage", "rmk-types/_ble"]
 
-[lib]
-# Don't run doctest for lib
-doctest = false
+## Enable extended HCI advertising, scanning and connecting. Disabled by default.
+## Requires controller support; nRF SDC needs its `central` and `peripheral` features.
+ext_adv = ["_ble", "trouble-host?/per-connection-address", "rmk-macro/ext_adv"]
+
+[dependencies]
+rmk-macro = { version = "=0.8.0", path = "../rmk-macro" }
+rmk-types = { version = "=0.4.0", path = "../rmk-types" }
+
+embedded-hal = { version = "1.0.0" }
+embedded-hal-async = { version = "1.0.0" }
+embedded-io-async = { version = "0.7" }
+embedded-storage = { version = "0.3", optional = true }
+embedded-storage-async = { version = "0.4", optional = true }
+
+embassy-embedded-hal = { version = "0.6", optional = true }
+embassy-futures = { version = "0.1" }
+embassy-sync = { version = "0.8" }
+embassy-time = { version = "0.5" }
+embassy-usb = { version = "0.6", features = [
+    "max-interface-count-8",
+    "max-handler-count-8",
+] }
+embassy-usb-logger = { version = "0.6", optional = true }
+
+futures = { version = "0.3", default-features = false, features = [
+    "async-await",
+] }
+
+heapless = "0.9"
+sequential-storage = { version = "8.0.1", features = ["postcard"] }
+static_cell = "2"
+usbd-hid = "0.10"
+
+byteorder = { version = "1", default-features = false, optional = true }
+defmt = { version = "1", optional = true }
+log = { version = "0.4", optional = true }
+postcard = { version = "1", features = ["experimental-derive"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
+
+# Used in macro
+paste = "1"
+
+# Display dependencies
+display-interface = { version = "0.5", optional = true }
+display-interface-i2c = { version = "0.5", optional = true }
+embedded-graphics = { version = "0.8", optional = true }
+lcd-async = { version = "0.1", optional = true, default-features = false }
+oled_async = { version = "0.2.1", optional = true, features = ["i2c"] }
+ssd1306 = { version = "0.10", optional = true, features = ["async"] }
+
+# Optional dependencies
+# BLE dependencies
+bt-hci = { version = "0.11", optional = true }
+embassy-crypto = { git = "https://github.com/embassy-rs/embassy.git", rev = "bd35bd7a7d19147c8bcae9c2eda99b25e597294c", optional = true }
+embassy-crypto-rustcrypto = { git = "https://github.com/embassy-rs/embassy.git", rev = "bd35bd7a7d19147c8bcae9c2eda99b25e597294c", optional = true, features = ["embassy-crypto-aes128-ecb", "embassy-crypto-aes128-cmac"] }
+rand_chacha = { version = "0.9", default-features = false, optional = true }
+trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "8cca99e5c217e7b4d5da0f12c9725b93623dc4d3", default-features = false, features = [
+    "peripheral",
+    "gatt",
+    "derive",
+    "security",
+    "serde",
+    "default-packet-pool",
+    "default-packet-pool-size-32",
+], optional = true }
+
+# nRF dependencies
+embassy-nrf = { version = "0.11", features = [
+    "unstable-pac",
+    "time",
+], optional = true }
+
+# RP2040 dependencies
+embassy-boot = { version = "0.7", optional = true, default-features = false }
+embassy-boot-rp = { version = "0.10.0", optional = true }
+embassy-hal-internal = { version = "0.5.0", optional = true }
+embassy-rp = { version = "0.10", optional = true }
+fixed = { version = "1.31.0", optional = true }
+pio = { version = "0.4.0", optional = true }
+
+# ESP32 dependencies
+esp-hal = { version = "1.2.0-rc.0", optional = true }
+
+# Document feature
+document-features = "0.2"
+
+# Architecture specific dependencies
+[target.'cfg(all(target_arch = "arm", target_os = "none"))'.dependencies]
+cortex-m = { version = "0.7" }
+p256-cortex-m4 = { version = "0.1.0-alpha.6", default-features = false, optional = true }
+zeroize = { version = "1", default-features = false, optional = true }
+
+[dev-dependencies]
+embassy-crypto-rustcrypto = { git = "https://github.com/embassy-rs/embassy.git", rev = "bd35bd7a7d19147c8bcae9c2eda99b25e597294c", features = ["embassy-crypto-p256-ecdh"] }
+critical-section = { version = "1.2", features = ["std"] }
+embedded-hal-mock = { version = "0.11.1", features = ["embedded-hal-async"] }
+# A hack for enabling 'std' feature in testing, ref: https://github.com/rust-lang/cargo/issues/2911
+rmk = { path = ".", default-features = false, features = ["std", "log"] }
+# Same unification hack: turn on the `run_tests!` scenario macro for tests only
+rmk-macro = { path = "../rmk-macro", features = ["_simulator"] }
+# Scenario files spell Rynk payloads as data; `run_tests!` forwards them as JSON
+# for the test to deserialize into the real request type. Alloc-only: enabling
+# `serde/std` here would break `ssmarshal`, which implements `serde::de::Error`
+# without a `StdError` impl.
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+# embassy main reorganized its USB classes (`class::<name>::device`) and renamed nRF `WatchdogHandle::pet`
+# to `feed` without a version bump, so RMK builds against main until the next embassy release.
+# Dependents need the same patch (patches only apply in the root workspace).
+[patch.crates-io]
+embassy-boot                 = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-boot-rp              = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-embedded-hal         = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-futures              = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-hal-internal         = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-nrf                  = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-rp                   = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-sync                 = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-time                 = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-time-driver          = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-time-queue-utils     = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-usb                  = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-usb-driver           = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-usb-logger           = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-executor-timer-queue = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }

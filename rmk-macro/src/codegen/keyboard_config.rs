@@ -1,6 +1,7 @@
 use quote::quote;
 use rmk_config::KeyboardTomlConfig;
-use rmk_config::resolved::{Host, Identity, Keymap};
+use rmk_config::resolved::hardware::ChipSeries;
+use rmk_config::resolved::{Hardware, Host, Identity, Keymap};
 
 pub(crate) fn read_keyboard_toml_config() -> KeyboardTomlConfig {
     // Get the path of the keyboard config file from the environment variable
@@ -10,19 +11,7 @@ pub(crate) fn read_keyboard_toml_config() -> KeyboardTomlConfig {
     KeyboardTomlConfig::new_from_toml_path(&config_toml_path)
 }
 
-pub(crate) fn expand_keyboard_info(
-    identity: &Identity,
-    keymap: &Keymap,
-) -> proc_macro2::TokenStream {
-    let pid = identity.product_id;
-    let vid = identity.vendor_id;
-    let product_name = identity.product_name.clone();
-    let manufacturer = identity.manufacturer.clone();
-    let serial_number_tokens = match &identity.serial_number {
-        Some(s) => quote! { #s },
-        None => quote! { ::rmk::config::RMK_BUILD_INFO },
-    };
-
+pub(crate) fn expand_keyboard_info(keymap: &Keymap) -> proc_macro2::TokenStream {
     let num_col = keymap.cols as usize;
     let num_row = keymap.rows as usize;
     let num_layer = keymap.layers as usize;
@@ -32,9 +21,35 @@ pub(crate) fn expand_keyboard_info(
         pub(crate) const ROW: usize = #num_row;
         pub(crate) const NUM_LAYER: usize = #num_layer;
         pub(crate) const NUM_ENCODER: usize = #total_num_encoder;
-        const KEYBOARD_DEVICE_CONFIG: ::rmk::config::DeviceConfig = ::rmk::config::DeviceConfig {
+    }
+}
+
+pub(crate) fn expand_device_config(
+    identity: &Identity,
+    hardware: &Hardware,
+) -> proc_macro2::TokenStream {
+    let pid = identity.product_id;
+    let vid = identity.vendor_id;
+    let product_name = identity.product_name.clone();
+    let manufacturer = identity.manufacturer.clone();
+    let serial_number_tokens = match (&identity.serial_number, &hardware.chip.series) {
+        (Some(s), _) => quote! { ::rmk::config::build_serial_number(#s) },
+        (None, ChipSeries::Nrf52 | ChipSeries::Esp32) => {
+            quote! { ::rmk::config::DeviceConfig::default().serial_number }
+        }
+        (None, ChipSeries::Rp2040) => {
+            quote! { ::rmk::config::rp2040_serial_number(p.FLASH.reborrow()) }
+        }
+        (None, ChipSeries::Stm32) => {
+            quote! { ::rmk::config::build_serial_number(&::embassy_stm32::uid::uid()) }
+        }
+    };
+
+    quote! {
+        let keyboard_device_config = ::rmk::config::DeviceConfig {
             vid: #vid,
             pid: #pid,
+            bcd_version: 0x0010,
             manufacturer: #manufacturer,
             product_name: #product_name,
             serial_number: #serial_number_tokens,
@@ -44,9 +59,6 @@ pub(crate) fn expand_keyboard_info(
 
 /// The `[host].unlock_keys` list as a `&'static [(u8, u8)]` literal (empty when unset).
 fn unlock_keys_tokens(host: &Host) -> proc_macro2::TokenStream {
-    if host.unlock_keys.is_empty() {
-        return quote! { &[] };
-    }
     let keys_expr = host.unlock_keys.iter().map(|key| {
         let row = key[0];
         let col = key[1];
