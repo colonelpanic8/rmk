@@ -180,40 +180,22 @@ fn expand_combos(
                 None => quote! {},
             };
 
-            // When no combos are defined the `let v = [#(#combos_def),*]` expression
-            // collapses to `let v = []`, which Rust can't type-infer. Emit an
-            // all-`None` array directly in that case.
-            let combos_field = if combos.combos.is_empty() {
-                quote! {
-                    combos: core::array::from_fn(|_| ::core::option::Option::None),
-                }
-            } else {
-                let combos_def = combos.combos.iter().map(|combo| {
-                    let actions = combo.actions.iter().map(|a| parse_key(a.to_owned(), profiles));
-                    let output = parse_key(combo.output.to_owned(), profiles);
-                    let layer = match combo.layer {
-                        Some(layer) => quote! { ::core::option::Option::Some(#layer) },
-                        None => quote! { ::core::option::Option::None },
-                    };
-                    quote! { ::rmk::keyboard::combo::Combo::new(::rmk::keyboard::combo::ComboConfig::new([#(#actions),*], #output, #layer)) }
-                });
-                quote! {
-                    combos: {
-                        let v = [#(#combos_def),*];
-                        core::array::from_fn(|i| {
-                            if i < v.len() {
-                                Some(v[i].clone())
-                            } else {
-                                None
-                            }
-                        })
-                    },
-                }
-            };
+            let combos_def = combos.combos.iter().map(|combo| {
+                let actions = combo.actions.iter().map(|a| parse_key(a.to_owned(), profiles));
+                let output = parse_key(combo.output.to_owned(), profiles);
+                let layer = match combo.layer {
+                    Some(layer) => quote! { ::core::option::Option::Some(#layer) },
+                    None => quote! { ::core::option::Option::None },
+                };
+                quote! { ::rmk::keyboard::combo::Combo::new(::rmk::keyboard::combo::ComboConfig::new([#(#actions),*], #output, #layer)) }
+            });
 
             quote! {
                 ::rmk::config::CombosConfig {
-                    #combos_field
+                    combos: {
+                        let v: &[::rmk::keyboard::combo::Combo] = &[#(#combos_def),*];
+                        core::array::from_fn(|i| v.get(i).cloned())
+                    },
                     #timeout
                     #prior_idle_time
                     ..Default::default()
@@ -383,27 +365,7 @@ struct StateBitsMacro {
 
 impl StateBitsMacro {
     fn is_empty(&self) -> bool {
-        !(self.modifiers_left_ctrl
-            || self.modifiers_left_shift
-            || self.modifiers_left_alt
-            || self.modifiers_left_gui
-            || self.modifiers_right_ctrl
-            || self.modifiers_right_shift
-            || self.modifiers_right_alt
-            || self.modifiers_right_gui
-            || self.leds_num_lock
-            || self.leds_caps_lock
-            || self.leds_scroll_lock
-            || self.leds_compose
-            || self.leds_kana
-            || self.mouse_button1
-            || self.mouse_button2
-            || self.mouse_button3
-            || self.mouse_button4
-            || self.mouse_button5
-            || self.mouse_button6
-            || self.mouse_button7
-            || self.mouse_button8)
+        self == &Self::default()
     }
 }
 // Allows to use `#modifiers` in the quote
@@ -480,18 +442,27 @@ fn expand_forks(
         Some(forks) => {
             let forks_def = forks.forks.iter().map(|fork| {
                 let trigger = parse_key(fork.trigger.to_owned(), profiles);
-                let negative_output = parse_key(fork.negative_output.to_owned(), profiles);
+                let negative_output = fork.negative_output.as_ref().map_or(
+                    quote! { ::rmk::types::action::KeyAction::Transparent },
+                    |k| parse_key(k.to_owned(), profiles),
+                );
                 let positive_output = parse_key(fork.positive_output.to_owned(), profiles);
                 let match_any  = fork.match_any.as_ref().map(|s| parse_state_combination(s)).unwrap_or_default();
                 let match_none = fork.match_none.as_ref().map(|s| parse_state_combination(s)).unwrap_or_default();
                 let kept = fork.kept_modifiers.as_ref().map(|s| parse_state_combination(s)).unwrap_or_default();
                 let bindable = fork.bindable;
+                let layers = fork.layers;
 
                 if match_any.is_empty() && match_none.is_empty() {
                     panic!("\n❌ keyboard.toml: fork configuration missing match conditions!");
                 }
 
-                quote! { ::rmk::types::fork::Fork::new(#trigger, #negative_output, #positive_output, #match_any, #match_none, #kept.modifiers, #bindable) }
+                quote! {
+                    ::rmk::types::fork::Fork {
+                        layers: #layers,
+                        ..::rmk::types::fork::Fork::new(#trigger, #negative_output, #positive_output, #match_any, #match_none, #kept.modifiers, #bindable)
+                    }
+                }
             });
 
             quote! {

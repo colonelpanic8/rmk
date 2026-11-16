@@ -13,7 +13,7 @@ unsafe impl ::core::clone::TrivialClone for SensorEvent {}
 #[automatically_derived]
 impl ::core::clone::Clone for SensorEvent {
     #[inline]
-    fn clone(&self) -> SensorEvent {
+    fn clone(&self) -> Self {
         let _: ::core::clone::AssertParamIsClone<u16>;
         *self
     }
@@ -41,7 +41,7 @@ unsafe impl ::core::clone::TrivialClone for ConfigEvent {}
 #[automatically_derived]
 impl ::core::clone::Clone for ConfigEvent {
     #[inline]
-    fn clone(&self) -> ConfigEvent {
+    fn clone(&self) -> Self {
         let _: ::core::clone::AssertParamIsClone<u16>;
         *self
     }
@@ -69,7 +69,7 @@ unsafe impl ::core::clone::TrivialClone for ModeEvent {}
 #[automatically_derived]
 impl ::core::clone::Clone for ModeEvent {
     #[inline]
-    fn clone(&self) -> ModeEvent {
+    fn clone(&self) -> Self {
         let _: ::core::clone::AssertParamIsClone<u8>;
         *self
     }
@@ -91,7 +91,6 @@ impl ::core::fmt::Debug for ModeEvent {
 /// Basic combined: input_device + processor
 mod basic {
     use super::{ConfigEvent, SensorEvent, input_device, processor};
-    #[::rmk::macros::runnable_generated]
     pub struct SensorController {
         pub threshold: u16,
     }
@@ -239,6 +238,7 @@ mod basic {
                             .await;
                     }
                 }
+                ::rmk::embassy_futures::yield_now().await;
             }
         }
     }
@@ -246,7 +246,6 @@ mod basic {
 /// Reversed order: processor + input_device
 mod reversed {
     use super::{ConfigEvent, SensorEvent, input_device, processor};
-    #[::rmk::macros::runnable_generated]
     pub struct ReversedSensorController {
         pub threshold: u16,
     }
@@ -396,6 +395,7 @@ mod reversed {
                             .await;
                     }
                 }
+                ::rmk::embassy_futures::yield_now().await;
             }
         }
     }
@@ -403,7 +403,6 @@ mod reversed {
 /// Polling combined: input_device + polling processor
 mod polling {
     use super::{ConfigEvent, SensorEvent, input_device, processor};
-    #[::rmk::macros::runnable_generated]
     pub struct PollingSensorController {
         pub counter: u32,
     }
@@ -598,6 +597,7 @@ mod polling {
                         <Self as ::rmk::processor::PollingProcessor>::update(self).await;
                     }
                 }
+                ::rmk::embassy_futures::yield_now().await;
             }
         }
     }
@@ -605,7 +605,6 @@ mod polling {
 /// Multi-event combined: input_device + processor with multiple events
 mod multi_event {
     use super::{ConfigEvent, ModeEvent, SensorEvent, input_device, processor};
-    #[::rmk::macros::runnable_generated]
     pub struct MultiEventSensorController {
         pub threshold: u16,
         pub mode: u8,
@@ -617,14 +616,14 @@ mod multi_event {
     #[automatically_derived]
     impl ::core::clone::Clone for MultiEventSensorControllerProcessorEventEnum {
         #[inline]
-        fn clone(&self) -> MultiEventSensorControllerProcessorEventEnum {
+        fn clone(&self) -> Self {
             match self {
-                MultiEventSensorControllerProcessorEventEnum::Config(__self_0) => {
+                Self::Config(__self_0) => {
                     MultiEventSensorControllerProcessorEventEnum::Config(
                         ::core::clone::Clone::clone(__self_0),
                     )
                 }
-                MultiEventSensorControllerProcessorEventEnum::Mode(__self_0) => {
+                Self::Mode(__self_0) => {
                     MultiEventSensorControllerProcessorEventEnum::Mode(
                         ::core::clone::Clone::clone(__self_0),
                     )
@@ -916,6 +915,7 @@ mod multi_event {
                             .await;
                     }
                 }
+                ::rmk::embassy_futures::yield_now().await;
             }
         }
     }
@@ -923,7 +923,6 @@ mod multi_event {
 /// Multi-event polling combined
 mod multi_event_polling {
     use super::{ConfigEvent, ModeEvent, SensorEvent, input_device, processor};
-    #[::rmk::macros::runnable_generated]
     pub struct MultiEventPollingSensorController {
         pub threshold: u16,
         pub mode: u8,
@@ -936,14 +935,14 @@ mod multi_event_polling {
     #[automatically_derived]
     impl ::core::clone::Clone for MultiEventPollingSensorControllerProcessorEventEnum {
         #[inline]
-        fn clone(&self) -> MultiEventPollingSensorControllerProcessorEventEnum {
+        fn clone(&self) -> Self {
             match self {
-                MultiEventPollingSensorControllerProcessorEventEnum::Config(__self_0) => {
+                Self::Config(__self_0) => {
                     MultiEventPollingSensorControllerProcessorEventEnum::Config(
                         ::core::clone::Clone::clone(__self_0),
                     )
                 }
-                MultiEventPollingSensorControllerProcessorEventEnum::Mode(__self_0) => {
+                Self::Mode(__self_0) => {
                     MultiEventPollingSensorControllerProcessorEventEnum::Mode(
                         ::core::clone::Clone::clone(__self_0),
                     )
@@ -1288,13 +1287,13 @@ mod multi_event_polling {
                         <Self as ::rmk::processor::PollingProcessor>::update(self).await;
                     }
                 }
+                ::rmk::embassy_futures::yield_now().await;
             }
         }
     }
 }
 mod polling_without_subscription {
     use super::{SensorEvent, input_device, processor};
-    #[::rmk::macros::runnable_generated]
     pub struct PollingSensor;
     impl ::rmk::processor::Processor for PollingSensor {
         type Event = ::core::convert::Infallible;
@@ -1483,10 +1482,10 @@ mod polling_without_subscription {
                         <Self as ::rmk::processor::PollingProcessor>::update(self).await;
                     }
                 }
+                ::rmk::embassy_futures::yield_now().await;
             }
         }
     }
-    #[::rmk::macros::runnable_generated]
     pub struct ReversedPollingSensor;
     impl ::rmk::input_device::InputDevice for ReversedPollingSensor {
         type Event = SensorEvent;
@@ -1677,6 +1676,7 @@ mod polling_without_subscription {
                         <Self as ::rmk::processor::PollingProcessor>::update(self).await;
                     }
                 }
+                ::rmk::embassy_futures::yield_now().await;
             }
         }
     }

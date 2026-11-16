@@ -36,8 +36,6 @@ pub(crate) fn expand_matrix_config(
                     async_matrix,
                     matrix.direct_pin_low_active,
                 ));
-                // `generic_arg_infer` is a nightly feature. Const arguments cannot yet be inferred with `_` in stable now.
-                // So we need to declare them in advance.
                 let direct_pins = matrix.direct_pins.as_ref().unwrap();
                 let rows = direct_pins.len();
                 let cols = direct_pins.first().map_or(0, |row| row.len());
@@ -190,17 +188,14 @@ pub(crate) fn expand_matrix_input_output_pins(
     } else {
         quote! {}
     };
-    let (input_pin_len, output_pin_len) = if row2col {
-        (col_pins.len(), row_pins.len())
-    } else {
-        (row_pins.len(), col_pins.len())
-    };
-
     let (input_pins, output_pins) = if row2col {
         (col_pins, row_pins)
     } else {
         (row_pins, col_pins)
     };
+
+    let input_pin_len = input_pins.len();
+    let output_pin_len = output_pins.len();
 
     // Get pin types
     let input_pin_type = get_input_pin_type(chip, async_matrix);

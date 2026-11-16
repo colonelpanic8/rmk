@@ -13,8 +13,9 @@ use cyw43_pio::PioSpi;
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
-use embassy_rp::flash::{Async, Flash};
+use embassy_rp::flash::Flash;
 use embassy_rp::gpio::{Input, Level, Output};
+use embassy_rp::mode::Async;
 use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, DMA_CH2, PIO0, USB};
 use embassy_rp::pio::{self, Pio};
 use embassy_rp::usb::{self, Driver};
@@ -52,7 +53,8 @@ const FLASH_SIZE: usize = 2 * 1024 * 1024;
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let p = embassy_rp::init(Default::default());
+    let mut p = embassy_rp::init(Default::default());
+    let serial_number = rmk::config::rp2040_serial_number(p.FLASH.reborrow());
 
     #[cfg(feature = "skip-cyw43-firmware")]
     let (fw, clm, btfw, nvram) = {
@@ -108,10 +110,11 @@ async fn main(spawner: Spawner) {
 
     // Use internal flash to emulate eeprom
     // Both blocking and async flash are support, use different API
-    // let flash = Flash::<_, Blocking, FLASH_SIZE>::new_blocking(p.FLASH);
-    let flash = Flash::<_, Async, FLASH_SIZE>::new(p.FLASH, p.DMA_CH1, Irqs);
+    // let flash = Flash::<Blocking, FLASH_SIZE>::new_blocking(p.FLASH);
+    let flash = Flash::<Async, FLASH_SIZE>::new(p.FLASH, p.DMA_CH1, Irqs);
 
     let keyboard_device_config = DeviceConfig {
+        serial_number,
         vid: 0x4c4c,
         pid: 0x464c,
         manufacturer: "Haobo",
@@ -155,7 +158,8 @@ async fn main(spawner: Spawner) {
 
     let ble_addr = [0x18, 0xe2, 0x21, 0x88, 0xc0, 0xc7];
 
-    let mut usb_transport = UsbTransport::new(driver, rmk_config.device_config).with_host_service(&host_service);
+    let mut usb_transport =
+        UsbTransport::new(driver, rmk_config.device_config.clone()).with_host_service(&host_service);
     // The other half: 4x7 at row offset 4 (keymap rows 4..8).
     let mut ble_transport = BleTransport::new(
         controller,
