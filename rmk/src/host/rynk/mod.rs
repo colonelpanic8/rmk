@@ -99,9 +99,10 @@ impl<'a> RynkService<'a> {
             | Cmd::GetCurrentLayer
             | Cmd::GetWpm
             | Cmd::GetSleepState
-            | Cmd::GetLedIndicator => Some(false),
+            | Cmd::GetLedIndicator
+            | Cmd::GetBatteryStatus => Some(false),
             #[cfg(feature = "_ble")]
-            Cmd::GetBleStatus | Cmd::SwitchBleProfile | Cmd::GetBatteryStatus => Some(false),
+            Cmd::GetBleStatus | Cmd::SwitchBleProfile => Some(false),
             #[cfg(feature = "split")]
             Cmd::GetPeripheralStatus => Some(false),
             _ => None,
@@ -167,7 +168,6 @@ impl<'a> RynkService<'a> {
 
             Cmd::GetCurrentLayer => serve::<command::GetCurrentLayer, _>(self, msg).await,
             Cmd::GetMatrixState => serve::<command::GetMatrixState, _>(self, msg).await,
-            #[cfg(feature = "_ble")]
             Cmd::GetBatteryStatus => serve::<command::GetBatteryStatus, _>(self, msg).await,
             #[cfg(feature = "split")]
             Cmd::GetPeripheralStatus => serve::<command::GetPeripheralStatus, _>(self, msg).await,
