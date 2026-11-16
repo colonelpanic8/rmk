@@ -1318,6 +1318,7 @@ mod runtime_configuration_tests {
             assert!(futures::poll!(task.as_mut()).is_pending());
             publish_event(PointingEvent {
                 device_id: 0,
+                buttons: 0,
                 axes: [
                     AxisEvent {
                         axis: Axis::X,
