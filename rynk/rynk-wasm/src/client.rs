@@ -260,6 +260,7 @@ endpoints! {
     // whole-resource pagers
     read_all_keymap() -> Vec<KeyAction>,
     write_all_keymap(actions: Vec<KeyAction>) -> (),
+    write_keymap_from(start: u16, actions: Vec<KeyAction>) -> (),
     read_all_combos() -> Vec<Combo>,
     write_all_combos(configs: Vec<Combo>) -> (),
     read_all_combo_definitions() -> Vec<ComboDefinition>,

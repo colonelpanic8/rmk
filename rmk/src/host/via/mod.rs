@@ -251,19 +251,13 @@ impl<RgbMatrix: rgb_matrix::ViaRgbMatrixControl> VialService<'_, RgbMatrix> {
                 let offset = BigEndian::read_u16(&report.output_data[1..3]);
                 // size <= 28
                 let size = report.output_data[3];
-                let mut idx = 4;
-                let (rows, cols, _) = self.ctx.keymap_dimensions();
-                for i in 0..(size as usize) {
-                    let via_keycode = LittleEndian::read_u16(&report.output_data[idx..idx + 2]);
-                    let action = from_via_keycode(via_keycode);
-                    let flat_index = offset as usize + i;
-                    let (layer, in_layer) = (flat_index / (rows * cols), flat_index % (rows * cols));
-                    let _ = self
-                        .ctx
-                        .set_action(layer as u8, (in_layer / cols) as u8, (in_layer % cols) as u8, action)
-                        .await;
-                    idx += 2;
-                }
+                let keycodes = report.output_data[4..]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .take(size as usize)
+                    .map(|keycode| from_via_keycode(LittleEndian::read_u16(keycode)));
+                let _ = self.ctx.set_actions(offset as usize, keycodes).await;
             }
             ViaCommand::DynamicKeymapGetEncoder => {
                 warn!("Keymap get encoder -- not supported");
