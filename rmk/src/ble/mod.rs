@@ -25,7 +25,7 @@ use trouble_host::prelude::*;
 
 use crate::ble::adv::{Adv, advertise};
 use crate::ble::battery_service::BleBatteryServer;
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 use crate::ble::battery_service::BlePeripheralBatteryServer;
 use crate::ble::ble_server::{BleHidServer, Server};
 use crate::ble::device_info::{PnPID, VidSource};
@@ -554,7 +554,7 @@ async fn gatt_events_task<C: Controller + ControllerCmdAsync<LeSetPhy>>(
     profiles: &ProfileManager<'_, '_, C, DefaultPacketPool, BOND_SLOTS>,
 ) -> Result<(), Error> {
     let level = &server.battery_service.level;
-    #[cfg(feature = "split")]
+    #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
     let peripheral_levels = &server.peripheral_battery_services.levels;
     let output_keyboard = &server.hid_service.output_keyboard;
     let hid_control_point = &server.hid_service.hid_control_point;
@@ -657,14 +657,14 @@ async fn gatt_events_task<C: Controller + ControllerCmdAsync<LeSetPhy>>(
                             || event.handle() == system_control.cccd_handle.expect("No CCCD for system report")
                             || event.handle() == level.cccd_handle.expect("No CCCD for battery level")
                             || {
-                                #[cfg(feature = "split")]
+                                #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
                                 {
                                     peripheral_levels.iter().any(|level| {
                                         event.handle()
                                             == level.cccd_handle.expect("No CCCD for peripheral battery level")
                                     })
                                 }
-                                #[cfg(not(feature = "split"))]
+                                #[cfg(any(not(feature = "split"), feature = "_no_split_peripheral_battery_service"))]
                                 {
                                     false
                                 }
@@ -920,7 +920,7 @@ async fn serve_keyboard_connection<
     let mut ble_hid_server = BleHidServer::new(server, conn);
     let mut ble_led_reader = BleLedReader;
     let mut ble_battery_server = config.enabled.then(|| BleBatteryServer::new(server, conn));
-    #[cfg(feature = "split")]
+    #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
     let mut ble_peripheral_battery_server = crate::SPLIT_BATTERY_PERIPHERAL_IDS
         .first()
         .map(|_| BlePeripheralBatteryServer::new(server, conn));
@@ -956,9 +956,9 @@ async fn serve_keyboard_connection<
         core::future::pending::<()>().await;
     };
 
-    #[cfg(not(feature = "split"))]
+    #[cfg(any(not(feature = "split"), feature = "_no_split_peripheral_battery_service"))]
     let battery_task = ble_battery_server.run();
-    #[cfg(feature = "split")]
+    #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
     let battery_task = embassy_futures::join::join(ble_battery_server.run(), ble_peripheral_battery_server.run());
 
     let communication_task = async {
