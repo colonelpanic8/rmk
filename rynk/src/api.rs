@@ -17,6 +17,7 @@ use rmk_types::battery::BatteryStatus;
 use rmk_types::ble::BleStatus;
 use rmk_types::combo::Combo;
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
+#[cfg(feature = "alloc")]
 use rmk_types::constants::KEYMAP_SEGMENT_KEYS;
 use rmk_types::fork::Fork;
 use rmk_types::keyboard_macros::{Macro, MacroOp};
@@ -439,9 +440,16 @@ impl Client {
 
     /// Write the whole keymap with concurrent paged writes. A failure leaves the
     /// earlier pages applied.
-    ///
-    /// Pages hold [`keymap_write_page_keys`] cells rather than filling the payload.
     pub async fn write_all_keymap(&self, actions: Vec<KeyAction>) -> Result<(), RynkHostError> {
+        self.write_keymap_from(0, actions).await
+    }
+
+    /// Write `actions` into consecutive keymap cells from flat index `start`, which counts
+    /// columns, then rows, then layers. A failure leaves the earlier pages applied.
+    ///
+    /// Pages hold [`keymap_write_page_keys`] cells rather than filling the payload, so a
+    /// `start` on a row boundary keeps every row within one page.
+    pub async fn write_keymap_from(&self, start: u16, actions: Vec<KeyAction>) -> Result<(), RynkHostError> {
         let caps = self.capabilities;
         let (rows, cols) = (caps.num_rows as u16, caps.num_cols as u16);
         // 3 fixed bytes before the items: layer, start_row, start_col.
@@ -450,8 +458,8 @@ impl Client {
             3,
             keymap_write_page_keys(&caps),
             actions,
-            async |c, start, actions| {
-                let (layer, row, col) = keymap_pos(start, rows, cols);
+            async |c, offset, actions| {
+                let (layer, row, col) = keymap_pos(start + offset, rows, cols);
                 c.set_keymap_bulk(SetKeymapBulkRequest {
                     layer,
                     start_row: row,

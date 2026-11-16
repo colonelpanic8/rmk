@@ -98,6 +98,8 @@ mod driver;
 #[cfg(feature = "alloc")]
 pub mod layout;
 
+#[cfg(feature = "alloc")]
+pub use api::keymap_write_page_keys;
 pub use device::RynkDevice;
 pub use driver::{Client, Driver, RynkHostError};
 pub use embedded_io_async as io;
