@@ -31,12 +31,17 @@ impl<F: AsyncNorFlash> Storage<F> {
             .map_err(|e| print_storage_error::<F>(e))?
         {
             match (key, value) {
-                (StorageKey::Keymap { layer, row, col }, StorageValue::KeyAction(action)) => {
-                    let layer = layer as usize;
-                    let row = row as usize;
-                    let col = col as usize;
-                    if layer < NUM_LAYER && row < ROW && col < COL {
-                        data.keymap[layer][row][col] = action;
+                (StorageKey::KeymapSegment { layer, row, col }, StorageValue::KeymapSegment(actions)) => {
+                    // A store written for another geometry keeps what still fits.
+                    if let Some(cells) = data
+                        .keymap
+                        .get_mut(layer as usize)
+                        .and_then(|layer| layer.get_mut(row as usize))
+                        .and_then(|row| row.get_mut(col as usize..))
+                    {
+                        for (cell, action) in cells.iter_mut().zip(actions) {
+                            *cell = action;
+                        }
                     }
                 }
                 (StorageKey::Encoder { layer, idx }, StorageValue::EncoderAction(action)) => {

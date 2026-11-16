@@ -19,7 +19,7 @@ use sequential_storage::map::{Key as MapKey, MapConfig, MapStorage, PostcardValu
 use {
     crate::keyboard::combo::ComboConfig,
     rmk_types::action::{EncoderAction, KeyAction},
-    rmk_types::constants::MACRO_CHUNK_SIZE,
+    rmk_types::constants::{KEYMAP_SEGMENT_KEYS, MACRO_CHUNK_SIZE},
     rmk_types::fork::Fork,
     rmk_types::morse::Morse,
 };
@@ -137,8 +137,9 @@ pub(crate) enum StorageKey {
     /// One `MACRO_CHUNK_SIZE`-byte piece of the macro buffer, keyed by its index.
     #[cfg(feature = "host")]
     MacroChunk(u8),
+    /// The cells of one keymap row from `col`, a multiple of [`KEYMAP_SEGMENT_KEYS`].
     #[cfg(feature = "host")]
-    Keymap {
+    KeymapSegment {
         layer: u8,
         row: u8,
         col: u8,
@@ -179,11 +180,11 @@ pub(crate) enum StorageItem {
         bytes: [u8; MACRO_CHUNK_SIZE],
     },
     #[cfg(feature = "host")]
-    Keymap {
+    KeymapSegment {
         layer: u8,
         row: u8,
         col: u8,
-        action: KeyAction,
+        actions: heapless::Vec<KeyAction, KEYMAP_SEGMENT_KEYS>,
     },
     #[cfg(feature = "host")]
     Encoder {
@@ -229,12 +230,15 @@ impl StorageItem {
             #[cfg(feature = "host")]
             Self::MacroChunk { idx, bytes } => (StorageKey::MacroChunk(idx), StorageValue::MacroChunk(bytes)),
             #[cfg(feature = "host")]
-            Self::Keymap {
+            Self::KeymapSegment {
                 layer,
                 row,
                 col,
-                action,
-            } => (StorageKey::Keymap { layer, row, col }, StorageValue::KeyAction(action)),
+                actions,
+            } => (
+                StorageKey::KeymapSegment { layer, row, col },
+                StorageValue::KeymapSegment(actions),
+            ),
             #[cfg(feature = "host")]
             Self::Encoder { layer, idx, action } => {
                 (StorageKey::Encoder { layer, idx }, StorageValue::EncoderAction(action))
@@ -285,7 +289,7 @@ pub(crate) enum StorageValue {
     #[cfg(feature = "host")]
     MacroChunk([u8; MACRO_CHUNK_SIZE]),
     #[cfg(feature = "host")]
-    KeyAction(KeyAction),
+    KeymapSegment(heapless::Vec<KeyAction, KEYMAP_SEGMENT_KEYS>),
     #[cfg(feature = "host")]
     EncoderAction(EncoderAction),
     #[cfg(feature = "host")]
@@ -498,12 +502,12 @@ impl<F: AsyncNorFlash> Storage<F> {
 
         for (layer, layer_data) in data.keymap.iter().enumerate() {
             for (row, row_data) in layer_data.iter().enumerate() {
-                for (col, action) in row_data.iter().enumerate() {
-                    put(StorageItem::Keymap {
+                for (segment, actions) in row_data.chunks(KEYMAP_SEGMENT_KEYS).enumerate() {
+                    put(StorageItem::KeymapSegment {
                         layer: layer as u8,
                         row: row as u8,
-                        col: col as u8,
-                        action: *action,
+                        col: (segment * KEYMAP_SEGMENT_KEYS) as u8,
+                        actions: actions.iter().copied().collect(),
                     })
                     .await;
                 }
@@ -890,11 +894,11 @@ mod tests {
         block_on(async {
             let mut storage = new_storage(async_flash_wrapper(Part::new())).await;
             storage
-                .put(StorageItem::Keymap {
+                .put(StorageItem::KeymapSegment {
                     layer: 0,
                     row: 0,
                     col: 0,
-                    action: a,
+                    actions: heapless::Vec::from_iter([a]),
                 })
                 .await
                 .unwrap();
@@ -986,6 +990,83 @@ mod tests {
         });
     }
 
+    /// A host write lands as one item per row segment it touches, neighbours included, and a
+    /// store read back on a narrower board keeps the cells that still exist.
+    #[cfg(feature = "host")]
+    #[test]
+    fn keymap_writes_persist_whole_row_segments() {
+        use rmk_types::action::Action;
+        use rmk_types::keycode::{HidKeyCode, KeyCode};
+
+        use crate::config::PositionalConfig;
+        use crate::core_traits::Runnable;
+        use crate::host::context::KeyboardContext;
+        use crate::keymap::{KeyMap, KeymapData};
+
+        const COLS: usize = KEYMAP_SEGMENT_KEYS + 2;
+        let key = |code| KeyAction::Single(Action::Key(KeyCode::Hid(code)));
+        let (a, b, c) = (key(HidKeyCode::A), key(HidKeyCode::B), key(HidKeyCode::C));
+
+        block_on(async {
+            let mut storage = new_storage(async_flash_wrapper(Part::new())).await;
+            let mut data = KeymapData::new([[[a; COLS]; 2]; 2]);
+            let mut behavior = RuntimeBehaviorConfig::default();
+            let positional = PositionalConfig::<2, COLS>::default();
+            let keymap = KeyMap::new_from_storage(&mut data, Some(&mut storage), &mut behavior, &positional).await;
+            let ctx = KeyboardContext::new(&keymap);
+
+            // Eight cells from the last two columns of the first segment: they end row 0 across
+            // both of its segments and open row 1. Then one key in the last layer's last segment.
+            crate::test_support::clear_flash_channel();
+            let write = async {
+                ctx.set_actions(KEYMAP_SEGMENT_KEYS - 2, [b; 8]).await.unwrap();
+                ctx.set_action(1, 1, COLS as u8 - 1, c).await.unwrap();
+            };
+            match select(storage.run(), write).await {
+                Either::First(never) => never,
+                Either::Second(()) => {}
+            }
+
+            let mut stored = heapless::Vec::<_, 8>::new();
+            let mut items = storage.flash.fetch_all_items(&mut storage.buffer).await.unwrap();
+            let mut buffer = [0; BUFFER_SIZE];
+            while let Some((key, value)) = items.next::<StorageValue>(&mut buffer).await.unwrap() {
+                if let (StorageKey::KeymapSegment { layer, row, col }, StorageValue::KeymapSegment(actions)) =
+                    (key, value)
+                {
+                    stored.push((layer, row, col as usize, actions.len())).unwrap();
+                }
+            }
+            assert_eq!(
+                stored.as_slice(),
+                [
+                    (0, 0, 0, KEYMAP_SEGMENT_KEYS),
+                    (0, 0, KEYMAP_SEGMENT_KEYS, 2),
+                    (0, 1, 0, KEYMAP_SEGMENT_KEYS),
+                    (1, 1, KEYMAP_SEGMENT_KEYS, 2),
+                ]
+            );
+
+            // The next boot compiles in another default and one column fewer.
+            let (flash, _) = storage.flash.destroy();
+            let mut storage = new_storage(flash).await;
+            let mut data = KeymapData::new([[[c; COLS - 1]; 2]; 2]);
+            storage.read_layout(&mut data, &mut behavior).await.unwrap();
+            let mut row = [a; COLS - 1];
+            row[KEYMAP_SEGMENT_KEYS - 2..].fill(b);
+            assert_eq!(data.keymap[0][0], row);
+            let mut row = [a; COLS - 1];
+            row[..4].fill(b);
+            row[KEYMAP_SEGMENT_KEYS] = c;
+            assert_eq!(data.keymap[0][1], row);
+            // Only the segment holding the edited key was stored, and that key's column is gone.
+            let mut row = [c; COLS - 1];
+            row[KEYMAP_SEGMENT_KEYS] = a;
+            assert_eq!(data.keymap[1][1], row);
+            assert_eq!(data.keymap[1][0], [c; COLS - 1]);
+        });
+    }
+
     // Postcard tags are declaration positions: inserting or reordering a variant shifts every
     // later tag and misreads storage written by the same commit. Both enums are append-only.
     #[test]
@@ -1001,10 +1082,10 @@ mod tests {
             #[cfg(feature = "host")]
             StorageKey::MacroChunk(5),
             #[cfg(feature = "host")]
-            StorageKey::Keymap {
+            StorageKey::KeymapSegment {
                 layer: 2,
                 row: 3,
-                col: 4,
+                col: 16,
             },
             #[cfg(feature = "host")]
             StorageKey::Encoder { layer: 1, idx: 5 },
@@ -1037,7 +1118,7 @@ mod tests {
             #[cfg(feature = "host")]
             StorageValue::MacroChunk([0; MACRO_CHUNK_SIZE]),
             #[cfg(feature = "host")]
-            StorageValue::KeyAction(KeyAction::No),
+            StorageValue::KeymapSegment(heapless::Vec::new()),
             #[cfg(feature = "host")]
             StorageValue::EncoderAction(EncoderAction::default()),
             #[cfg(feature = "host")]
