@@ -81,6 +81,11 @@ impl<F: AsyncNorFlash> Storage<F> {
                         *slot = morse;
                     }
                 }
+                // Absent means no pointing policy at all, so only a stored one seeds the pads.
+                #[cfg(feature = "rynk")]
+                (StorageKey::PointingConfig, StorageValue::PointingConfig(config)) => {
+                    crate::input_device::pointing_config::init(Some(config)).await;
+                }
                 (StorageKey::MorseHoldTriggerPositions, StorageValue::MorseHoldTriggerPositions(positions)) => {
                     behavior.morse.hold_trigger_positions = positions;
                 }
