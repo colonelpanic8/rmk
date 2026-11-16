@@ -18,6 +18,8 @@ use rmk_types::morse::MorseProfileName;
 #[cfg(feature = "host")]
 use rmk_types::protocol::rynk::BehaviorOptions;
 #[cfg(feature = "rynk")]
+use rmk_types::protocol::rynk::LayerMetadata;
+#[cfg(feature = "rynk")]
 use rmk_types::protocol::rynk::PointingConfig;
 #[cfg(all(feature = "lighting", feature = "rynk"))]
 use rmk_types::protocol::rynk::{
@@ -25,11 +27,9 @@ use rmk_types::protocol::rynk::{
     LIGHTING_EXTENSION_PARAM_CHUNK, LIGHTING_SCENE_CHUNK_SIZE, LightingAdvancedConditionalSceneCell,
     LightingConditionalSceneCell, LightingLayerPolicy, LightingSceneCell,
 };
-use rmk_types::unicode::UnicodeMode;
-#[cfg(feature = "rynk")]
-use rmk_types::protocol::rynk::LayerMetadata;
 #[cfg(all(feature = "lighting", feature = "rynk"))]
 use rmk_types::protocol::rynk::{LIGHTING_EXTENDED_CONDITIONAL_SCENE_CHUNK_SIZE, LightingExtendedConditionalSceneCell};
+use rmk_types::unicode::UnicodeMode;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::Cache;
 use sequential_storage::cache::key_pointers::ArrayKeyPointers;
