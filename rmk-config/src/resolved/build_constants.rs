@@ -188,6 +188,7 @@ impl crate::KeyboardTomlConfig {
             battery_adc,
             charging_state,
             pointing,
+            touch,
             peripheral_connected,
             central_connected,
             peripheral_battery,
@@ -436,6 +437,23 @@ mod tests {
                 .err()
                 .expect("invalid intervals accepted");
             assert!(error.contains(field), "{error}");
+        }
+    }
+
+    #[test]
+    fn reserves_battery_subscribers_without_requiring_ble() {
+        // The LED processor, split forwarding, and each Rynk session can coexist.
+        let config: KeyboardTomlConfig = toml::from_str("").unwrap();
+        for (features, expected) in [
+            (vec![], 1),
+            (vec!["split"], 2),
+            (vec!["rynk"], 2),
+            (vec!["split", "rynk"], 3),
+            (vec!["split", "rynk", "_ble"], 5),
+        ] {
+            let constants = config.build_constants(&features).unwrap();
+            let event = constants.events.iter().find(|e| e.name == "battery_status").unwrap();
+            assert_eq!(event.subs, expected, "features: {features:?}");
         }
     }
 

@@ -9,6 +9,12 @@ readme = "../README.md"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
+[[bin]]
+name = "rmk-nrf-dongle-central"
+path = "src/main.rs"
+test = false
+bench = false
+
 [dependencies]
 rmk = { path = "../../../../rmk", default-features = false, features = [
     "defmt",
@@ -18,22 +24,12 @@ rmk = { path = "../../../../rmk", default-features = false, features = [
     "split",
     "nrf52833_ble",
 ] }
-nrf-sdc = { version = "0.4.0", features = [
-    "defmt",
-    "peripheral",
-    "central",
-    "nrf52833",
-] }
-nrf-mpsl = { version = "0.4.0", features = [
-    "defmt",
-    "critical-section-impl",
-    "nrf52833",
-] }
-bt-hci = { version = "0.10", features = ["defmt"] }
 
-cortex-m = "0.7.7"
-cortex-m-rt = "0.7.5"
-embassy-time = { version = "0.5", features = ["tick-hz-32_768", "defmt", "defmt-timestamp-uptime"] }
+embassy-executor = { version = "0.10", features = [
+    "defmt",
+    "platform-cortex-m",
+    "executor-thread",
+] }
 embassy-nrf = { version = "0.11", features = [
     "defmt",
     "nrf52833",
@@ -42,21 +38,26 @@ embassy-nrf = { version = "0.11", features = [
     "unstable-pac",
     "time",
 ] }
-embassy-executor = { version = "0.10", features = [
+embassy-time = { version = "0.5", features = ["tick-hz-32_768", "defmt", "defmt-timestamp-uptime"] }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc", rev = "9cf87fa7883b89b2d4dc7cd94864da7927bd858c", features = [
     "defmt",
-    "platform-cortex-m",
-    "executor-thread",
+    "critical-section-impl",
+    "nrf52833",
 ] }
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc", rev = "9cf87fa7883b89b2d4dc7cd94864da7927bd858c", features = [
+    "defmt",
+    "peripheral",
+    "central",
+    "nrf52833",
+] }
+
+bt-hci = { version = "0.11", features = ["defmt"] }
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.5"
 defmt = "1"
 defmt-rtt = "1"
 panic-probe = { version = "1", features = ["print-defmt"] }
 static_cell = "2"
-
-[[bin]]
-name = "rmk-nrf-dongle-central"
-path = "src/main.rs"
-test = false
-bench = false
 
 [profile.dev]
 codegen-units = 1
@@ -73,3 +74,22 @@ opt-level = "z"
 
 overflow-checks = false
 lto = "fat"
+
+# Keep the Embassy patch in sync with rmk/Cargo.toml; patches only apply in the root workspace.
+
+[patch.crates-io]
+embassy-boot                 = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-boot-rp              = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-embedded-hal         = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-futures              = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-hal-internal         = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-nrf                  = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-rp                   = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-sync                 = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-time                 = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-time-driver          = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-time-queue-utils     = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-usb                  = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-usb-driver           = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-usb-logger           = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }
+embassy-executor-timer-queue = { git = "https://github.com/embassy-rs/embassy", rev = "12b84e3dd8d6b31f045649b84250292c34e024d4" }

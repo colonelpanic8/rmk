@@ -81,6 +81,11 @@ impl BatteryConfig {
             if chip.chip == "nrf52820" {
                 return Err("nrf52820 has no ADC for battery_adc_pin".into());
             }
+            if chip.chip == "esp32s31" {
+                return Err(
+                    "ESP32-S31 battery ADC calibration is unavailable in esp-hal; use a custom Rust reader".into(),
+                );
+            }
             if chip.series == ChipSeries::Stm32 {
                 return Err("Automatic battery ADC setup is unavailable for STM32; use a custom Rust reader".into());
             }
@@ -115,11 +120,12 @@ impl crate::KeyboardTomlConfig {
         let chip_config = self.get_chip_config();
         let communication = self.get_communication_config()?;
         let board = self.get_board_config()?;
-        let storage_toml = self.get_storage_config();
+        board.validate_pointing_ids()?;
+        let storage_toml = self.storage.unwrap_or_default();
         let storage = if storage_toml.enabled {
             Some(Storage {
                 start_addr: storage_toml.start_addr.unwrap_or(0),
-                num_sectors: if self.get_dfu_config().is_some() {
+                num_sectors: if self.dfu.is_some() {
                     if self.storage_user_set {
                         storage_toml.num_sectors.unwrap_or(8)
                     } else {
@@ -135,8 +141,8 @@ impl crate::KeyboardTomlConfig {
             None
         };
         let dfu = self.split_side_dfu(None)?;
-        let light = self.get_light_config();
-        let display = self.get_display_config();
+        let light = self.light.clone().unwrap_or_default();
+        let display = self.display.clone();
         let output = self.get_output_config()?;
         let dependency = self.get_dependency_config();
         let battery = BatteryConfig::resolve(self.resolve_battery_config(None)?, &chip)?;
@@ -220,11 +226,11 @@ impl crate::KeyboardTomlConfig {
                 .and_then(|p| p.dfu.as_ref())
             {
                 Some(d) => self.resolve_dfu(Some(d), &format!("[split.peripheral[{id}].dfu]")),
-                None => self.resolve_dfu(self.get_dfu_config().as_ref(), "[dfu]"),
+                None => self.resolve_dfu(self.dfu.as_ref(), "[dfu]"),
             },
             None => match self.split.as_ref().and_then(|s| s.central.dfu.as_ref()) {
                 Some(d) => self.resolve_dfu(Some(d), "[split.central.dfu]"),
-                None => self.resolve_dfu(self.get_dfu_config().as_ref(), "[dfu]"),
+                None => self.resolve_dfu(self.dfu.as_ref(), "[dfu]"),
             },
         }
     }

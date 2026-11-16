@@ -8,6 +8,7 @@
 //! - [`Action`] - Single basic operations (key press, layer switch, macro trigger, etc.)
 //! - [`KeyAction`] - Composite behaviors stored in the keymap (tap-hold, morse, etc.)
 //! - [`EncoderAction`] - Rotary encoder actions
+//! - [`TouchAction`] - Touchpad gesture actions
 //! - [`LightAction`] - Light control actions
 //! - [`KeyboardAction`] - Keyboard control actions (reboot, toggle features, etc.)
 //! - [`crate::morse::MorseProfile`] / [`crate::morse::MorseMode`] - Morse/tap-hold timing configuration
@@ -16,6 +17,7 @@ mod encoder;
 mod key_action;
 mod keyboard;
 mod light;
+mod touch;
 
 pub use encoder::EncoderAction;
 pub use key_action::KeyAction;
@@ -23,6 +25,7 @@ pub use keyboard::KeyboardAction;
 pub use light::LightAction;
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
+pub use touch::{TouchAction, TouchGesture};
 
 use crate::keycode::{HidKeyCode, KeyCode, SpecialKey};
 use crate::modifier::ModifierCombination;
@@ -79,9 +82,9 @@ pub enum Action {
     ///
     /// Runtime behavior matches [`Action::DefaultLayer`]; additionally persisted to flash.
     PersistentDefaultLayer(u8),
-    /// A Plover HID stenography key. Press/release of this key updates the
-    /// in-progress steno chord; on first release the accumulated chord is
-    /// sent to the host as a vendor HID report.
+    /// A Plover HID stenography key. Each press/release updates the live chord
+    /// bitmap, which is sent to the host on every change; Plover accumulates
+    /// the bitmap and decides when a stroke is complete.
     #[cfg(feature = "steno")]
     Steno(StenoKey),
 }
