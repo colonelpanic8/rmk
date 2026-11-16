@@ -51,6 +51,24 @@ pub struct IndicatorState {
     pub kana: bool,
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum SplitForce {
+    #[default]
+    Auto,
+    Wired,
+    Ble,
+}
+
+/// Authoritative state of an automatic wired/BLE split-link selector.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct SplitTransportState {
+    /// False on boards without automatic split-transport selection.
+    pub auto: bool,
+    pub force: SplitForce,
+    /// True when the currently selected link is wired, false for BLE.
+    pub wired: bool,
+}
+
 /// State RMK makes available to standard and external lighting sources.
 /// Additional firmware-specific state can be carried in a source of the
 /// board's own type; it does not belong in the core compositor.
@@ -75,6 +93,10 @@ pub struct LightingContext {
     /// paired-versus-empty state observable at once, which is what lets a
     /// board light one indicator per slot key. Zero without `_ble`.
     pub bonded_slots: u8,
+    /// Whether maintenance-gated host mutations are currently allowed.
+    pub maintenance_unlocked: bool,
+    /// Automatic split-link selection state, if the board has one.
+    pub split_transport: SplitTransportState,
 }
 
 /// Access to RMK's standard lighting state from a board-extended snapshot.
