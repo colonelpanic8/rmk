@@ -136,7 +136,10 @@ impl HandleBulk<SetKeymapBulk> for RynkService<'_> {
         // Answer `Busy` rather than park this session on a flash queue the
         // storage task may hold for a whole page migration.
         self.ctx
-            .persist_bounded(segments, self.ctx.set_actions(start, cells.map(|(_, action)| action)))
+            .persist_bounded(
+                segments,
+                self.ctx.set_actions(start, &mut cells.map(|(_, action)| action)),
+            )
             .await
             .ok_or(RynkError::Busy)?
             .or(Err(RynkError::StorageFault))?;
