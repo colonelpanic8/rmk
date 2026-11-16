@@ -2,7 +2,6 @@ use crate::BehaviorConfig;
 
 impl crate::KeyboardTomlConfig {
     pub(crate) fn get_behavior_config(&self) -> Result<BehaviorConfig, String> {
-        let default = self.behavior.clone().unwrap_or_default();
         let num_layers = self.num_layers();
         let matrix_dimensions = self
             .behavior
@@ -12,23 +11,16 @@ impl crate::KeyboardTomlConfig {
             .then(|| self.get_keymap_config().map(|(keymap, _)| (keymap.rows, keymap.cols)))
             .transpose()?;
         match self.behavior.clone() {
-            Some(mut behavior) => {
-                behavior.tri_layer = match behavior.tri_layer {
-                    Some(tri_layer) => {
-                        if tri_layer.upper >= num_layers {
-                            return Err("keyboard.toml: Tri layer upper is larger than [keymap].layers".to_string());
-                        } else if tri_layer.lower >= num_layers {
-                            return Err("keyboard.toml: Tri layer lower is larger than [keymap].layers".to_string());
-                        } else if tri_layer.adjust >= num_layers {
-                            return Err("keyboard.toml: Tri layer adjust is larger than [keymap].layers".to_string());
-                        }
-                        Some(tri_layer)
+            Some(behavior) => {
+                if let Some(tri_layer) = &behavior.tri_layer {
+                    if tri_layer.upper >= num_layers {
+                        return Err("keyboard.toml: Tri layer upper is larger than [keymap].layers".to_string());
+                    } else if tri_layer.lower >= num_layers {
+                        return Err("keyboard.toml: Tri layer lower is larger than [keymap].layers".to_string());
+                    } else if tri_layer.adjust >= num_layers {
+                        return Err("keyboard.toml: Tri layer adjust is larger than [keymap].layers".to_string());
                     }
-                    None => default.tri_layer,
-                };
-                behavior.one_shot = behavior.one_shot.or(default.one_shot);
-                behavior.one_shot_modifiers = behavior.one_shot_modifiers.or(default.one_shot_modifiers);
-                behavior.combo = behavior.combo.or(default.combo);
+                }
                 if let Some(combo) = &behavior.combo {
                     if combo.combos.len() > self.rmk.combo_max_num {
                         return Err("keyboard.toml: number of combos is greater than combo_max_num configured under [rmk] section".to_string());
@@ -76,9 +68,6 @@ impl crate::KeyboardTomlConfig {
                         }
                     }
                 }
-                // Default macros are checked by the const assert the codegen emits.
-                behavior.macros = behavior.macros.or(default.macros);
-                behavior.fork = behavior.fork.or(default.fork);
                 if let Some(fork) = &behavior.fork {
                     let count: usize = fork.forks.iter().map(|f| f.trigger.keys().len()).sum();
                     if count > self.rmk.fork_max_num {
@@ -102,7 +91,6 @@ impl crate::KeyboardTomlConfig {
                         }
                     }
                 }
-                behavior.auto_mouse_layer = behavior.auto_mouse_layer.or(default.auto_mouse_layer);
                 if let Some(entries) = &behavior.auto_mouse_layer {
                     let auto_mouse_layer_max_num = self
                         .rmk
@@ -162,7 +150,6 @@ impl crate::KeyboardTomlConfig {
                         seen_device_ids.push(entry.device_id);
                     }
                 }
-                behavior.morse = behavior.morse.or(default.morse);
                 if let Some(morse) = &behavior.morse
                     && let Some(morses) = &morse.morses
                     && morses.len() > self.rmk.morse_max_num
@@ -172,9 +159,10 @@ impl crate::KeyboardTomlConfig {
                             .to_string(),
                     );
                 }
+                // Default macros are checked by the const assert the codegen emits.
                 Ok(behavior)
             }
-            None => Ok(default),
+            None => Ok(BehaviorConfig::default()),
         }
     }
 }
