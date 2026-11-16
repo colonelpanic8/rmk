@@ -196,7 +196,7 @@ fn expand_bind_interrupt_for_split_peripheral(
                 quote! {}
             };
 
-            if split_config.connection != SplitConnection::Ble {
+            if split_config.connection == SplitConnection::Serial {
                 let clock_power_handler = usb_enabled.then(|| {
                     quote! {
                         CLOCK_POWER => ::embassy_nrf::usb::vbus_detect::InterruptHandler;

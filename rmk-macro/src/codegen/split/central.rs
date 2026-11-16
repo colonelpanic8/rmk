@@ -156,18 +156,18 @@ pub(crate) fn expand_serial_init(chip: &ChipModel, serial: Vec<SerialConfig>) ->
                     static #tx_ring_static: ::static_cell::StaticCell<[u8; 512]> = ::static_cell::StaticCell::new();
                     let #uart_name = ::embassy_nrf::buffered_uarte::BufferedUarte::new(
                         p.#uart_instance,
+                        p.#tx_pin,
+                        p.#rx_pin,
                         p.#timer,
                         p.#ppi_ch1,
                         p.#ppi_ch2,
                         p.#ppi_group,
-                        p.#rx_pin,
-                        p.#tx_pin,
                         #irq_name,
-                        uart_config,
-                        &mut #rx_ring_static.init([0_u8; 4096])[..],
                         &mut #tx_ring_static.init([0_u8; 512])[..],
+                        &mut #rx_ring_static.init([0_u8; 4096])[..],
+                        uart_config,
                     );
-                    let (#rx_name, #tx_name) = #uart_name.split();
+                    let (#tx_name, #rx_name) = #uart_name.split();
                     let direction = ::embassy_nrf::gpio::Output::new(
                         p.#direction_pin,
                         ::embassy_nrf::gpio::Level::Low,

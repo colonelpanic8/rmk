@@ -55,7 +55,7 @@ pub(crate) fn chip_init_default(hardware: &Hardware, peripheral_id: Option<usize
     };
     let is_peripheral_not_ble = if peripheral_id.is_some() {
         match &hardware.board {
-            BoardConfig::Split(split) => split.connection != rmk_config::SplitConnection::Ble,
+            BoardConfig::Split(split) => split.connection == rmk_config::SplitConnection::Serial,
             _ => false,
         }
     } else {
