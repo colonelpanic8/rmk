@@ -301,6 +301,7 @@ _ble = ["dep:trouble-host", "dep:bt-hci", "dep:embassy-crypto", "dep:embassy-cry
 ext_adv = ["_ble", "trouble-host?/per-connection-address", "rmk-macro/ext_adv"]
 
 [dependencies]
+cobs = { version = "0.3", default-features = false }
 rmk-macro = { version = "=0.8.0", path = "../rmk-macro" }
 rmk-types = { version = "=0.4.0", path = "../rmk-types" }
 
