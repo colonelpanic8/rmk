@@ -2,12 +2,12 @@
 
 use rmk_types::constants;
 use rmk_types::protocol::rynk::command::{
-    BootloaderJump, GetBuildInfo, GetCapabilities, GetDeviceInfo, GetDeviceDataDescriptor, GetDeviceDataRecord, GetLockStatus, GetMaintenanceMode, GetVersion, Lock,
-    PeripheralBootloaderJump, Reboot, StorageReset, UnlockPoll,
+    BootloaderJump, GetBuildInfo, GetCapabilities, GetDeviceDataDescriptor, GetDeviceDataRecord, GetDeviceInfo,
+    GetLockStatus, GetMaintenanceMode, GetVersion, Lock, PeripheralBootloaderJump, Reboot, StorageReset, UnlockPoll,
 };
 use rmk_types::protocol::rynk::{
-    BuildInfo, DeviceCapabilities, DeviceInfo, DeviceDataDescriptor, DeviceDataRecord, LockStatus, MaintenanceMode, MAX_BULK_ITEMS, MAX_BULK_KEYS, ProtocolVersion,
-    RYNK_MAX_PAYLOAD_SIZE, RynkError, StorageResetMode,
+    BuildInfo, DeviceCapabilities, DeviceDataDescriptor, DeviceDataRecord, DeviceInfo, LockStatus, MAX_BULK_ITEMS,
+    MAX_BULK_KEYS, MaintenanceMode, ProtocolVersion, RYNK_MAX_PAYLOAD_SIZE, RynkError, StorageResetMode,
 };
 
 use super::super::{RMK_VERSION, RynkService, truncated};
