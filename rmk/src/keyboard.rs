@@ -240,6 +240,11 @@ pub struct Keyboard<'a> {
     #[cfg(feature = "_ble")]
     user_hold: Option<(Instant, u8)>,
 
+    /// An inactive profile key's double-tap window: its end (`None` while the first press is
+    /// held), the profile, the key, and whether the second press is held.
+    #[cfg(feature = "_ble")]
+    profile_tap: Option<(Option<Instant>, u8, KeyboardEventSource, bool)>,
+
     /// Caps Word state machine
     caps_word: CapsWordState,
 
@@ -286,6 +291,8 @@ impl<'a> Keyboard<'a> {
             osm_deadline: None,
             #[cfg(feature = "_ble")]
             user_hold: None,
+            #[cfg(feature = "_ble")]
+            profile_tap: None,
             caps_word: CapsWordState::default(),
             ctrl_gui_swap: false,
             ctrl_gui_swap_requested: false,
@@ -344,6 +351,8 @@ impl<'a> Keyboard<'a> {
             one_shot,
             #[cfg(feature = "_ble")]
             self.user_hold.map(|(at, _)| at),
+            #[cfg(feature = "_ble")]
+            self.profile_tap.and_then(|(at, ..)| at),
             buffered,
             self.mouse.next_deadline(),
             self.keymap.macros(|m| m.is_playing()).then_some(self.macro_due),
@@ -363,7 +372,15 @@ impl<'a> Keyboard<'a> {
             None => self.fire_oneshot_timeout().await,
         }
         #[cfg(feature = "_ble")]
-        self.fire_user_hold().await;
+        {
+            self.fire_user_hold().await;
+            if self
+                .profile_tap
+                .is_some_and(|(at, ..)| at.is_some_and(|at| at <= Instant::now()))
+            {
+                self.finish_profile_tap().await;
+            }
+        }
         self.fire_mouse_repeat().await;
         self.fire_macro().await;
     }
@@ -409,6 +426,39 @@ impl<'a> Keyboard<'a> {
 
     /// Process an input source's press or release.
     pub async fn process_inner(&mut self, event: KeyboardEvent) {
+        #[cfg(feature = "_ble")]
+        if let Some((at, id, source, second_pressed)) = self.profile_tap {
+            let same_key = event.source == source;
+            match at {
+                // Releasing the first tap opens the double-tap window.
+                None if same_key && !event.pressed => {
+                    self.profile_tap = Some((Some(Instant::now() + Duration::from_millis(300)), id, source, false));
+                }
+                Some(at) if same_key && Instant::now() <= at && event.pressed != second_pressed => {
+                    self.profile_tap = event
+                        .pressed
+                        .then(|| (Some(Instant::now() + Duration::from_millis(300)), id, source, true));
+                    return;
+                }
+                _ => self.finish_profile_tap().await,
+            }
+        }
+        self.process_event(event).await;
+    }
+
+    #[cfg(feature = "_ble")]
+    async fn finish_profile_tap(&mut self) {
+        if let Some((_, id, source, second_pressed)) = self.profile_tap.take() {
+            crate::channel::BLE_PROFILE_CHANNEL
+                .send(crate::ble::profile::BleProfileAction::Switch(id))
+                .await;
+            if second_pressed {
+                self.process_event(KeyboardEvent { source, pressed: true }).await;
+            }
+        }
+    }
+
+    async fn process_event(&mut self, event: KeyboardEvent) {
         // A User-key hold gesture needs 5s without any key event, so cancel it here.
         #[cfg(feature = "_ble")]
         {
@@ -1895,10 +1945,14 @@ impl<'a> Keyboard<'a> {
                 // Start the 5s hold gesture for any user key. `fire_user_hold` decides
                 // which ids actually do something, so the id list lives in one place.
                 self.user_hold = Some((Instant::now() + Duration::from_secs(5), id));
-                // Profile keys select on press, so a hold only has to start re-pairing.
+                // Profile keys select on press, so a hold only has to start re-pairing. An
+                // inactive profile first waits out a possible double tap, which keeps it inactive.
                 if id < NUM_BLE_PROFILES as u8 {
-                    info!("Switch to profile: {}", id);
-                    BLE_PROFILE_CHANNEL.send(BleProfileAction::Switch(id)).await;
+                    if id != crate::state::current_profile() {
+                        self.profile_tap = Some((None, id, event.source, false));
+                    } else {
+                        BLE_PROFILE_CHANNEL.send(BleProfileAction::Switch(id)).await;
+                    }
                 }
                 #[cfg(feature = "dongle")]
                 if id == NUM_BLE_PROFILES as u8 + 5 {
@@ -1945,6 +1999,8 @@ impl<'a> Keyboard<'a> {
 
         // Keep the old bond until a replacement pairing succeeds.
         if id < NUM_BLE_PROFILES as u8 {
+            // An inactive profile still waiting on its press is selected first.
+            self.finish_profile_tap().await;
             info!("Profile key held: re-pairing profile {}", id);
             BLE_PROFILE_CHANNEL.send(BleProfileAction::Disconnect(id)).await;
         }
@@ -2548,6 +2604,118 @@ mod test {
         keyboard.osm_state = OneShotState::None;
         report_modifiers(&mut keyboard, false);
         assert!(!keyboard.ctrl_gui_swap);
+    }
+
+    #[cfg(feature = "_ble")]
+    async fn tap_inactive_profile_key(keyboard: &mut Keyboard<'static>) {
+        while crate::channel::BLE_PROFILE_CHANNEL.try_receive().is_ok() {}
+        keyboard.process_user(1, KeyboardEvent::key(3, 6, true)).await;
+        keyboard.process_inner(KeyboardEvent::key(3, 6, false)).await;
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn profile_double_tap_consumes_the_complete_second_tap() {
+        block_on(async {
+            let mut keyboard = create_test_keyboard();
+            tap_inactive_profile_key(&mut keyboard).await;
+            assert!(keyboard.profile_tap.is_some());
+            keyboard.process_inner(KeyboardEvent::key(3, 6, true)).await;
+            keyboard.process_inner(KeyboardEvent::key(3, 6, false)).await;
+            assert!(keyboard.profile_tap.is_none());
+            assert!(crate::channel::BLE_PROFILE_CHANNEL.try_receive().is_err());
+        });
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn profile_single_tap_switches_when_its_deadline_expires() {
+        block_on(async {
+            let mut keyboard = create_test_keyboard();
+            tap_inactive_profile_key(&mut keyboard).await;
+            Timer::at(keyboard.profile_tap.unwrap().0.unwrap()).await;
+            keyboard.fire_expired().await;
+            assert!(matches!(
+                crate::channel::BLE_PROFILE_CHANNEL.try_receive(),
+                Ok(crate::ble::profile::BleProfileAction::Switch(1))
+            ));
+            assert!(keyboard.profile_tap.is_none());
+        });
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn profile_double_tap_interruption_preserves_the_next_key() {
+        block_on(async {
+            let mut keyboard = create_test_keyboard();
+            tap_inactive_profile_key(&mut keyboard).await;
+            keyboard.process_inner(KeyboardEvent::key(0, 0, true)).await;
+            assert!(matches!(
+                crate::channel::BLE_PROFILE_CHANNEL.try_receive(),
+                Ok(crate::ble::profile::BleProfileAction::Switch(1))
+            ));
+            assert!(keyboard.profile_tap.is_none());
+            assert!(!keyboard.registered.is_empty());
+        });
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn incomplete_profile_double_tap_replays_the_second_press() {
+        block_on(async {
+            let mut keyboard = create_test_keyboard();
+            tap_inactive_profile_key(&mut keyboard).await;
+            keyboard.process_inner(KeyboardEvent::key(3, 6, true)).await;
+            assert!(keyboard.registered.is_empty());
+            Timer::at(keyboard.profile_tap.unwrap().0.unwrap()).await;
+            keyboard.fire_expired().await;
+            assert!(matches!(
+                crate::channel::BLE_PROFILE_CHANNEL.try_receive(),
+                Ok(crate::ble::profile::BleProfileAction::Switch(1))
+            ));
+            assert_eq!(keyboard.registered.len(), 1);
+            keyboard.process_inner(KeyboardEvent::key(3, 6, false)).await;
+            assert!(keyboard.registered.is_empty());
+        });
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn interrupted_profile_double_tap_replays_both_keys() {
+        block_on(async {
+            let mut keyboard = create_test_keyboard();
+            tap_inactive_profile_key(&mut keyboard).await;
+            keyboard.process_inner(KeyboardEvent::key(3, 6, true)).await;
+            keyboard.process_inner(KeyboardEvent::key(0, 0, true)).await;
+            assert!(matches!(
+                crate::channel::BLE_PROFILE_CHANNEL.try_receive(),
+                Ok(crate::ble::profile::BleProfileAction::Switch(1))
+            ));
+            assert_eq!(keyboard.registered.len(), 2);
+        });
+    }
+
+    #[cfg(feature = "_ble")]
+    #[test]
+    fn holding_an_inactive_profile_key_selects_it_before_re_pairing() {
+        use crate::ble::profile::BleProfileAction;
+        use crate::channel::BLE_PROFILE_CHANNEL;
+
+        let mut keyboard = create_test_keyboard();
+        BLE_PROFILE_CHANNEL.clear();
+        let (_, actions) = block_on(embassy_futures::join::join(
+            async {
+                keyboard.process_user(1, KeyboardEvent::key(3, 6, true)).await;
+                Timer::at(keyboard.user_hold.unwrap().0).await;
+                keyboard.fire_expired().await;
+            },
+            async { (BLE_PROFILE_CHANNEL.receive().await, BLE_PROFILE_CHANNEL.receive().await) },
+        ));
+        assert!(matches!(
+            actions,
+            (BleProfileAction::Switch(1), BleProfileAction::Disconnect(1))
+        ));
+        assert!(keyboard.profile_tap.is_none());
     }
 
     async fn force_timeout_first_hold(keyboard: &mut Keyboard<'static>) {

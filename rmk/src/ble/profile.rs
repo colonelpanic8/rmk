@@ -115,6 +115,8 @@ pub(crate) enum BleProfileAction {
     Next,
     /// Clear a profile's bond without selecting it. None means clearing the current profile.
     ClearBond(Option<u8>),
+    /// Clear every host profile's bond, keeping the dongle profile's.
+    ClearAllBonds,
 }
 
 /// Stored bonds for host or dongle profiles.
