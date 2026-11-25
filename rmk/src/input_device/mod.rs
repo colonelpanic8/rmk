@@ -7,6 +7,7 @@ use crate::core_traits::Runnable;
 
 pub mod adc;
 pub mod battery;
+pub mod cirque_pinnacle;
 pub mod iqs5xx;
 pub mod joystick;
 pub mod pmw33xx;
