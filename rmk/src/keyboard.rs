@@ -1768,8 +1768,9 @@ impl<'a> Keyboard<'a> {
 
         if let Some(report) = report {
             let scale = self.keymap.mouse_layer_scale();
-            let report = self.mouse.scale_report(report, scale);
+            let mut report = self.mouse.scale_report(report, scale);
             self.keymap.set_mouse_buttons(self.mouse.report.buttons);
+            report.buttons |= crate::input_device::pointing::device_held_buttons();
             self.send_report(Report::MouseReport(report)).await;
             yield_now().await;
         }
@@ -2042,7 +2043,8 @@ impl<'a> Keyboard<'a> {
     pub(crate) async fn send_mouse_report(&mut self) {
         let report = self.mouse.get_report();
         let scale = self.keymap.mouse_layer_scale();
-        let report = self.mouse.scale_report(report, scale);
+        let mut report = self.mouse.scale_report(report, scale);
+        report.buttons |= crate::input_device::pointing::device_held_buttons();
         self.send_report(Report::MouseReport(report)).await;
         yield_now().await;
     }
