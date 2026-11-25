@@ -1,5 +1,3 @@
-use core::sync::atomic::Ordering;
-
 use embassy_futures::select::select;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use rmk_types::battery::BatteryStatus;
@@ -11,7 +9,6 @@ use crate::core_traits::Runnable;
 use crate::event::PeripheralBatteryEvent;
 use crate::event::{BatteryStatusEvent, SubscribableEvent};
 use crate::keyboard::LAST_KEY_TIMESTAMP;
-use crate::sleep::SLEEPING_STATE;
 
 const CHARACTERISTIC_PRESENTATION_FORMAT_UINT8: u8 = 0x04;
 const CHARACTERISTIC_PRESENTATION_FORMAT_EXPONENT_ZERO: u8 = 0x00;
@@ -184,7 +181,7 @@ impl<P: PacketPool> Runnable for BleBatteryServer<'_, '_, '_, P> {
                 let awake_timeout = async {
                     loop {
                         Timer::after_secs(1800).await;
-                        if !SLEEPING_STATE.load(Ordering::Acquire) {
+                        if !crate::state::current_sleeping() {
                             break;
                         }
                     }
