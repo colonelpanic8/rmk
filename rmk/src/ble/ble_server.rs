@@ -22,7 +22,9 @@ use crate::dongle::event::{DONGLE_EVENT_CHAR_UUID, DONGLE_EVENT_MAX, DONGLE_EVEN
 use crate::hid::RynkHidReport;
 #[cfg(feature = "vial")]
 use crate::hid::ViaReport;
-use crate::hid::{BleCompositeReport, CompositeReportType, HidError, HidWriterTrait, MOUSE_REPORT_SIZE, Report};
+use crate::hid::{
+    BLE_REPORT_MAP_SIZE, BleCompositeReport, CompositeReportType, HidError, HidWriterTrait, MOUSE_REPORT_SIZE, Report,
+};
 
 // Used for saving the client attribute (CCCD) table. Tracks the trouble-host
 // per-connection client-specific attribute buffer size.
@@ -115,31 +117,38 @@ impl Server<'_> {
         })
     }
 
-    pub(crate) fn prepare_name_read(&self, event: &GattEvent<'_, '_, DefaultPacketPool>, slot: u8) {
-        let [name] = self.profile_name.characteristic.as_slice() else {
-            return;
-        };
-        let uuid = Uuid::from(characteristic::DEVICE_NAME);
-        let reads_name = match event {
-            GattEvent::Read(read) => read.handle() == name.handle,
+    pub(crate) fn prepare_profile_read(&self, event: &GattEvent<'_, '_, DefaultPacketPool>, slot: u8) {
+        let reads = |handle, uuid: Uuid| match event {
+            GattEvent::Read(read) => read.handle() == handle,
             GattEvent::Other(other) => match other.payload().incoming() {
                 AttClient::Request(AttReq::ReadByType {
                     attribute_type,
                     start,
                     end,
-                }) => attribute_type == uuid && (start..=end).contains(&name.handle),
+                }) => attribute_type == uuid && (start..=end).contains(&handle),
                 AttClient::Request(AttReq::FindByTypeValue {
                     att_type,
                     start_handle,
                     end_handle,
                     ..
-                }) => Uuid::from(att_type) == uuid && (start_handle..=end_handle).contains(&name.handle),
+                }) => Uuid::from(att_type) == uuid && (start_handle..=end_handle).contains(&handle),
                 _ => false,
             },
             _ => false,
         };
-        if reads_name && let Some(value) = self.profile_name(slot).first() {
+        if let [name] = self.profile_name.characteristic.as_slice()
+            && reads(name.handle, characteristic::DEVICE_NAME.into())
+            && let Some(value) = self.profile_name(slot).first()
+        {
             unwrap!(self.set(name, value));
+        }
+
+        #[cfg(feature = "hires_scroll")]
+        {
+            let report = &self.hid_service.resolution_multipliers;
+            if reads(report.handle, Uuid::new_short(0x2a4d)) {
+                unwrap!(self.set(report, &crate::hid::BLE_SCROLL_MULTIPLIERS[slot as usize].get()));
+            }
         }
     }
 
@@ -253,35 +262,60 @@ pub(crate) struct VialGattService {
     pub(crate) output_data: [u8; 32],
 }
 
-/// The single HID service carrying all reports, distinguished by report id via
-/// each characteristic's Report Reference descriptor. Android's HID host only
-/// attaches to the first HID service instance, so the reports must not be
-/// spread over multiple service instances.
-#[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
-pub(crate) struct HidService {
-    #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
-    pub(crate) hid_info: [u8; 4],
-    #[characteristic(uuid = "2a4b", read, value = BleCompositeReport::desc().try_into().expect("Failed to convert BleCompositeReport to [u8; 177]"))]
-    pub(crate) report_map: [u8; 177],
-    #[characteristic(uuid = "2a4c", write_without_response)]
-    pub(crate) hid_control_point: u8,
-    #[characteristic(uuid = "2a4e", read, write_without_response, value = 1)]
-    pub(crate) protocol_mode: u8,
-    #[descriptor(uuid = "2908", read, value = [CompositeReportType::Keyboard as u8, 1u8])]
-    #[characteristic(uuid = "2a4d", read, notify)]
-    pub(crate) input_keyboard: [u8; 8],
-    #[descriptor(uuid = "2908", read, value = [CompositeReportType::Keyboard as u8, 2u8])]
-    #[characteristic(uuid = "2a4d", read, write, write_without_response)]
-    pub(crate) output_keyboard: [u8; 1],
-    #[descriptor(uuid = "2908", read, value = [CompositeReportType::Mouse as u8, 1u8])]
-    #[characteristic(uuid = "2a4d", read, notify)]
-    pub(crate) mouse_report: [u8; MOUSE_REPORT_SIZE],
-    #[descriptor(uuid = "2908", read, value = [CompositeReportType::Media as u8, 1u8])]
-    #[characteristic(uuid = "2a4d", read, notify)]
-    pub(crate) media_report: [u8; 2],
-    #[descriptor(uuid = "2908", read, value = [CompositeReportType::System as u8, 1u8])]
-    #[characteristic(uuid = "2a4d", read, notify)]
-    pub(crate) system_report: [u8; 1],
+// The GATT macro counts cfg-disabled fields in its attribute-table capacity.
+// Pass it only the reports this firmware actually registers.
+macro_rules! hid_service {
+    ($($feature_report:ident)?) => {
+        /// The single HID service carrying all reports, distinguished by report id via
+        /// each characteristic's Report Reference descriptor. Android's HID host only
+        /// attaches to the first HID service instance, so the reports must not be
+        /// spread over multiple service instances.
+        #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
+        pub(crate) struct HidService {
+            #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
+            pub(crate) hid_info: [u8; 4],
+            #[characteristic(uuid = "2a4b", read, value = BleCompositeReport::desc().try_into().expect("BLE_REPORT_MAP_SIZE does not match BleCompositeReport"))]
+            pub(crate) report_map: [u8; BLE_REPORT_MAP_SIZE],
+            #[characteristic(uuid = "2a4c", write_without_response)]
+            pub(crate) hid_control_point: u8,
+            #[characteristic(uuid = "2a4e", read, write_without_response, value = 1)]
+            pub(crate) protocol_mode: u8,
+            #[descriptor(uuid = "2908", read, value = [CompositeReportType::Keyboard as u8, 1u8])]
+            #[characteristic(uuid = "2a4d", read, notify)]
+            pub(crate) input_keyboard: [u8; 8],
+            #[descriptor(uuid = "2908", read, value = [CompositeReportType::Keyboard as u8, 2u8])]
+            #[characteristic(uuid = "2a4d", read, write, write_without_response)]
+            pub(crate) output_keyboard: [u8; 1],
+            #[descriptor(uuid = "2908", read, value = [CompositeReportType::Mouse as u8, 1u8])]
+            #[characteristic(uuid = "2a4d", read, notify)]
+            pub(crate) mouse_report: [u8; MOUSE_REPORT_SIZE],
+            #[descriptor(uuid = "2908", read, value = [CompositeReportType::Media as u8, 1u8])]
+            #[characteristic(uuid = "2a4d", read, notify)]
+            pub(crate) media_report: [u8; 2],
+            #[descriptor(uuid = "2908", read, value = [CompositeReportType::System as u8, 1u8])]
+            #[characteristic(uuid = "2a4d", read, notify)]
+            pub(crate) system_report: [u8; 1],
+            $(
+                #[descriptor(uuid = "2908", read, value = [crate::hid::RESOLUTION_MULTIPLIER_REPORT_ID, 3u8])]
+                #[characteristic(uuid = "2a4d", read, write, permissions(encrypted))]
+                pub(crate) $feature_report: [u8; 2],
+            )?
+        }
+    };
+}
+
+#[cfg(not(feature = "hires_scroll"))]
+hid_service!();
+
+#[cfg(feature = "hires_scroll")]
+hid_service!(resolution_multipliers);
+
+#[cfg(test)]
+#[test]
+fn hid_attribute_capacity_matches_registered_reports() {
+    let mut table = AttributeTable::<NoopRawMutex, { HidService::ATTRIBUTE_COUNT }>::new();
+    HidService::new(&mut table);
+    assert_eq!(table.len(), HidService::ATTRIBUTE_COUNT);
 }
 
 pub(crate) struct BleHidServer<'stack, 'server, 'conn, P: PacketPool> {
