@@ -616,8 +616,18 @@ impl<'a> PointingProcessor<'a> {
         if let Some(acceleration) = self.config.acceleration {
             (x, y) = accelerate(x, y, dt_ms, acceleration, &mut self.acceleration_rest);
         }
-        let out_x = scale_motion(x, cfg.multiplier_x, cfg.divisor_x, &mut self.accumulator.remainder_x);
-        let out_y = scale_motion(y, cfg.multiplier_y, cfg.divisor_y, &mut self.accumulator.remainder_y);
+        let out_x = scale_motion(
+            x,
+            cfg.multiplier_x.into(),
+            cfg.divisor_x.into(),
+            &mut self.accumulator.remainder_x,
+        );
+        let out_y = scale_motion(
+            y,
+            cfg.multiplier_y.into(),
+            cfg.divisor_y.into(),
+            &mut self.accumulator.remainder_y,
+        );
         if out_x == 0 && out_y == 0 && (x, y) != (0, 0) && !buttons_changed {
             return None;
         }
@@ -2102,6 +2112,7 @@ mod tests {
 
         let scroll = |h, v| PointingEvent {
             device_id: 0,
+            buttons: 0,
             axes: [
                 AxisEvent {
                     typ: AxisValType::Rel,
