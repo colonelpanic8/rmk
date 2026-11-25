@@ -1993,10 +1993,10 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
                     #[cfg(feature = "_ble")]
                     if value
                         .profile
-                        .is_some_and(|profile| profile as usize >= crate::NUM_BLE_PROFILE)
+                        .is_some_and(|profile| profile as usize >= crate::NUM_BLE_PROFILES)
                         || value
                             .bonded
-                            .is_some_and(|bonded| bonded.slot as usize >= crate::NUM_BLE_PROFILE)
+                            .is_some_and(|bonded| bonded.slot as usize >= crate::NUM_BLE_PROFILES)
                     {
                         return Err(LightingError::InvalidRequest);
                     }
