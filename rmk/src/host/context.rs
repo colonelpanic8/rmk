@@ -261,7 +261,7 @@ impl<'a> KeyboardContext<'a> {
             return true;
         };
         let (rows, cols, layers) = self.keymap_dimensions();
-        if config.layer.is_some_and(|layer| layer as usize >= layers) {
+        if config.layers != u32::MAX && config.layers.checked_shr(layers as u32).is_some_and(|above| above != 0) {
             return false;
         }
         config.positions.iter().enumerate().all(|(idx, position)| {
