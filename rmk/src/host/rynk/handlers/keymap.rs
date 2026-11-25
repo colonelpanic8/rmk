@@ -2,12 +2,12 @@
 
 use rmk_types::action::{EncoderAction, KeyAction};
 use rmk_types::protocol::rynk::command::{
-    GetDefaultLayer, GetEncoderAction, GetKeyAction, GetKeymapBulk, SetDefaultLayer, SetEncoderAction, SetKeyAction,
-    SetKeymapBulk,
+    GetDefaultLayer, GetEncoderAction, GetKeyAction, GetKeymapBulk, GetLayerMetadata, SetDefaultLayer,
+    SetEncoderAction, SetKeyAction, SetKeymapBulk, SetLayerMetadata,
 };
 use rmk_types::protocol::rynk::{
-    GetEncoderRequest, GetKeymapBulkRequest, KeyPosition, RynkError, RynkMessage, SetEncoderRequest, SetKeyRequest,
-    bulk_key_capacity,
+    GetEncoderRequest, GetKeymapBulkRequest, KeyPosition, LAYER_NAME_MAX_LEN, LayerMetadata, RynkError, RynkMessage,
+    SetEncoderRequest, SetKeyRequest, SetLayerMetadataRequest, bulk_key_capacity,
 };
 
 use super::super::RynkService;
@@ -47,6 +47,42 @@ impl Handle<SetDefaultLayer> for RynkService<'_> {
     }
 }
 
+impl Handle<GetLayerMetadata> for RynkService<'_> {
+    async fn handle(&self, layer: u8) -> Result<LayerMetadata, RynkError> {
+        self.check_layer(layer)?;
+        #[cfg(feature = "storage")]
+        if let Some(crate::storage::StorageValue::LayerMetadata(metadata)) =
+            crate::storage::read(crate::storage::StorageKey::LayerMetadata(layer))
+                .await
+                .map_err(|_| RynkError::StorageFault)?
+        {
+            return Ok(metadata);
+        }
+        Ok(self.compiled_layer_metadata(layer))
+    }
+}
+
+impl Handle<SetLayerMetadata> for RynkService<'_> {
+    async fn handle(&self, request: SetLayerMetadataRequest) -> Result<(), RynkError> {
+        self.check_layer(request.layer)?;
+        if request.metadata.occupied == request.metadata.name.is_empty() {
+            return Err(RynkError::Invalid);
+        }
+        #[cfg(feature = "storage")]
+        {
+            crate::storage::store(crate::storage::StorageItem::LayerMetadata {
+                layer: request.layer,
+                metadata: request.metadata,
+            })
+            .await
+            .map_err(|_| RynkError::StorageFault)?;
+            Ok(())
+        }
+        #[cfg(not(feature = "storage"))]
+        Err(RynkError::Unimplemented)
+    }
+}
+
 impl Handle<GetEncoderAction> for RynkService<'_> {
     async fn handle(&self, r: GetEncoderRequest) -> Result<EncoderAction, RynkError> {
         self.check_encoder_bounds(r.layer, r.encoder_id)?;
@@ -65,6 +101,31 @@ impl Handle<SetEncoderAction> for RynkService<'_> {
 }
 
 impl RynkService<'_> {
+    fn check_layer(&self, layer: u8) -> Result<(), RynkError> {
+        let (_, _, num_layers) = self.ctx.keymap_dimensions();
+        if (layer as usize) >= num_layers {
+            Err(RynkError::Invalid)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn compiled_layer_metadata(&self, layer: u8) -> LayerMetadata {
+        let Some(Some(name)) = self.layer_names.get(layer as usize) else {
+            return LayerMetadata::vacant();
+        };
+        let mut stored = heapless::String::<LAYER_NAME_MAX_LEN>::new();
+        for ch in name.chars() {
+            if stored.push(ch).is_err() {
+                break;
+            }
+        }
+        LayerMetadata {
+            occupied: true,
+            name: stored,
+        }
+    }
+
     /// `Invalid` for a key position outside the live keymap grid. Reads and
     /// writes share these bounds.
     fn check_key_position(&self, pos: &KeyPosition) -> Result<(), RynkError> {
