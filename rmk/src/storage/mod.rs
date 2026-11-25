@@ -13,7 +13,7 @@ use rmk_types::connection::ConnectionType;
 use rmk_types::morse::MorseProfile;
 #[cfg(feature = "host")]
 use rmk_types::morse::MorseProfileName;
-#[cfg(feature = "host")]
+#[cfg(feature = "rynk")]
 use rmk_types::protocol::rynk::BehaviorOptions;
 use sequential_storage::Error as SSError;
 use sequential_storage::cache::Cache;
@@ -389,7 +389,7 @@ pub(crate) struct StoredBehaviorOptions {
     pub(crate) morse_enable_flow_tap: bool,
 }
 
-#[cfg(feature = "host")]
+#[cfg(feature = "rynk")]
 impl From<BehaviorOptions> for StoredBehaviorOptions {
     fn from(options: BehaviorOptions) -> Self {
         Self {
