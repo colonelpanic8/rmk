@@ -81,7 +81,8 @@ Combo configuration includes the following parameters:
   - `actions`: An array of strings defining the resolved key actions that trigger a legacy combo.
   - `positions`: An alternative to `actions`, written as `[[row, col], ...]`, that matches physical positions in the keyboard's unified matrix. Split-board row/column offsets are already included. Position combos keep working when those keys have duplicate actions or resolve differently on another layer.
   - `output`: The action emitted when every configured action or position is pressed.
-  - `layer`: An optional parameter specifying the active layer on which the combo is valid. If omitted, the combo is valid on all layers; position matching remains independent of the resolved actions.
+  - `layers`: An optional list of the active layers on which the combo is valid. If neither `layers` nor `layer` is specified, the combo is valid on all layers; position matching remains independent of the resolved actions.
+  - `layer`: An optional single layer the combo is valid on, the same as a one-element `layers` list. Specify at most one of `layer` and `layers`.
 
 Each combo must use either `actions` or `positions`, never both. Existing
 action-based configurations retain their original semantics.
@@ -99,6 +100,8 @@ combos = [
   { actions = ["F", "D"], output = "Tab", layer = 0 },
   # Physical positions work even if both currently resolve to the same action
   { positions = [[1, 3], [1, 10]], output = "Backspace" },
+  # Press K and L keys simultaneously to output Backspace key on layers 0, 1 and 3
+  { actions = ["K", "L"], output = "Backspace", layers = [0, 1, 3] },
   # Three-key combo, press A, S, and D keys to switch to layer 2
   { actions = ["A", "S", "D"], output = "TO(2)" }
 ]
