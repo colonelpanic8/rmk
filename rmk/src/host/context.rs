@@ -7,6 +7,7 @@ use rmk_types::auto_mouse::AutoMouseLayerConfig;
 use rmk_types::battery::BatteryStatus;
 use rmk_types::combo::{Combo as ComboConfig, ComboDefinition};
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
+use rmk_types::constants::KEYMAP_SEGMENT_KEYS;
 use rmk_types::fork::Fork;
 use rmk_types::led_indicator::LedIndicator;
 #[cfg(feature = "storage")]
@@ -39,6 +40,10 @@ use crate::storage::{self, StorageItem, store};
 const PERSIST_ROOM_WAIT: Duration = Duration::from_millis(500);
 #[cfg(feature = "storage")]
 const PERSIST_ROOM_POLL: Duration = Duration::from_millis(20);
+
+/// Orders keymap segment writes across host sessions, see [`KeyboardContext::set_actions`].
+#[cfg(feature = "storage")]
+static KEYMAP_WRITER: embassy_sync::mutex::Mutex<crate::RawMutex, ()> = embassy_sync::mutex::Mutex::new(());
 
 /// Whether `count` persist messages can enter a queue with `free` of
 /// `capacity` slots open without parking the sender.
@@ -131,16 +136,47 @@ impl<'a> KeyboardContext<'a> {
     }
 
     pub async fn set_action(&self, layer: u8, row: u8, col: u8, action: KeyAction) -> Result<(), ()> {
-        self.keymap
-            .set_action_at(KeyboardEventSource::key_pos(col, row), layer as usize, action);
-        #[cfg(feature = "storage")]
-        store(StorageItem::Keymap {
-            layer,
-            row,
-            col,
-            action,
-        })
-        .await?;
+        let (rows, cols, _) = self.keymap_dimensions();
+        self.set_actions((layer as usize * rows + row as usize) * cols + col as usize, [action])
+            .await
+    }
+
+    /// Write `actions` into consecutive cells from flat index `start`, in the order
+    /// [`get_action_flat`](Self::get_action_flat) reads, stopping at the keymap's end.
+    ///
+    /// Each row segment the cells fall in is persisted whole as one flash item, so a
+    /// caller that covers a segment in one call pays for one item rather than one per cell.
+    pub async fn set_actions(&self, start: usize, actions: impl IntoIterator<Item = KeyAction>) -> Result<(), ()> {
+        let (rows, cols, num_layers) = self.keymap_dimensions();
+        let mut actions = actions.into_iter().peekable();
+        let mut offset = start;
+        while offset < num_layers * rows * cols && actions.peek().is_some() {
+            let (layer, row, col) = (offset / (rows * cols), offset / cols % rows, offset % cols);
+            let segment_start = col - col % KEYMAP_SEGMENT_KEYS;
+            let segment = segment_start..cols.min(segment_start + KEYMAP_SEGMENT_KEYS);
+            // Held from the first RAM write until the segment is on flash: the item is a
+            // snapshot, and two host sessions editing one segment must not land the older last.
+            #[cfg(feature = "storage")]
+            let _writer = KEYMAP_WRITER.lock().await;
+            for (col, action) in (col..segment.end).zip(&mut actions) {
+                self.keymap
+                    .set_action_at(KeyboardEventSource::key_pos(col as u8, row as u8), layer, action);
+                offset += 1;
+            }
+            #[cfg(feature = "storage")]
+            store(StorageItem::KeymapSegment {
+                layer: layer as u8,
+                row: row as u8,
+                col: segment.start as u8,
+                actions: segment
+                    .map(|col| {
+                        self.keymap
+                            .get_action_at(KeyboardEventSource::key_pos(col as u8, row as u8), layer)
+                    })
+                    .collect(),
+            })
+            .await?;
+        }
         Ok(())
     }
 
