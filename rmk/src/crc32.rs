@@ -37,6 +37,12 @@ pub struct Crc32 {
     state: u32,
 }
 
+impl Default for Crc32 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Crc32 {
     /// Create a new CRC-32 calculator initialised to `0xFFFF_FFFF`.
     pub const fn new() -> Self {
