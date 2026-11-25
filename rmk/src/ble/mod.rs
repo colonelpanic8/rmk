@@ -515,7 +515,7 @@ async fn run_ble_keyboard<
         // that is fast when a host should connect soon: a bonded host reconnecting,
         // or a new host pairing with a profile that waits for one.
         const ADV_PERIOD: Duration = Duration::from_secs(300);
-        const FAST_ADV: Duration = Duration::from_secs(30);
+        const FAST_ADV: Duration = Duration::from_secs(crate::BLE_ADVERTISING_FAST_TIMEOUT_SECS as u64);
         // Start of the current advertising period; `None` while asleep until input.
         let mut adv_start = Some(Instant::now());
         // Let USB detection run before the first advertisement.
