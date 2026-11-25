@@ -36,6 +36,7 @@ use rmk_types::protocol::rynk::{
 
 use crate::RawMutex;
 use crate::core_traits::Runnable;
+use crate::lighting::packed::PackedRules;
 use crate::lighting::{
     BackgroundMode, BackgroundState, BuiltinEffect, ConditionalSceneCell, FramePage, LayerPolicy, LayerState, LedId,
     LightingControls, LightingMailbox, LightingNodeId, LightingRouting, LightingTopology, OVERLAY_CHUNK_SIZE,
@@ -267,7 +268,7 @@ pub struct RynkLightingController<'a> {
     /// with `Unsupported`.
     pub(super) scene_capacity: u16,
     pub(super) runtime_conditional_scene_capacity: u16,
-    pub(super) conditional_scenes: &'a [ConditionalSceneCell<BuiltinEffect>],
+    pub(super) conditional_scenes: PackedRules<'a>,
     pub(super) controls: LightingControls,
     /// Whether the board wired a host-selectable extension source; gates the
     /// `EXTENSION_EFFECTS` capability bit and the extension endpoints.
@@ -298,7 +299,7 @@ impl<'a> RynkLightingController<'a> {
             },
             scene_capacity: 0,
             runtime_conditional_scene_capacity: 0,
-            conditional_scenes: &[],
+            conditional_scenes: PackedRules::EMPTY,
             controls: LightingControls {
                 output_toggle_user_action: None,
                 output_mode_cycle_user_action: None,
@@ -399,7 +400,7 @@ impl<'a> RynkLightingController<'a> {
     }
 
     /// Advertise immutable conditional scenes compiled from board config.
-    pub const fn with_conditional_scenes(mut self, scenes: &'a [ConditionalSceneCell<BuiltinEffect>]) -> Self {
+    pub const fn with_conditional_scenes(mut self, scenes: PackedRules<'a>) -> Self {
         self.conditional_scenes = scenes;
         self
     }
@@ -822,10 +823,11 @@ pub struct StandardRynkLightingAdapter<
     const OVERLAY_CAPACITY: usize,
     const CORE_COMMAND_CAPACITY: usize,
     const SCENE_CAP: usize = 0,
+    const RULE_CAP: usize = 0,
 > {
     protocol: &'a RynkLightingMailbox,
     core: &'a LightingMailbox<
-        StandardCommand<OVERLAY_CAPACITY, SCENE_CAP>,
+        StandardCommand<OVERLAY_CAPACITY, SCENE_CAP, RULE_CAP>,
         StandardReply,
         StandardError,
         CORE_COMMAND_CAPACITY,
@@ -833,13 +835,18 @@ pub struct StandardRynkLightingAdapter<
     topology: LightingTopology<'a>,
 }
 
-impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, const SCENE_CAP: usize>
-    StandardRynkLightingAdapter<'a, OVERLAY_CAPACITY, CORE_COMMAND_CAPACITY, SCENE_CAP>
+impl<
+    'a,
+    const OVERLAY_CAPACITY: usize,
+    const CORE_COMMAND_CAPACITY: usize,
+    const SCENE_CAP: usize,
+    const RULE_CAP: usize,
+> StandardRynkLightingAdapter<'a, OVERLAY_CAPACITY, CORE_COMMAND_CAPACITY, SCENE_CAP, RULE_CAP>
 {
     pub const fn new(
         protocol: &'a RynkLightingMailbox,
         core: &'a LightingMailbox<
-            StandardCommand<OVERLAY_CAPACITY, SCENE_CAP>,
+            StandardCommand<OVERLAY_CAPACITY, SCENE_CAP, RULE_CAP>,
             StandardReply,
             StandardError,
             CORE_COMMAND_CAPACITY,
@@ -863,7 +870,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
 
     async fn request_core(
         &self,
-        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP>,
+        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP, RULE_CAP>,
     ) -> LightingResult<StandardReply> {
         self.core
             .request(command)
@@ -873,7 +880,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
 
     async fn request_core_state(
         &self,
-        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP>,
+        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP, RULE_CAP>,
     ) -> LightingResult<StandardState> {
         match self.request_core(command).await? {
             StandardReply::State(state) => Ok(state),
@@ -895,7 +902,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
     /// source of truth instead of mirroring its insertion algorithm here.
     async fn scene_mutation(
         &self,
-        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP>,
+        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP, RULE_CAP>,
     ) -> LightingResult<StandardState> {
         let state = self.request_core_state(command).await?;
         self.persist_scenes(&state).await;
@@ -907,7 +914,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
     /// cycle instead of the compiled-in default.
     async fn extension_mutation(
         &self,
-        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP>,
+        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP, RULE_CAP>,
     ) -> LightingResult<StandardState> {
         let state = self.request_core_state(command).await?;
         self.persist_extension().await;
@@ -1025,7 +1032,7 @@ impl<'a, const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, cons
 
     async fn runtime_conditional_scene_mutation(
         &self,
-        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP>,
+        command: StandardCommand<OVERLAY_CAPACITY, SCENE_CAP, RULE_CAP>,
     ) -> LightingResult<StandardState> {
         let state = self.request_core_state(command).await?;
         self.persist_runtime_conditional_scenes(&state).await;
@@ -2190,8 +2197,15 @@ where
 /// before the engine begins serving commands. Cells whose stable LED id no
 /// longer resolves against the current topology are skipped rather than
 /// failing the boot.
-pub fn install_lighting_scenes<Extension, Status, const N: usize, const OVERLAY_CAP: usize, const SCENE_CAP: usize>(
-    engine: &mut StandardLightingEngine<'_, Extension, Status, N, OVERLAY_CAP, SCENE_CAP>,
+pub fn install_lighting_scenes<
+    Extension,
+    Status,
+    const N: usize,
+    const OVERLAY_CAP: usize,
+    const SCENE_CAP: usize,
+    const RULE_CAP: usize,
+>(
+    engine: &mut StandardLightingEngine<'_, Extension, Status, N, OVERLAY_CAP, SCENE_CAP, RULE_CAP>,
     topology: &LightingTopology<'_>,
     cells: &[LightingSceneCell],
     policy: Option<LightingLayerPolicy>,
@@ -2222,8 +2236,9 @@ pub fn install_lighting_runtime_conditional_scenes<
     const N: usize,
     const OVERLAY_CAP: usize,
     const SCENE_CAP: usize,
+    const RULE_CAP: usize,
 >(
-    engine: &mut StandardLightingEngine<'_, Extension, Status, N, OVERLAY_CAP, SCENE_CAP>,
+    engine: &mut StandardLightingEngine<'_, Extension, Status, N, OVERLAY_CAP, SCENE_CAP, RULE_CAP>,
     topology: &LightingTopology<'_>,
     cells: &[WireAdvancedConditionalSceneCell],
 ) {
@@ -2258,8 +2273,15 @@ pub fn install_lighting_runtime_conditional_scenes<
 
 /// Install one persisted self-describing rule. Invalid rules and LED ids that
 /// no longer exist in the compiled topology are ignored at boot.
-pub fn install_lighting_rule<Extension, Status, const N: usize, const OVERLAY_CAP: usize, const SCENE_CAP: usize>(
-    engine: &mut StandardLightingEngine<'_, Extension, Status, N, OVERLAY_CAP, SCENE_CAP>,
+pub fn install_lighting_rule<
+    Extension,
+    Status,
+    const N: usize,
+    const OVERLAY_CAP: usize,
+    const SCENE_CAP: usize,
+    const RULE_CAP: usize,
+>(
+    engine: &mut StandardLightingEngine<'_, Extension, Status, N, OVERLAY_CAP, SCENE_CAP, RULE_CAP>,
     topology: LightingTopology<'_>,
     rule: LightingRule,
 ) {
@@ -2268,8 +2290,8 @@ pub fn install_lighting_rule<Extension, Status, const N: usize, const OVERLAY_CA
     }
 }
 
-impl<const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, const SCENE_CAP: usize> Runnable
-    for StandardRynkLightingAdapter<'_, OVERLAY_CAPACITY, CORE_COMMAND_CAPACITY, SCENE_CAP>
+impl<const OVERLAY_CAPACITY: usize, const CORE_COMMAND_CAPACITY: usize, const SCENE_CAP: usize, const RULE_CAP: usize>
+    Runnable for StandardRynkLightingAdapter<'_, OVERLAY_CAPACITY, CORE_COMMAND_CAPACITY, SCENE_CAP, RULE_CAP>
 {
     #[cfg(not(feature = "storage"))]
     async fn run(&mut self) -> ! {
