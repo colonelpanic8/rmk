@@ -292,6 +292,7 @@ impl<'a> RynkService<'a> {
             | Cmd::GetBehaviorOptions
             | Cmd::GetAutoMouseLayerConfigs
             | Cmd::GetLayerState
+            | Cmd::GetLayerMetadata
             | Cmd::GetModifierState
             | Cmd::GetPointingConfig
             | Cmd::GetPointingCapabilities
