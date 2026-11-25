@@ -373,6 +373,7 @@ impl<
                 &stack,
                 self.address,
                 &self.device_config,
+                self.ble_name,
                 &self.config,
                 #[cfg(feature = "host")]
                 self.host_service,
