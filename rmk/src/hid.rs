@@ -1,5 +1,7 @@
 /// Traits and types for HID message reporting and listening.
 use core::future::Future;
+#[cfg(feature = "hires_scroll")]
+use core::sync::atomic::Ordering;
 
 use embassy_usb::class::hid::device::ReadError;
 use embassy_usb::driver::EndpointError;
