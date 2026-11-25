@@ -151,12 +151,9 @@ impl BatteryProcessor {
         let charging = event.charging;
         info!("Charging state changed: {:?}", charging);
 
+        // Keep the last measured level across charge transitions; the next ADC
+        // sample refreshes it.
         let level = match self.battery_status {
-            // ADC updates pause during charging, so refresh the level when charging ends.
-            BatteryStatus::Available {
-                charge_state: ChargeState::Charging,
-                ..
-            } if !charging => None,
             BatteryStatus::Available { level, .. } => level,
             BatteryStatus::Unavailable => None,
         };
@@ -180,6 +177,7 @@ mod tests {
 
     use super::{BatteryProcessor, ChargingStateReader, current_battery_status};
     use crate::core_traits::Runnable;
+    use crate::event::ChargingStateEvent;
     use crate::processor::builtin::battery_led::BatteryLedProcessor;
     use crate::test_support::test_block_on;
 
@@ -207,6 +205,36 @@ mod tests {
         assert_eq!(
             BatteryProcessor::new(u32::MAX, u32::MAX).get_battery_percent(4000),
             Some(66)
+        );
+    }
+
+    #[test]
+    fn charge_transitions_preserve_the_last_measured_level() {
+        let mut battery = BatteryProcessor::new(1, 1);
+        battery.commit(BatteryStatus::Available {
+            charge_state: ChargeState::Charging,
+            level: Some(73),
+        });
+        test_block_on(battery.on_charging_state_event(ChargingStateEvent { charging: false }));
+        assert_eq!(
+            current_battery_status(),
+            BatteryStatus::Available {
+                charge_state: ChargeState::Discharging,
+                level: Some(73),
+            }
+        );
+    }
+
+    #[test]
+    fn charge_state_before_the_first_measurement_keeps_the_level_unknown() {
+        let mut battery = BatteryProcessor::new(1, 1);
+        test_block_on(battery.on_charging_state_event(ChargingStateEvent { charging: true }));
+        assert_eq!(
+            current_battery_status(),
+            BatteryStatus::Available {
+                charge_state: ChargeState::Charging,
+                level: None,
+            }
         );
     }
 

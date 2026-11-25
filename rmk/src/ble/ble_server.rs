@@ -10,7 +10,7 @@ use trouble_host::prelude::*;
 use usbd_hid::descriptor::{AsInputReport, SerializedDescriptor};
 
 use super::battery_service::BatteryService;
-#[cfg(feature = "split")]
+#[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
 use super::battery_service::PeripheralBatteryServices;
 use super::device_info::DeviceConfigurationService;
 use crate::BLE_PROFILE_NAME_SUFFIX;
@@ -38,7 +38,7 @@ use rmk_types::protocol::rynk::{
 pub(crate) struct Server {
     profile_name: ProfileName,
     pub(crate) battery_service: BatteryService,
-    #[cfg(feature = "split")]
+    #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
     pub(crate) peripheral_battery_services: PeripheralBatteryServices,
     pub(crate) hid_service: HidService,
     #[cfg(feature = "vial")]
@@ -150,7 +150,7 @@ impl Server<'_> {
                 crate::input_device::battery::current_battery_status(),
             )
         } else {
-            #[cfg(feature = "split")]
+            #[cfg(all(feature = "split", not(feature = "_no_split_peripheral_battery_service")))]
             {
                 let Some(slot) = self
                     .peripheral_battery_services
@@ -166,7 +166,7 @@ impl Server<'_> {
                         .unwrap_or(BatteryStatus::Unavailable),
                 )
             }
-            #[cfg(not(feature = "split"))]
+            #[cfg(any(not(feature = "split"), feature = "_no_split_peripheral_battery_service"))]
             return;
         };
         if let BatteryStatus::Available { level: Some(level), .. } = status
