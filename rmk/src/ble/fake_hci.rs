@@ -21,7 +21,7 @@ pub(crate) struct FakeController {
 }
 
 struct State {
-    events: Channel<CriticalSectionRawMutex, Vec<u8>, 16>,
+    events: Channel<CriticalSectionRawMutex, (PacketKind, Vec<u8>), 16>,
     /// The opcode and parameters of every command, in order.
     commands: Mutex<Vec<(Opcode, Vec<u8>)>>,
     /// The connection handle and payload of every ACL packet sent, in order.
@@ -79,6 +79,33 @@ impl FakeController {
             .collect()
     }
 
+    /// Send one ATT request from the host and collect the response from the keyboard.
+    #[cfg(feature = "hires_scroll")]
+    pub(crate) async fn att_request(&self, link: u16, request: &[u8]) -> Vec<u8> {
+        let len = u16::try_from(request.len()).unwrap();
+        let mut packet = (link | 0x2000).to_le_bytes().to_vec();
+        packet.extend((len + 4).to_le_bytes());
+        packet.extend(len.to_le_bytes());
+        packet.extend([4, 0]); // L2CAP fixed ATT channel
+        packet.extend_from_slice(request);
+        let start = self.state.acl.lock().unwrap().len();
+        self.state.events.try_send((PacketKind::AclData, packet)).unwrap();
+        embassy_time::with_timeout(embassy_time::Duration::from_millis(100), async {
+            loop {
+                for (handle, packet) in &self.state.acl.lock().unwrap()[start..] {
+                    if *handle == link
+                        && let [_, _, 4, 0, response @ ..] = packet.as_slice()
+                    {
+                        return response.to_vec();
+                    }
+                }
+                embassy_time::Timer::after_millis(1).await;
+            }
+        })
+        .await
+        .expect("keyboard must answer ATT request")
+    }
+
     /// The minimum interval of every advertising setup, in 0.625 ms units.
     pub(crate) fn advertising_intervals(&self) -> Vec<u32> {
         #[cfg(feature = "ext_adv")]
@@ -124,7 +151,10 @@ impl FakeController {
     }
 
     fn push(&self, event: Vec<u8>) {
-        self.state.events.try_send(event).expect("fake HCI event queue is full");
+        self.state
+            .events
+            .try_send((PacketKind::Event, event))
+            .expect("fake HCI event queue is full");
     }
 
     async fn record<C: Cmd>(&self, cmd: &C) -> Vec<u8> {
@@ -167,10 +197,10 @@ impl Controller for FakeController {
     }
 
     async fn read<'a>(&self, buf: &'a mut Self::Buffer<'_>) -> Result<ControllerToHostPacket<'a>, Infallible> {
-        let event = self.state.events.receive().await;
+        let (kind, event) = self.state.events.receive().await;
         buf[..event.len()].copy_from_slice(&event);
         Ok(
-            ControllerToHostPacket::from_hci_bytes_with_kind(PacketKind::Event, &buf[..event.len()])
+            ControllerToHostPacket::from_hci_bytes_with_kind(kind, &buf[..event.len()])
                 .expect("malformed fake HCI event")
                 .0,
         )

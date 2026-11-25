@@ -742,7 +742,6 @@ async fn gatt_events_task(
     profile_id: u8,
     profile_manager: &ProfileManager<TOTAL_BLE_PROFILES>,
     led: &Cell<LedIndicator>,
-    #[cfg(feature = "hires_scroll")] resolution_multipliers: &Cell<u8>,
     #[cfg(feature = "host")] host: Option<&HostConnection<'_>>,
 ) {
     let level = &server.battery_service.level;
@@ -820,18 +819,20 @@ async fn gatt_events_task(
                         };
                         if security_level.encrypted() {
                             server.refresh_battery_level(event.handle());
-                            #[cfg(feature = "hires_scroll")]
-                            if event.handle() == server.hid_service.resolution_multipliers.handle {
-                                // One attribute serves every link, so answer with this link's values.
-                                let value = crate::hid::unpack_resolution_multipliers(resolution_multipliers.get());
-                                if let Err(e) = server.set(&server.hid_service.resolution_multipliers, &value) {
-                                    warn!("Failed to refresh resolution multipliers: {:?}", e);
-                                }
-                            }
                             None
                         } else {
                             Some(AttErrorCode::INSUFFICIENT_ENCRYPTION)
                         }
+                    }
+                    #[cfg(feature = "hires_scroll")]
+                    GattEvent::Write(event) if event.handle() == server.hid_service.resolution_multipliers.handle => {
+                        let multipliers = &crate::hid::BLE_SCROLL_MULTIPLIERS[profile_id as usize];
+                        event.with_data(|offset, data| match (offset, data) {
+                            (0, &[wheel, pan]) if multipliers.set([wheel, pan]) => None,
+                            (0, [_, _]) => Some(AttErrorCode::VALUE_NOT_ALLOWED),
+                            (0, _) => Some(AttErrorCode::INVALID_ATTRIBUTE_VALUE_LENGTH),
+                            _ => Some(AttErrorCode::INVALID_OFFSET),
+                        })
                     }
                     GattEvent::Write(event) => {
                         #[cfg(all(feature = "dongle", feature = "custom_message"))]
@@ -853,14 +854,6 @@ async fn gatt_events_task(
                         });
                         let data = &data_buf[..data_len.min(data_buf.len())];
                         let mut control_point_write = false;
-                        #[cfg(feature = "hires_scroll")]
-                        let (resolution_multipliers_write, mut value_not_allowed) = (
-                            event.handle() == server.hid_service.resolution_multipliers.handle,
-                            false,
-                        );
-                        #[cfg(not(feature = "hires_scroll"))]
-                        let (resolution_multipliers_write, value_not_allowed) = (false, false);
-
                         if event.handle() == output_keyboard.handle {
                             if data_len == 1 {
                                 let led_indicator = LedIndicator::from_bits(data[0]);
@@ -894,21 +887,6 @@ async fn gatt_events_task(
                             cccd_updated = true;
                         } else if event.handle() == hid_control_point.handle {
                             control_point_write = true;
-                        } else if resolution_multipliers_write {
-                            #[cfg(feature = "hires_scroll")]
-                            match <[u8; 2]>::try_from(data)
-                                .ok()
-                                .and_then(crate::hid::pack_resolution_multipliers)
-                            {
-                                Some(packed) => {
-                                    info!("BLE host set scroll resolution multipliers: {:?}", data);
-                                    resolution_multipliers.set(packed);
-                                    if profile_id == crate::state::current_profile() {
-                                        crate::hid::set_resolution_multipliers(ConnectionType::Ble, packed);
-                                    }
-                                }
-                                None => value_not_allowed = true,
-                            }
                         } else if is_custom_message {
                             #[cfg(all(feature = "dongle", feature = "custom_message"))]
                             match postcard::from_bytes::<crate::custom_message::CustomMessage>(data) {
@@ -955,12 +933,10 @@ async fn gatt_events_task(
                             }
                         }
 
-                        if !encrypted {
-                            Some(AttErrorCode::INSUFFICIENT_ENCRYPTION)
-                        } else if value_not_allowed {
-                            Some(AttErrorCode::VALUE_NOT_ALLOWED)
-                        } else {
+                        if encrypted {
                             None
+                        } else {
+                            Some(AttErrorCode::INSUFFICIENT_ENCRYPTION)
                         }
                     }
                     GattEvent::Other(_) => None,
@@ -972,7 +948,7 @@ async fn gatt_events_task(
                 let result = if let Some(code) = result {
                     gatt_event.reject(code)
                 } else {
-                    server.prepare_name_read(&gatt_event, profile_id);
+                    server.prepare_profile_read(&gatt_event, profile_id);
                     gatt_event.accept()
                 };
                 // Update CCCD table after processing the event
@@ -1190,15 +1166,12 @@ async fn serve_keyboard_connection<
 
     // The host only reports its lock LEDs when they change, so a switch back to this link replays them.
     let led = Cell::new(LedIndicator::default());
-    // Likewise each host enables high-resolution scrolling for itself.
     #[cfg(feature = "hires_scroll")]
-    let resolution_multipliers = Cell::new(0u8);
+    crate::hid::BLE_SCROLL_MULTIPLIERS[profile_id as usize].reset();
     let writer_task = async {
         loop {
             wait_for_connection_status(|s| s.selected == profile_id).await;
             LED_SIGNAL.signal(led.get());
-            #[cfg(feature = "hires_scroll")]
-            crate::hid::set_resolution_multipliers(ConnectionType::Ble, resolution_multipliers.get());
             // One wait spans every report of this selection, so a report costs no subscriber.
             let mut deselected = pin!(wait_for_connection_status(|s| s.selected != profile_id));
             while let Either::Second(report) = select(deselected.as_mut(), BLE_REPORT_CHANNEL.receive()).await {
@@ -1224,16 +1197,7 @@ async fn serve_keyboard_connection<
         match host_service {
             Some(service) => {
                 let host = HostConnection::new(server);
-                let events = gatt_events_task(
-                    server,
-                    conn,
-                    profile_id,
-                    profile_manager,
-                    &led,
-                    #[cfg(feature = "hires_scroll")]
-                    &resolution_multipliers,
-                    Some(&host),
-                );
+                let events = gatt_events_task(server, conn, profile_id, profile_manager, &led, Some(&host));
                 // Restart after a session-fatal TX error so the host service survives the rest of the connection.
                 let sessions = async {
                     loop {
@@ -1242,31 +1206,11 @@ async fn serve_keyboard_connection<
                 };
                 select(events, sessions).await;
             }
-            None => {
-                gatt_events_task(
-                    server,
-                    conn,
-                    profile_id,
-                    profile_manager,
-                    &led,
-                    #[cfg(feature = "hires_scroll")]
-                    &resolution_multipliers,
-                    None,
-                )
-                .await
-            }
+            None => gatt_events_task(server, conn, profile_id, profile_manager, &led, None).await,
         }
     };
     #[cfg(not(feature = "host"))]
-    let gatt_task = gatt_events_task(
-        server,
-        conn,
-        profile_id,
-        profile_manager,
-        &led,
-        #[cfg(feature = "hires_scroll")]
-        &resolution_multipliers,
-    );
+    let gatt_task = gatt_events_task(server, conn, profile_id, profile_manager, &led);
 
     // When dongle feature is enabled, send `DongleEvent` to the dongle.
     #[cfg(feature = "dongle")]
@@ -1692,6 +1636,50 @@ mod tests {
         hci.connect(handle, peer);
         hci.encrypt(handle);
         crate::state::wait_for_connection_status(|s| s.selected_profile().state == BleState::Connected).await;
+    }
+
+    #[cfg(feature = "hires_scroll")]
+    #[test]
+    fn ble_host_discovers_reads_and_writes_scroll_resolution() {
+        use crate::hid::scroll_resolution;
+
+        let hci = FakeController::default();
+        with_keyboard(hci.clone(), &[bond(0, HOST_A)], async {
+            reconnect(&hci, 1, HOST_A).await;
+            // Read the Report Reference descriptors (0x2908) until we find Feature report 5.
+            let mut start = 1u16;
+            let feature = 'discover: loop {
+                let [lo, hi] = start.to_le_bytes();
+                let response = hci.att_request(1, &[0x08, lo, hi, 0xff, 0xff, 0x08, 0x29]).await;
+                let [0x09, 4, entries @ ..] = response.as_slice() else {
+                    panic!("missing Feature report reference: {response:?}");
+                };
+                for entry in entries.chunks_exact(4) {
+                    let handle = u16::from_le_bytes([entry[0], entry[1]]);
+                    if entry[2..] == [5, 3] {
+                        break 'discover handle - 1;
+                    }
+                    start = handle + 1;
+                }
+            };
+            let [lo, hi] = feature.to_le_bytes();
+            assert_eq!(hci.att_request(1, &[0x0a, lo, hi]).await, [0x0b, 0, 0]);
+            assert_eq!(hci.att_request(1, &[0x12, lo, hi, 0, 1]).await, [0x13]);
+            assert_eq!(scroll_resolution(), (1, 120));
+            assert_eq!(hci.att_request(1, &[0x0a, lo, hi]).await, [0x0b, 0, 1]);
+            assert_eq!(hci.att_request(1, &[0x12, lo, hi, 1]).await, [1, 0x12, lo, hi, 0x0d]);
+            assert_eq!(hci.att_request(1, &[0x12, lo, hi, 2, 0]).await, [1, 0x12, lo, hi, 0x13]);
+            assert_eq!(scroll_resolution(), (1, 120));
+
+            if super::TOTAL_BLE_PROFILES > 1 {
+                // Producers can run immediately on selection, before the new writer has been polled.
+                crate::state::set_ble_state(1, BleState::Connected);
+                crate::state::select_ble_profile(1);
+                assert_eq!(scroll_resolution(), (1, 1));
+                crate::state::select_ble_profile(0);
+                assert_eq!(scroll_resolution(), (1, 120));
+            }
+        });
     }
 
     #[test]
