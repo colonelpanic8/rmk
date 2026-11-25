@@ -64,6 +64,8 @@ use crate::protocol::rynk::{
 };
 #[cfg(all(feature = "_ble", feature = "split"))]
 use crate::protocol::rynk::{SplitCentralLatencyPolicy, SplitCentralLatencyState};
+#[cfg(feature = "split")]
+use crate::protocol::rynk::{SplitTransportForce, SplitTransportState};
 
 /// CMD high bit marking a topic (server → host push).
 const RYNK_TOPIC_BIT: u16 = 0x8000;
@@ -407,16 +409,22 @@ endpoints! {
     DisconnectBleProfile = 0x0706: u8 => ();
     #[cfg(all(feature = "_ble", feature = "split"))]
     /// Read the volatile active-mode policy, current USB-power selection, and effective value.
-    GetSplitCentralLatency = 0x070A: () => SplitCentralLatencyState;
+    GetSplitCentralLatency = 0x070F: () => SplitCentralLatencyState;
     #[cfg(all(feature = "_ble", feature = "split"))]
     /// Replace the volatile policy. Each connection-event count must be `0..=499`.
-    SetSplitCentralLatency = 0x070B: SplitCentralLatencyPolicy => SplitCentralLatencyState;
+    SetSplitCentralLatency = 0x0710: SplitCentralLatencyPolicy => SplitCentralLatencyState;
     #[cfg(feature = "_ble")]
     /// Read the persistent BLE advertising-name template.
     GetBleName = 0x0708: () => BleName;
     #[cfg(feature = "_ble")]
     /// Replace the persistent BLE advertising-name template.
     SetBleName = 0x0709: BleName => ();
+    #[cfg(feature = "split")]
+    /// Read the split-transport selector: policy, force, cable detect.
+    GetSplitTransport = 0x070A: () => SplitTransportState;
+    #[cfg(feature = "split")]
+    /// Force the split transport (volatile); echoes the resulting state.
+    SetSplitTransportForce = 0x070B: SplitTransportForce => SplitTransportState;
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;

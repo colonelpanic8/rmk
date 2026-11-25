@@ -257,7 +257,7 @@ where
     config: BleBatteryConfig,
     /// One matrix region per split peripheral.
     #[cfg(feature = "split")]
-    peripheral_matrices: [PeripheralMatrixConfig; crate::NUM_SPLIT_PERIPHERALS],
+    peripheral_matrices: Option<[PeripheralMatrixConfig; crate::NUM_SPLIT_PERIPHERALS]>,
     #[cfg(feature = "host")]
     host_service: Option<&'a crate::host::HostService<'a>>,
     // Keeps `'a` in the type's parameter list across all feature configurations.
@@ -273,7 +273,7 @@ where
         controller: C,
         address: [u8; 6],
         rmk_config: RmkConfig<'static>,
-        #[cfg(feature = "split")] peripheral_matrices: [PeripheralMatrixConfig; crate::NUM_SPLIT_PERIPHERALS],
+        #[cfg(feature = "split")] peripheral_matrices: Option<[PeripheralMatrixConfig; crate::NUM_SPLIT_PERIPHERALS]>,
     ) -> Self {
         Self {
             controller: Some(controller),
@@ -368,6 +368,17 @@ impl<
             TOTAL_BLE_PROFILES,
         > = HostResources::new();
         let stack = build_ble_stack(controller, &mut resources, self.address);
+        let Some(peripheral_matrices) = self.peripheral_matrices else {
+            run_ble_keyboard(
+                &stack,
+                self.address,
+                &self.device_config,
+                &self.config,
+                #[cfg(feature = "host")]
+                self.host_service,
+            )
+            .await
+        };
 
         // `scan_and_connect_peripherals` task sends each established connection to its session task via `conn_channels`
         let conn_channels: [Channel<NoopRawMutex, Connection<'_, DefaultPacketPool>, 1>; crate::NUM_SPLIT_PERIPHERALS] =
@@ -388,7 +399,7 @@ impl<
             &conn_channels,
             &ended,
             &stack,
-            &self.peripheral_matrices
+            &peripheral_matrices
         ));
         embassy_futures::join::join3(
             poll_separately(keyboard),
