@@ -1,0 +1,40 @@
+[layout]
+rows = 1
+cols = 6
+map = "(0,0) (0,1) (0,2) (0,3) (0,4) (0,5)"
+
+[[keymap.layer]]
+keys = "CG_TOGG LCtrl J K MO(1) TH(A, RGui)"
+
+[[keymap.layer]]
+keys = "CtrlGuiSwapToggle RCtrl WM(C, LGui) No No No"
+
+[behavior.combo]
+combos = [{ actions = ["J", "K"], output = "CtrlGuiSwapToggle" }]
+
+[[test]]
+name = "modifier_swap_key_applies_across_layers"
+steps = [
+  { tap = { pos = [0, 0], duration = 20 } },
+  { tap = { pos = [0, 1], duration = 20 } },
+  { press = [0, 4] },
+  { tap = { pos = [0, 1], duration = 20 } },
+  { tap = { pos = [0, 2], duration = 20 } },
+  { release = [0, 4] },
+]
+expect = [["LGui"], [], ["RGui"], [], ["LCtrl", "C"], []]
+
+[[test]]
+name = "modifier_swap_combo_and_hold_tap"
+steps = [
+  { press = [0, 2] },
+  { press = [0, 3] },
+  { release = [0, 2] },
+  { release = [0, 3] },
+  { press = [0, 5] },
+  { delay = 500 },
+  { release = [0, 5] },
+  { tap = { pos = [0, 0], duration = 20 } },
+  { tap = { pos = [0, 1], duration = 20 } },
+]
+expect = [["RCtrl"], [], ["LCtrl"], []]
