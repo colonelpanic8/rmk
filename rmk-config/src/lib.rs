@@ -965,6 +965,7 @@ pub(crate) struct ComboConfig {
     pub actions: Vec<String>,
     pub output: String,
     pub layer: Option<u8>,
+    pub layers: Option<Vec<u8>>,
 }
 
 /// Configurations for macros
