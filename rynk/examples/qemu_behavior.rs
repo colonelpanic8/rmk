@@ -288,6 +288,7 @@ async fn script(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
     // before touching the wire.
     expect_unsupported("switch_ble_profile", client.switch_ble_profile(0).await);
     expect_unsupported("clear_ble_profile", client.clear_ble_profile(0).await);
+    expect_unsupported("clear_all_ble_profiles", client.clear_all_ble_profiles().await);
     expect_unsupported("get_peripheral_status", client.get_peripheral_status(0).await);
     expect_unsupported(
         "storage_reset",
