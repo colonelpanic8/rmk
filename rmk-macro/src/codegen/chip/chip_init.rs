@@ -55,7 +55,7 @@ pub(crate) fn chip_init_default(hardware: &Hardware, peripheral_id: Option<usize
     };
     let is_peripheral_not_ble = if peripheral_id.is_some() {
         match &hardware.board {
-            BoardConfig::Split(split) => split.connection != rmk_config::SplitConnection::Ble,
+            BoardConfig::Split(split) => split.connection == rmk_config::SplitConnection::Serial,
             _ => false,
         }
     } else {
@@ -285,7 +285,9 @@ fn get_ble_addr(hardware: &Hardware, peripheral_id: Option<usize>) -> TokenStrea
                 let high = u64::from(ficr.deviceid(1).read());
                 let addr = high << 32 | u64::from(ficr.deviceid(0).read());
                 let addr = addr | 0x0000_c000_0000_0000;
-                let ble_addr = addr.to_le_bytes()[..6].try_into().expect("Failed to read BLE address from FICR");
+                let ble_addr: [u8; 6] = addr.to_le_bytes()[..6]
+                    .try_into()
+                    .expect("Failed to read BLE address from FICR");
                 ble_addr
             }
         }
