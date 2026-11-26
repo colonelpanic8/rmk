@@ -11,7 +11,7 @@ mod vial;
 pub use behavior::{
     AutoMouseLayerConfig, BehaviorConfig, CombosConfig, ForksConfig, HOLD_TRIGGER_DEFAULT_PROFILE,
     HoldTriggerPositions, MorsesConfig, MouseKeyConfig, MouseLayerScaleConfig, OneShotConfig, OneShotModifiersConfig,
-    TapConfig,
+    TapConfig, UnicodeConfig,
 };
 #[cfg(feature = "_ble")]
 pub use ble_battery::BleBatteryConfig;
