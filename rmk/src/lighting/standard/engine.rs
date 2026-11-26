@@ -161,6 +161,12 @@ impl<
 
     /// Install the board's declarative lighting controls before the engine is
     /// served. The configured initial mode becomes authoritative on boot.
+    /// Start at `level` instead of full brightness, e.g. a level restored from storage.
+    pub const fn with_output_brightness(mut self, level: u8) -> Self {
+        self.output_brightness = level;
+        self
+    }
+
     pub const fn with_controls(mut self, controls: LightingControls) -> Self {
         self.output_mode = controls.initial_output_mode;
         self.effective_output_enabled = matches!(self.output_mode, OutputMode::AlwaysOn);
