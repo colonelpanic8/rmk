@@ -401,6 +401,12 @@ pub enum HidKeyCode {
     AcPaste = 0x00F0,
     AcFind = 0x00F1,
     NextKeyboardLayoutSelect = 0x00F2,
+    /// Brightness Minimum
+    BrightnessMinimum = 0x00F3,
+    /// Brightness Maximum
+    BrightnessMaximum = 0x00F4,
+    /// Auto Brightness
+    BrightnessAuto = 0x00F5,
 }
 
 impl HidKeyCode {
@@ -498,6 +504,9 @@ impl HidKeyCode {
             HidKeyCode::MediaRewind => Some(ConsumerKey::Rewind),
             HidKeyCode::BrightnessUp => Some(ConsumerKey::BrightnessUp),
             HidKeyCode::BrightnessDown => Some(ConsumerKey::BrightnessDown),
+            HidKeyCode::BrightnessMinimum => Some(ConsumerKey::BrightnessMinimum),
+            HidKeyCode::BrightnessMaximum => Some(ConsumerKey::BrightnessMaximum),
+            HidKeyCode::BrightnessAuto => Some(ConsumerKey::BrightnessAuto),
             HidKeyCode::ControlPanel => Some(ConsumerKey::ControlPanel),
             HidKeyCode::Assistant => Some(ConsumerKey::Assistant),
             HidKeyCode::MissionControl => Some(ConsumerKey::DesktopShowAllWindows),
