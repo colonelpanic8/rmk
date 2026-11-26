@@ -16,7 +16,7 @@ use bt_hci::cmd::le::{LeRand, LeReadLocalSupportedFeatures, LeReadPhy, LeSetPhy}
 use bt_hci::controller::{ControllerCmdAsync, ControllerCmdSync};
 use bt_hci::param::Error as HciError;
 use embassy_futures::join::join5;
-use embassy_futures::select::{Either, Either3, select, select_slice, select3, select6};
+use embassy_futures::select::{Either, Either4, select, select_slice, select4, select6};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
@@ -62,6 +62,7 @@ mod fake_hci;
 #[cfg(feature = "host")]
 pub(crate) mod host;
 pub(crate) mod led;
+pub(crate) mod name;
 #[cfg(all(feature = "_nrf_ble", target_arch = "arm", target_os = "none"))]
 mod p256;
 pub mod passkey;
@@ -250,6 +251,7 @@ where
     controller: Option<C>,
     address: [u8; 6],
     device_config: DeviceConfig<'static>,
+    ble_name: Option<&'static str>,
     config: BleBatteryConfig,
     /// One matrix region per split peripheral.
     #[cfg(feature = "split")]
@@ -275,6 +277,7 @@ where
             controller: Some(controller),
             address,
             device_config: rmk_config.device_config,
+            ble_name: rmk_config.ble_name,
             config: rmk_config.ble_battery_config,
             #[cfg(feature = "split")]
             peripheral_matrices,
@@ -322,6 +325,7 @@ where
             &stack,
             self.address,
             &self.device_config,
+            self.ble_name,
             &self.config,
             #[cfg(feature = "host")]
             self.host_service,
@@ -373,6 +377,7 @@ impl<
             &stack,
             self.address,
             &self.device_config,
+            self.ble_name,
             &self.config,
             #[cfg(feature = "host")]
             self.host_service,
@@ -406,10 +411,17 @@ async fn run_ble_keyboard<
     stack: &Stack<'_, C, DefaultPacketPool>,
     address: [u8; 6],
     device_config: &DeviceConfig<'static>,
+    ble_name: Option<&'static str>,
     config: &BleBatteryConfig,
     #[cfg(feature = "host")] host_service: Option<&'r crate::host::HostService<'r>>,
 ) -> ! {
     let product_name = device_config.product_name;
+    name::initialize(ble_name.unwrap_or(product_name));
+    if let Ok(Some(crate::storage::StorageValue::BleName(saved))) =
+        crate::storage::read(crate::storage::StorageKey::BleName).await
+    {
+        name::restore(saved);
+    }
 
     info!("Starting advertising and GATT service");
     let Ok(server) = &Server::new_keyboard(product_name) else {
@@ -498,6 +510,8 @@ async fn run_ble_keyboard<
         loop {
             let profile_id = crate::state::current_profile();
             let name = server.profile_name(profile_id);
+            name::BLE_NAME_CHANGED.reset();
+            let advertised_name = name::render(profile_id);
             let local_address = cfg!(feature = "ext_adv")
                 .then(|| BdAddr::new(crate::ble::profile::profile_address(address, profile_id)));
             let bond = profile_manager.bond_info(profile_id);
@@ -526,7 +540,7 @@ async fn run_ble_keyboard<
                     #[cfg(feature = "dongle")]
                     None if profile_id == DONGLE_PROFILE => Adv::DongleSeeking,
                     bond => Adv::Host {
-                        name: name.first().map_or(product_name, |name| name.as_str()),
+                        name: name.first().map_or(advertised_name.as_str(), |name| name.as_str()),
                         fast: (bond.is_some() || profile_manager.is_pairing(profile_id)) && Instant::now() < fast_until,
                     },
                 };
@@ -548,34 +562,35 @@ async fn run_ble_keyboard<
             };
 
             // Consume queued wake input before a profile action can cancel the connection flow.
-            let gatt_conn = match select3(
+            let gatt_conn = match select4(
                 advertise_and_connect,
                 BLE_PROFILE_CHANNEL.receive(),
                 completed.receive(),
+                name::BLE_NAME_CHANGED.wait(),
             )
             .await
             {
-                Either3::First(Ok(gatt_conn)) => gatt_conn,
+                Either4::First(Ok(gatt_conn)) => gatt_conn,
                 // Only fast advertising ended; the advertising period continues.
-                Either3::First(Err(BleHostError::BleHost(Error::Timeout)))
+                Either4::First(Err(BleHostError::BleHost(Error::Timeout)))
                     if adv_start.is_some_and(|start| Instant::now() < start + ADV_PERIOD) =>
                 {
                     continue;
                 }
-                Either3::First(Err(BleHostError::BleHost(Error::Timeout))) => {
+                Either4::First(Err(BleHostError::BleHost(Error::Timeout))) => {
                     profile_manager.set_pairing(None);
                     adv_start = None;
                     set_ble_state(profile_id, BleState::Inactive);
                     request_sleep();
                     continue;
                 }
-                Either3::First(Err(e)) => {
+                Either4::First(Err(e)) => {
                     set_ble_state(profile_id, BleState::Inactive);
                     error!("Advertise error: {:?}", e);
                     Timer::after_millis(200).await;
                     continue;
                 }
-                Either3::Second(action) => {
+                Either4::Second(action) => {
                     use crate::ble::profile::BleProfileAction::{ClearBond, Disconnect, Next, Previous, Switch};
 
                     if matches!(action, Switch(_) | Next | Previous) {
@@ -632,7 +647,7 @@ async fn run_ble_keyboard<
                     profile_manager.switch_profile(target);
                     continue;
                 }
-                Either3::Third(ended) => {
+                Either4::Third(ended) => {
                     host_connections.remove(&ended);
                     if ended == profile_id && crate::state::current_ble_status().state == BleState::Connected {
                         adv_start = Some(Instant::now());
@@ -640,6 +655,8 @@ async fn run_ble_keyboard<
                     set_ble_state(ended, BleState::Inactive);
                     continue;
                 }
+                // Restart advertising under the new name.
+                Either4::Fourth(()) => continue,
             };
 
             let conn = gatt_conn.raw();
@@ -1354,6 +1371,7 @@ mod tests {
                 &stack,
                 [1, 2, 3, 4, 5, 0xC6],
                 &DeviceConfig::default(),
+                None,
                 &BleBatteryConfig::disabled(),
                 #[cfg(feature = "host")]
                 None,
