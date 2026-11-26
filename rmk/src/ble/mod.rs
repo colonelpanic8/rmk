@@ -578,6 +578,9 @@ async fn run_ble_keyboard<
                 Either3::Second(action) => {
                     use crate::ble::profile::BleProfileAction::{ClearBond, Disconnect, Next, Previous, Switch};
 
+                    if matches!(action, Switch(_) | Next | Previous) {
+                        crate::state::set_preferred(ConnectionType::Ble).await;
+                    }
                     let last_host = crate::NUM_BLE_PROFILES.saturating_sub(1) as u8;
                     let target = match action {
                         Switch(target) | Disconnect(target) => target,

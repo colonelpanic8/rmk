@@ -154,6 +154,18 @@ pub(crate) fn set_preferred_connection(t: ConnectionType) {
     update_status(|c| c.preferred = t);
 }
 
+pub(crate) async fn set_preferred(preferred: ConnectionType) {
+    // Profile-select keys call this on every press; skip the flash write when
+    // the preference is already set to avoid needless wear.
+    if CONNECTION_STATUS.lock(|c| c.borrow().preferred) == preferred {
+        return;
+    }
+    set_preferred_connection(preferred);
+    info!("Switching preferred transport to: {:?}", preferred);
+    #[cfg(feature = "storage")]
+    crate::storage::store_unchecked(crate::storage::StorageItem::ConnectionType(preferred)).await;
+}
+
 /// Restore the persisted preferred connection at startup.
 ///
 /// Falls back to a build-time default when nothing is stored: `Ble` when USB is
@@ -176,16 +188,11 @@ pub(crate) async fn restore_preferred_connection() {
 
 #[cfg(all(feature = "_ble", not(feature = "_no_usb")))]
 pub(crate) async fn toggle_preferred() {
-    let mut new = ConnectionType::Usb;
-    update_status(|c| {
-        c.preferred = match c.preferred {
-            ConnectionType::Usb => ConnectionType::Ble,
-            ConnectionType::Ble => ConnectionType::Usb,
-        };
-        new = c.preferred;
+    let preferred = CONNECTION_STATUS.lock(|c| match c.borrow().preferred {
+        ConnectionType::Usb => ConnectionType::Ble,
+        ConnectionType::Ble => ConnectionType::Usb,
     });
-    info!("Switching preferred transport to: {:?}", new);
-    crate::storage::store_unchecked(crate::storage::StorageItem::ConnectionType(new)).await;
+    set_preferred(preferred).await;
 }
 
 /// The selected BLE profile.
