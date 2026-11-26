@@ -16,6 +16,8 @@ use rmk_types::action::{EncoderAction, KeyAction};
 use rmk_types::battery::BatteryStatus;
 use rmk_types::combo::{Combo, ComboDefinition};
 use rmk_types::connection::{ConnectionStatus, ConnectionType};
+#[cfg(feature = "alloc")]
+use rmk_types::constants::KEYMAP_SEGMENT_KEYS;
 use rmk_types::fork::Fork;
 use rmk_types::keyboard_macros::{Macro, MacroOp};
 use rmk_types::led_indicator::LedIndicator;
@@ -1469,23 +1471,26 @@ impl Client {
 
     /// Write the whole keymap with concurrent paged writes. A failure leaves the
     /// earlier pages applied.
-    ///
-    /// Pages hold at most [`KEYMAP_WRITE_PAGE_KEYS`] cells rather than filling the
-    /// payload: every cell is one flash item, and the firmware only accepts a page
-    /// it can queue for flash whole (answering `Busy` otherwise), so a page longer
-    /// than its flash queue would fall back to streaming through it and stall the
-    /// session for the length of a storage page migration.
     pub async fn write_all_keymap(&self, actions: Vec<KeyAction>) -> Result<(), RynkHostError> {
+        self.write_keymap_from(0, actions).await
+    }
+
+    /// Write `actions` into consecutive keymap cells from flat index `start`, which counts
+    /// columns, then rows, then layers. A failure leaves the earlier pages applied.
+    ///
+    /// Pages hold [`keymap_write_page_keys`] cells rather than filling the payload, so a
+    /// `start` on a row boundary keeps every row within one page.
+    pub async fn write_keymap_from(&self, start: u16, actions: Vec<KeyAction>) -> Result<(), RynkHostError> {
         let caps = self.capabilities;
         let (rows, cols) = (caps.num_rows as u16, caps.num_cols as u16);
         // 3 fixed bytes before the items: layer, start_row, start_col.
         self.write_pages(
             Cmd::SetKeymapBulk,
             3,
-            KEYMAP_WRITE_PAGE_KEYS,
+            keymap_write_page_keys(&caps),
             actions,
-            async |c, start, actions| {
-                let (layer, row, col) = keymap_pos(start, rows, cols);
+            async |c, offset, actions| {
+                let (layer, row, col) = keymap_pos(start + offset, rows, cols);
                 c.set_keymap_bulk(SetKeymapBulkRequest {
                     layer,
                     start_row: row,
@@ -2422,12 +2427,20 @@ impl Client {
     }
 }
 
-/// Cells per keymap write page. RMK's default flash queue (`flash_channel_size`)
-/// is four deep, and a page must fit the queue whole to be accepted without
-/// streaming; each cell costs a flash write anyway, so shorter pages lose no
-/// throughput.
+/// Cells per keymap write page: whole rows, so a page that starts on a row boundary
+/// never splits one. The firmware stores each [`KEYMAP_SEGMENT_KEYS`]-wide row segment
+/// as one flash item and only accepts a page it can queue for flash whole (answering
+/// `Busy` otherwise), so the rows of a page stay within RMK's default four-deep flash
+/// queue (`flash_channel_size`) and within a frame of worst-case actions. A row too
+/// wide for either travels alone.
 #[cfg(feature = "alloc")]
-pub const KEYMAP_WRITE_PAGE_KEYS: usize = 4;
+pub fn keymap_write_page_keys(caps: &DeviceCapabilities) -> usize {
+    let cols = caps.num_cols as usize;
+    let rows = (4 / cols.div_ceil(KEYMAP_SEGMENT_KEYS))
+        .min(caps.max_bulk_keys as usize / cols.max(1))
+        .max(1);
+    rows * cols
+}
 
 /// `Busy` answers a page may draw before the write fails. The firmware waits about
 /// half a second for flash-queue room before answering, so this spans a migration
@@ -2544,6 +2557,25 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn keymap_pages_hold_whole_rows_within_the_flash_queue_and_frame() {
+        let page = |num_cols, max_bulk_keys| {
+            keymap_write_page_keys(&DeviceCapabilities {
+                num_cols,
+                max_bulk_keys,
+                ..Default::default()
+            })
+        };
+        // One segment per row: four rows fill the queue unless the frame holds fewer.
+        assert_eq!(page(14, 255), 4 * 14);
+        assert_eq!(page(14, 40), 2 * 14);
+        // Two segments per row: two rows fill the queue.
+        assert_eq!(page(20, 255), 2 * 20);
+        // A row beyond either limit still travels as one page.
+        assert_eq!(page(14, 4), 14);
+        assert_eq!(page(70, 255), 70);
     }
 
     #[test]
