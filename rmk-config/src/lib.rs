@@ -1479,6 +1479,7 @@ pub enum SplitConnection {
     #[default]
     Ble,
     Serial,
+    Auto,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -1514,9 +1515,9 @@ pub enum UpdatePolicy {
 
 /// Configurations for each split board
 ///
-/// The transport field must match `split.connection`: `serial` is required for
-/// serial splits and forbidden for BLE splits; `ble_addr` is optional for BLE
-/// splits (dongle setups omit it) and forbidden for serial splits.
+/// The transport fields must match `split.connection`: `serial` is required
+/// for serial and automatic splits, while automatic splits also require a
+/// cable-detect pin. `ble_addr` remains optional for BLE-capable splits.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SplitBoardConfig {
@@ -1532,6 +1533,11 @@ pub struct SplitBoardConfig {
     pub ble_addr: Option<[u8; 6]>,
     /// Serial config, the vector length should be 1 for peripheral
     pub serial: Option<Vec<SerialConfig>>,
+    /// GPIO that is asserted while the wired split cable is present.
+    pub detect_pin: Option<String>,
+    /// Invert the cable-detect GPIO. It is active-high by default.
+    #[serde(default)]
+    pub detect_active_low: bool,
     /// Matrix config for the split
     pub matrix: MatrixConfig,
     /// Input device config for the split
@@ -1567,6 +1573,12 @@ pub struct SerialConfig {
     pub instance: String,
     pub tx_pin: String,
     pub rx_pin: String,
+    #[serde(default)]
+    pub half_duplex: bool,
+    pub direction_pin: Option<String>,
+    pub baudrate: Option<u32>,
+    pub timer: Option<String>,
+    pub ppi_channels: Option<[String; 2]>,
 }
 
 /// Duration in milliseconds
