@@ -7,8 +7,8 @@ use rmk_types::morse::{Morse, MorseMode, MorseProfile};
 
 use crate::keyboard::combo::Combo;
 use crate::{
-    MAX_AUTO_MOUSE_LAYERS, MAX_COMBOS, MAX_FORKS, MAX_MORSE_PROFILES, MAX_MORSES, MOUSE_KEY_INTERVAL,
-    MOUSE_WHEEL_INTERVAL,
+    MAX_AUTO_MOUSE_LAYERS, MAX_COMBOS, MAX_FORKS, MAX_MORSE_PROFILES, MAX_MORSES, MAX_MOUSE_LAYER_SCALES,
+    MOUSE_KEY_INTERVAL, MOUSE_WHEEL_INTERVAL,
 };
 
 /// Config for configurable action behavior
@@ -29,6 +29,15 @@ pub struct BehaviorConfig {
     pub keyboard_macros: &'static [&'static [MacroOp]],
     pub mouse_key: MouseKeyConfig,
     pub auto_mouse_layer: Vec<AutoMouseLayerConfig, MAX_AUTO_MOUSE_LAYERS>,
+    pub mouse_layer_scale: Vec<MouseLayerScaleConfig, MAX_MOUSE_LAYER_SCALES>,
+}
+
+/// Mouse movement and scroll scaling for one active layer.
+#[derive(Clone, Copy, Debug)]
+pub struct MouseLayerScaleConfig {
+    pub layer: u8,
+    pub move_scale: [u16; 2],
+    pub scroll_scale: [u16; 2],
 }
 
 /// Config for auto mouse layer behavior
