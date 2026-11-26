@@ -71,6 +71,37 @@ pub(crate) mod rng;
 #[cfg(any(feature = "split", feature = "dongle"))]
 pub(crate) mod scan;
 
+/// Number of host BLE profiles configured for this firmware build.
+pub const fn profile_count() -> u8 {
+    crate::NUM_BLE_PROFILES as u8
+}
+
+/// Forget the bond in the active BLE host profile.
+pub async fn clear_active_profile() {
+    crate::channel::BLE_PROFILE_CHANNEL
+        .send(profile::BleProfileAction::ClearBond(None))
+        .await;
+}
+
+/// Forget the bond in one BLE host profile without changing the active slot.
+/// Returns `false` without touching non-host bond slots when `slot` is invalid.
+pub async fn clear_profile(slot: u8) -> bool {
+    if slot >= profile_count() {
+        return false;
+    }
+    crate::channel::BLE_PROFILE_CHANNEL
+        .send(profile::BleProfileAction::ClearBond(Some(slot)))
+        .await;
+    true
+}
+
+/// Forget the bonds in every BLE host profile, preserving split and dongle bonds.
+pub async fn clear_all_profiles() {
+    crate::channel::BLE_PROFILE_CHANNEL
+        .send(profile::BleProfileAction::ClearAllBonds)
+        .await;
+}
+
 #[cfg(all(feature = "subrating", feature = "_no_subrating"))]
 compile_error!("You may not enable feature `subrating` on unsupported platforms!");
 
@@ -603,7 +634,9 @@ async fn run_ble_keyboard<
                     continue;
                 }
                 Either4::Second(action) => {
-                    use crate::ble::profile::BleProfileAction::{ClearBond, Disconnect, Next, Previous, Switch};
+                    use crate::ble::profile::BleProfileAction::{
+                        ClearAllBonds, ClearBond, Disconnect, Next, Previous, Switch,
+                    };
 
                     if matches!(action, Switch(_) | Next | Previous) {
                         crate::state::set_preferred(ConnectionType::Ble).await;
@@ -612,23 +645,30 @@ async fn run_ble_keyboard<
                     let target = match action {
                         Switch(target) | Disconnect(target) => target,
                         ClearBond(target) => target.unwrap_or(profile_id),
+                        ClearAllBonds => profile_id,
                         Next if profile_id < last_host => profile_id + 1,
                         Next => 0,
                         Previous => profile_id.checked_sub(1).unwrap_or(last_host),
                     };
-                    if matches!(action, Disconnect(_) | ClearBond(_)) {
-                        if target == profile_id {
-                            // The selected profile waits for a new host.
-                            profile_manager.set_pairing(Some(target));
-                            set_ble_state(target, BleState::Inactive);
-                            report_activity();
-                            adv_start = Some(Instant::now());
-                        }
-                        if let Some(conn) = host_connections.get(&target) {
-                            conn.disconnect();
-                        }
-                        if matches!(action, ClearBond(_)) {
-                            profile_manager.clear_bond(target);
+                    if matches!(action, Disconnect(_) | ClearBond(_) | ClearAllBonds) {
+                        let targets = match action {
+                            ClearAllBonds => 0..crate::NUM_BLE_PROFILES as u8,
+                            _ => target..target + 1,
+                        };
+                        for target in targets {
+                            if target == profile_id {
+                                // The selected profile waits for a new host.
+                                profile_manager.set_pairing(Some(target));
+                                set_ble_state(target, BleState::Inactive);
+                                report_activity();
+                                adv_start = Some(Instant::now());
+                            }
+                            if let Some(conn) = host_connections.get(&target) {
+                                conn.disconnect();
+                            }
+                            if matches!(action, ClearBond(_) | ClearAllBonds) {
+                                profile_manager.clear_bond(target);
+                            }
                         }
                         continue;
                     }

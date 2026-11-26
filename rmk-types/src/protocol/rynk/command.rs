@@ -438,6 +438,9 @@ endpoints! {
     #[cfg(feature = "split")]
     /// Force the split transport (volatile); echoes the resulting state.
     SetSplitTransportForce = 0x070B: SplitTransportForce => SplitTransportState;
+    /// Disconnect every host profile and forget their bonds.
+    #[cfg(feature = "_ble")]
+    ClearAllBleProfiles = 0x070C: () => ();
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
