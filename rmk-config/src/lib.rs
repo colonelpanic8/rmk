@@ -1073,6 +1073,8 @@ pub struct ExternalFlashTomlConfig {
 #[serde(deny_unknown_fields)]
 pub struct BleConfig {
     pub enabled: bool,
+    /// BLE advertising-name template. `{slot}` expands to the one-based profile number.
+    pub name: Option<String>,
     pub default_tx_power: Option<i8>,
     pub use_2m_phy: Option<bool>,
     /// Append each host profile's number to its advertising and GATT names; requires `ext_adv`.

@@ -404,6 +404,11 @@ fn expand_main(
         .storage
         .is_some()
         .then(|| quote! { storage_config, });
+    let ble_name_field = hardware
+        .communication
+        .get_ble_config()
+        .and_then(|ble| ble.name)
+        .map(|name| quote! { ble_name: Some(#name), });
 
     let main_function_sig = if hardware.chip.series == ChipSeries::Esp32 {
         quote! {
@@ -451,6 +456,7 @@ fn expand_main(
                 device_config: keyboard_device_config,
                 #vial_config
                 #rynk_config_fields
+                #ble_name_field
                 #storage_config
                 ..Default::default()
             };

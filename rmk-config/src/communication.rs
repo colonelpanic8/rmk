@@ -90,6 +90,19 @@ impl KeyboardTomlConfig {
             None
         };
         let ble_config = self.ble.as_ref().filter(|config| config.enabled).cloned();
+        if let Some(ble) = ble_config.as_ref()
+            && let Some(name) = ble.name.as_deref()
+        {
+            if name.is_empty() || name.len() > 16 {
+                return Err(format!(
+                    "`[ble].name` must contain 1..=16 UTF-8 bytes, got {}",
+                    name.len()
+                ));
+            }
+            if ble.profile_name_suffix {
+                return Err("`[ble].name` and `[ble].profile_name_suffix` both name each profile; use `{slot}` in the name instead".into());
+            }
+        }
 
         match (usb_info, ble_config) {
             (Some(usb_info), None) => Ok(CommunicationConfig::Usb(usb_info)),
