@@ -60,13 +60,14 @@ pub struct PositionCombo {
     #[cfg_attr(feature = "wasm", tsify(type = "MatrixPosition[]"))]
     pub positions: Vec<MatrixPosition, COMBO_SIZE>,
     pub output: KeyAction,
-    pub layer: Option<u8>,
+    /// Bitmask of layers the combo is valid on. `u32::MAX` means all layers.
+    pub layers: u32,
 }
 
 impl MaxSize for PositionCombo {
     const POSTCARD_MAX_SIZE: usize = crate::heapless_vec_max_size::<MatrixPosition, COMBO_SIZE>()
         + KeyAction::POSTCARD_MAX_SIZE
-        + Option::<u8>::POSTCARD_MAX_SIZE;
+        + u32::POSTCARD_MAX_SIZE;
 }
 
 impl PositionCombo {
@@ -76,7 +77,7 @@ impl PositionCombo {
     /// dropped. Callers accepting untrusted configuration should reject
     /// duplicate or out-of-matrix positions before constructing the runtime
     /// combo.
-    pub fn new<I: IntoIterator<Item = MatrixPosition>>(positions: I, output: KeyAction, layer: Option<u8>) -> Self {
+    pub fn new<I: IntoIterator<Item = MatrixPosition>>(positions: I, output: KeyAction, layers: u32) -> Self {
         let mut combo_positions = Vec::new();
         for position in positions {
             if combo_positions.push(position).is_err() {
@@ -86,7 +87,7 @@ impl PositionCombo {
         Self {
             positions: combo_positions,
             output,
-            layer,
+            layers,
         }
     }
 
@@ -94,7 +95,7 @@ impl PositionCombo {
         Self {
             positions: Vec::new(),
             output: KeyAction::No,
-            layer: None,
+            layers: u32::MAX,
         }
     }
 
@@ -143,10 +144,10 @@ impl ComboDefinition {
         }
     }
 
-    pub fn layer(&self) -> Option<u8> {
+    pub fn layers(&self) -> u32 {
         match self {
-            Self::Actions(combo) => combo.layer,
-            Self::Positions(combo) => combo.layer,
+            Self::Actions(combo) => combo.layers,
+            Self::Positions(combo) => combo.layers,
         }
     }
 
