@@ -14,7 +14,7 @@ use {
 };
 
 use super::SplitMessage;
-use super::driver::{SplitReader, SplitWriter};
+use super::driver::{SplitDriverError, SplitReader, SplitWriter};
 #[cfg(feature = "_ble")]
 use crate::ble::ExtAdvCmds;
 #[cfg(feature = "dfu_split")]
@@ -213,20 +213,30 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                         }
                         SplitMessage::TransportOverride { generation, mode } => {
                             info!("Split transport force {} from central: {}", generation, mode);
-                            // Applying the force may tear this link down, so
-                            // the acknowledgement has to be on its way first.
-                            let delivered = match self
+                            // The central applies the force as soon as it
+                            // reads the acknowledgement, so queueing one
+                            // commits this half: the flush only gives it
+                            // time to leave before the force tears the link
+                            // down. An acknowledgement the central can never
+                            // read — refused, or discarded by a session
+                            // restart — commits nothing.
+                            let lost = match self
                                 .split_driver
                                 .write(&SplitMessage::TransportOverrideAck(generation))
                                 .await
                             {
-                                Ok(_) => self.split_driver.flush().await,
-                                Err(e) => Err(e),
+                                Ok(_) => self
+                                    .split_driver
+                                    .flush()
+                                    .await
+                                    .err()
+                                    .filter(|e| matches!(e, SplitDriverError::Disconnected)),
+                                Err(e) => Some(e),
                             };
-                            match delivered {
-                                Ok(()) => crate::split::selector::set_forced(mode),
-                                Err(e) => error!(
-                                    "Transport force {} acknowledgement not delivered, not applying: {:?}",
+                            match lost {
+                                None => crate::split::selector::set_forced(mode),
+                                Some(e) => error!(
+                                    "Transport force {} acknowledgement lost, not applying: {:?}",
                                     generation, e
                                 ),
                             }

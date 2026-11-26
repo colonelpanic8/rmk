@@ -541,6 +541,9 @@ const CONTROL_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 /// Consecutive answered exchanges that leave the oldest frame unacknowledged
 /// before the central gives the session up as lost.
 const STUCK_ACK_EXCHANGES: u8 = 24;
+/// Exchanges the central spends getting a poll answered before it stops
+/// using the bus.
+const FLUSH_EXCHANGES: usize = 4;
 /// Consecutive unanswered exchanges before the central reports the wired
 /// peripheral gone and renegotiates the session once it answers again.
 const PEER_LOST_EXCHANGES: u8 = 64;
@@ -812,6 +815,20 @@ impl<S: Read + Write> SplitWriter for HalfDuplexCentralDriver<S> {
         }
         Ok(SPLIT_MESSAGE_MAX_SIZE)
     }
+
+    /// The peripheral learns what this side has received from the header of
+    /// the next frame, and it answers only a poll it decoded. Drive
+    /// exchanges until one is answered, so a caller about to stop using the
+    /// bus does not leave the peripheral waiting on that acknowledgement.
+    async fn flush(&mut self) -> Result<(), SplitDriverError> {
+        for _ in 0..FLUSH_EXCHANGES {
+            if self.exchange().await? {
+                return Ok(());
+            }
+            Timer::after(HALF_DUPLEX_POLL_INTERVAL).await;
+        }
+        Err(SplitDriverError::SerialError)
+    }
 }
 
 /// Peripheral side of the polled half-duplex bus: transmits only in reply to
@@ -946,13 +963,15 @@ impl<S: Read + Write> SplitWriter for HalfDuplexPeripheralDriver<S> {
     /// This side transmits only when polled, so delivery of a control
     /// message means answering polls until the central's headers have
     /// acknowledged it. Frames the central sends meanwhile are stowed for
-    /// `read`. Bounded: a central that stops polling is not waited for.
+    /// `read`. Bounded: a central that stops polling is not waited for. A
+    /// session restart discards the message, reported as
+    /// [`SplitDriverError::Disconnected`].
     async fn flush(&mut self) -> Result<(), SplitDriverError> {
         let deadline = Instant::now() + CONTROL_FLUSH_TIMEOUT;
         let resets = self.resets;
         for _ in 0..CONTROL_ACK_EXCHANGES {
             if self.resets != resets {
-                return Err(SplitDriverError::SerialError);
+                return Err(SplitDriverError::Disconnected);
             }
             if !self.link.control_outstanding() {
                 return Ok(());
@@ -974,7 +993,7 @@ mod tests {
     use std::convert::Infallible;
 
     use embassy_futures::block_on;
-    use embassy_futures::select::{Either, select, select3};
+    use embassy_futures::select::{Either, Either3, select, select3};
     use embassy_time::with_timeout;
     use embedded_io_async::ErrorType;
 
@@ -1738,10 +1757,14 @@ mod tests {
     #[derive(Default)]
     struct PeripheralLog {
         received: Vec<SplitMessage>,
+        /// When the peripheral committed a transport force, and whether the
+        /// central had confirmed receiving its acknowledgement by then.
+        force: Option<(Instant, Result<(), SplitDriverError>)>,
     }
 
-    /// The peripheral application: records what the central sends and
-    /// forwards `outgoing`.
+    /// The peripheral application: records what the central sends, forwards
+    /// `outgoing`, and answers a transport force the way `SplitPeripheral`
+    /// does before leaving the wire.
     async fn peripheral_app<S: Read + Write>(
         driver: &mut HalfDuplexPeripheralDriver<S>,
         outgoing: &RefCell<VecDeque<SplitMessage>>,
@@ -1753,6 +1776,15 @@ mod tests {
                 None => Poll::Pending,
             });
             match select(driver.read(), queued).await {
+                Either::First(Ok(SplitMessage::TransportOverride { generation, .. })) => {
+                    driver
+                        .write(&SplitMessage::TransportOverrideAck(generation))
+                        .await
+                        .unwrap();
+                    let confirmed = driver.flush().await;
+                    log.borrow_mut().force = Some((Instant::now(), confirmed));
+                    return;
+                }
                 Either::First(Ok(message)) => log.borrow_mut().received.push(message),
                 Either::First(Err(_)) => {}
                 Either::Second(message) => {
@@ -1791,6 +1823,138 @@ mod tests {
             .iter()
             .filter(|m| matches!(m, SplitMessage::ConnectionStatus(_)))
             .count()
+    }
+
+    /// Force BLE over a wired session that is carrying key events. The
+    /// central must stay on the cable until the peripheral has seen its own
+    /// acknowledgement confirmed: a central that leaves first cuts off the
+    /// frame carrying that confirmation.
+    fn force_handover(lose: impl FnMut(Side, &Frame) -> bool + 'static) {
+        selector::initialize(true);
+        let wire = Wire::new(lose);
+        let outgoing = RefCell::new(VecDeque::new());
+        let log = RefCell::new(PeripheralLog::default());
+        let mut keys = KeyboardEvent::subscriber();
+
+        let peripheral = async {
+            let mut driver = HalfDuplexPeripheralDriver::new(wire.end(Side::Peripheral));
+            peripheral_app(&mut driver, &outgoing, &log).await;
+            core::future::pending::<()>().await
+        };
+        let script = async {
+            settled("the session is up", || connection_syncs(&log) == 1).await;
+            for pressed in [true, false] {
+                outgoing
+                    .borrow_mut()
+                    .push_back(SplitMessage::Key(KeyboardEvent::key(0, 0, pressed)));
+                let key = with_timeout(Duration::from_secs(1), keys.next_message_pure())
+                    .await
+                    .expect("key events cross the wired link");
+                assert_eq!(key, KeyboardEvent::key(0, 0, pressed));
+            }
+
+            crate::split::request_transport_force(selector::FORCE_BLE);
+            settled("the central applies the force", || {
+                selector::forced_mode() == selector::FORCE_BLE
+            })
+            .await;
+            let central_left = Instant::now();
+            Timer::after(CONTROL_FLUSH_TIMEOUT * 2).await;
+            central_left
+        };
+        let central_left = crate::test_support::test_block_on(async {
+            match select3(auto_central(&wire), peripheral, script).await {
+                Either3::Third(at) => at,
+                _ => unreachable!(),
+            }
+        });
+
+        let (committed, confirmed) = log.borrow().force.expect("the peripheral answered the force");
+        confirmed.expect("the peripheral saw its acknowledgement confirmed");
+        assert!(
+            committed <= central_left,
+            "the peripheral committed at {committed:?}, after the central left the cable at {central_left:?}"
+        );
+    }
+
+    #[test]
+    fn central_keeps_the_cable_until_the_peripheral_commits_a_force() {
+        force_handover(|_, _| false);
+    }
+
+    /// The poll confirming the peripheral's acknowledgement is lost.
+    #[test]
+    fn force_handover_survives_a_lost_confirmation() {
+        let mut stage = 0;
+        force_handover(move |side, frame| match (stage, side, &frame.3) {
+            (0, Side::Peripheral, SplitMessage::TransportOverrideAck(_)) => {
+                stage = 1;
+                false
+            }
+            (1, Side::Central, _) => {
+                stage = 2;
+                true
+            }
+            _ => false,
+        });
+    }
+
+    /// The peripheral's acknowledgement itself is lost and retransmitted.
+    #[test]
+    fn force_handover_survives_a_lost_acknowledgement() {
+        let mut lost = false;
+        force_handover(move |side, frame| {
+            let first_ack =
+                !lost && side == Side::Peripheral && matches!(frame.3, SplitMessage::TransportOverrideAck(_));
+            lost |= first_ack;
+            first_ack
+        });
+    }
+
+    /// The central applies a force as soon as it reads the acknowledgement,
+    /// so a peripheral that has queued one is committed even if the central
+    /// never confirms receiving it. Only a session restart, which discards
+    /// the acknowledgement unread, cancels.
+    // Under `dfu_split` the peripheral reads its own image through linker
+    // symbols that only firmware defines.
+    #[cfg(not(feature = "dfu_split"))]
+    #[test]
+    fn peripheral_commits_a_force_once_its_acknowledgement_is_queued() {
+        selector::initialize(true);
+        let wire = Wire::new(|_, _| false);
+        let mut peripheral =
+            crate::split::peripheral::SplitPeripheral::new(HalfDuplexPeripheralDriver::new(wire.end(Side::Peripheral)));
+        let mut central = SerialSplitDriver::new(wire.end(Side::Central));
+        let poll = SplitMessage::HalfDuplexPoll;
+        let force = |generation| SplitMessage::TransportOverride {
+            generation,
+            mode: selector::FORCE_BLE,
+        };
+
+        let script = async {
+            central.write_frame(RESET_FLAG, 0, 8, &poll).await.unwrap();
+            Timer::after_millis(10).await;
+            central.write_frame(SEQ_FLAG, 0, 8, &force(1)).await.unwrap();
+            central.write_frame(0, 0, 8, &poll).await.unwrap();
+            Timer::after_millis(10).await;
+            central.write_frame(RESET_FLAG, 0, 8, &poll).await.unwrap();
+            Timer::after(CONTROL_FLUSH_TIMEOUT * 2).await;
+            assert_eq!(
+                selector::forced_mode(),
+                selector::FORCE_AUTO,
+                "a restarted session never delivered the acknowledgement"
+            );
+
+            central.write_frame(SEQ_FLAG, 0, 8, &force(2)).await.unwrap();
+            central.write_frame(0, 0, 8, &poll).await.unwrap();
+            Timer::after(CONTROL_FLUSH_TIMEOUT * 2).await;
+            assert_eq!(
+                selector::forced_mode(),
+                selector::FORCE_BLE,
+                "the central read the acknowledgement and left without confirming it"
+            );
+        };
+        crate::test_support::test_block_on(select(peripheral.run(), script));
     }
 
     /// A peripheral that restarts alone — a reboot, or a cable-detect flap

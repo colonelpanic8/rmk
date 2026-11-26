@@ -40,9 +40,10 @@ pub(crate) trait SplitReader {
 pub(crate) trait SplitWriter {
     async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError>;
 
-    /// Wait until the last written control message has reached the peer, as
-    /// far as the transport can tell. Transports whose `write` already
-    /// delivers keep the default.
+    /// Wait until the last written control message, and the acknowledgement
+    /// of everything read, has reached the peer as far as the transport can
+    /// tell. Called before acting on an exchange in a way that may take the
+    /// link down. Transports that need nothing more keep the default.
     async fn flush(&mut self) -> Result<(), SplitDriverError> {
         Ok(())
     }
@@ -504,6 +505,13 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
                         self.handle_proactive_hash(hash).await;
                     }
                     Ok(SplitMessage::TransportOverrideAck(generation)) => {
+                        // The peripheral is committed to the force, but it
+                        // holds the link until it sees this frame
+                        // acknowledged, and applying the force here may
+                        // drop the transport mid-frame.
+                        if let Err(e) = self.transceiver.flush().await {
+                            warn!("Transport force {} acknowledgement unconfirmed: {:?}", generation, e);
+                        }
                         if self.on_force_acknowledged(generation) {
                             force_ack_deadline = None;
                         }
