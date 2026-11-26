@@ -999,7 +999,7 @@ impl<
         self.persist_extension().await;
         if let Ok(state) = self.request_core_state(StandardCommand::ReadState).await {
             crate::storage::send_unchecked(crate::storage::FlashOperationMessage::LightingOutputMode(
-                output_mode_to_wire(state.output_mode),
+                output_record(&state),
             ))
             .await;
         }
@@ -1150,7 +1150,10 @@ impl<
                     })
                     .await?;
                 #[cfg(feature = "storage")]
-                crate::storage::send_unchecked(crate::storage::FlashOperationMessage::LightingOutputMode(mode)).await;
+                crate::storage::send_unchecked(crate::storage::FlashOperationMessage::LightingOutputMode(
+                    output_record(&state),
+                ))
+                .await;
                 return Ok(RynkLightingReadback::OutputMode(state));
             }
             RynkLightingCommand::SetWakeLayers {
@@ -1800,10 +1803,19 @@ impl<
             }
         };
 
-        self.request_core_state(core_command)
-            .await
-            .map(state_to_wire)
-            .map(RynkLightingReadback::State)
+        // A host turning the lights on or off, or dimming them, outlasts a restart just as a
+        // lighting key's change does.
+        #[cfg(feature = "storage")]
+        let persist = matches!(core_command, StandardCommand::SetStateIfRevision { .. });
+        let state = self.request_core_state(core_command).await?;
+        #[cfg(feature = "storage")]
+        if persist {
+            crate::storage::send_unchecked(crate::storage::FlashOperationMessage::LightingOutputMode(
+                output_record(&state),
+            ))
+            .await;
+        }
+        Ok(RynkLightingReadback::State(state_to_wire(state)))
     }
 
     fn overlay_cell(&self, cell: LightingOverlayCell) -> LightingResult<OverlayCell> {
@@ -2563,6 +2575,15 @@ fn connection_condition_from_wire(
             bonded: bonded.bonded,
         }),
         usb_connected: condition.usb_connected,
+    }
+}
+
+#[cfg(feature = "storage")]
+const fn output_record(state: &StandardState) -> crate::storage::LightingOutputRecord {
+    crate::storage::LightingOutputRecord {
+        mode: output_mode_to_wire(state.output_mode),
+        #[cfg(feature = "lighting_persist_brightness")]
+        brightness: state.output_brightness,
     }
 }
 
@@ -3375,6 +3396,55 @@ mod tests {
         assert_eq!(&params.values[..2], &[3, 77]);
     }
 
+    /// A host turning the lights off survives a restart, and with
+    /// `lighting_persist_brightness` so does the brightness it chose.
+    #[cfg(feature = "storage")]
+    #[test]
+    fn host_lighting_state_persists_the_output_record() {
+        use crate::storage::FlashOperationMessage;
+        while crate::storage::try_receive_flash_message().is_some() {}
+        let state = run_extension_flow(
+            TestExtensionSource {
+                state: crate::lighting::compositor::ExtensionState {
+                    effect: 1,
+                    palette: 0,
+                    value: 128,
+                    speed: 20,
+                },
+                params: [3, 128],
+            },
+            async |protocol| {
+                let Ok(RynkLightingReadback::State(state)) = protocol.request(RynkLightingCommand::ReadState).await
+                else {
+                    panic!("state read failed");
+                };
+                protocol
+                    .request(RynkLightingCommand::SetState {
+                        expected_revision: state.revision,
+                        state: LightingMutableState {
+                            output_enabled: false,
+                            output_brightness: 77,
+                            background: state.background,
+                        },
+                    })
+                    .await
+            },
+        );
+        assert!(matches!(state, Ok(RynkLightingReadback::State(_))));
+        let mut stored = None;
+        while let Some(message) = crate::storage::try_receive_flash_message() {
+            if let FlashOperationMessage::LightingOutputMode(record) = message {
+                stored = Some(record);
+            }
+        }
+        let record = stored.expect("a host's lighting state must reach storage");
+        assert_eq!(record.mode, WireLightingOutputMode::AlwaysOff);
+        #[cfg(feature = "lighting_persist_brightness")]
+        assert_eq!(record.brightness(), Some(77));
+        #[cfg(not(feature = "lighting_persist_brightness"))]
+        assert_eq!(record.brightness(), None);
+    }
+
     #[cfg(feature = "storage")]
     #[test]
     fn lighting_preferences_persist_inactive_effect_and_output_policy() {
@@ -3419,7 +3489,7 @@ mod tests {
         while let Some(message) = crate::storage::try_receive_flash_message() {
             match message {
                 FlashOperationMessage::LightingExtensionParams(record) => params = Some(record),
-                FlashOperationMessage::LightingOutputMode(value) => mode = Some(value),
+                FlashOperationMessage::LightingOutputMode(value) => mode = Some(value.mode),
                 _ => {}
             }
         }
@@ -3448,7 +3518,7 @@ mod tests {
             let mut mode = None;
             while let Some(message) = crate::storage::try_receive_flash_message() {
                 if let FlashOperationMessage::LightingOutputMode(value) = message {
-                    mode = Some(value);
+                    mode = Some(value.mode);
                 }
             }
             mode
