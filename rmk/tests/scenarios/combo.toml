@@ -528,3 +528,40 @@ steps = [
   { release = [1, 1] },
 ]
 expect = [["LShift"], ["LShift", "A"], ["LShift"], []]
+
+[[test]]
+name = "combo_layer_mod_tap_taps_once_and_holds"
+behavior.combo = {
+  timeout = "40ms",
+  combos = [{ actions = ["E", "R"], output = "LMT(1, LAlt, Tab)", layer = 0 }]
+}
+steps = [
+  { press = [1, 4] },
+  { press = [1, 5] },
+  { delay = 500 },
+  { tap = { pos = [0, 11], duration = 50 } },
+  { release = [1, 4] },
+  { delay = 100 },
+  { release = [1, 5] },
+]
+expect = [["LAlt"], ["LAlt", "Tab"], ["LAlt"], ["LAlt", "B"], ["LAlt"], []]
+
+# Releasing a layer-mod-tap combo that is still buffered behind an unresolved
+# morse key used to hit `unreachable!()` and reset the keyboard.
+[[test]]
+name = "combo_layer_mod_tap_released_while_buffered_behind_morse_key"
+behavior.morse = { permissive_hold = true }
+behavior.combo = {
+  timeout = "40ms",
+  combos = [{ actions = ["E", "R"], output = "LMT(1, LAlt, Tab)", layer = 0 }]
+}
+steps = [
+  { press = [1, 1] },   # MT(B, LShift)
+  { delay = 20 },
+  { press = [1, 4] },
+  { press = [1, 5] },   # E+R fires the combo, buffered behind the morse key
+  { release = [1, 4] },
+  { release = [1, 5] },
+  { release = [1, 1] },
+]
+expect = [["LShift"], ["LShift", "LAlt"], ["LShift", "LAlt", "Tab"], ["LShift", "LAlt"], ["LShift"], []]
