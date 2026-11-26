@@ -1555,6 +1555,14 @@ fn wire_frames_locked() {
             encode_frame(Cmd::DisconnectBleProfile, SEQ, &Ok::<(), RynkError>(())),
         ),
         (
+            "ClearAllBleProfiles request ()",
+            encode_frame(Cmd::ClearAllBleProfiles, SEQ, &())
+        ),
+        (
+            "ClearAllBleProfiles reply Ok(())",
+            encode_frame(Cmd::ClearAllBleProfiles, SEQ, &Ok::<(), RynkError>(())),
+        ),
+        (
             "GetBatteryStatus request ()",
             encode_frame(Cmd::GetBatteryStatus, SEQ, &())
         ),
@@ -3309,7 +3317,7 @@ mod protocol_reference {
              A request's response is postcard `Result<T, RynkError>`; the `Err` side is one of these variants.\n\n\
              {errors}\n\
              ## Lock\n\n\
-             Commands that can flash firmware, wipe storage, or read the matrix sit behind a physical-presence unlock. `BootloaderJump`, `StorageReset`, `GetMatrixState`, and (with `_ble`) `ClearBleProfile` and `DisconnectBleProfile` always need an unlocked connection; every `Set*` command joins them when the firmware was built with `[host] write_requires_unlock = true`. A gated command on a locked connection answers `Locked` and does nothing. `GetLockStatus`, `UnlockPoll`, and `Lock` are never gated.\n\n\
+             Commands that can flash firmware, wipe storage, or read the matrix sit behind a physical-presence unlock. `BootloaderJump`, `StorageReset`, `GetMatrixState`, and (with `_ble`) `ClearBleProfile`, `ClearAllBleProfiles`, and `DisconnectBleProfile` always need an unlocked connection; every `Set*` command joins them when the firmware was built with `[host] write_requires_unlock = true`. A gated command on a locked connection answers `Locked` and does nothing. `GetLockStatus`, `UnlockPoll`, and `Lock` are never gated.\n\n\
              The lock belongs to the connection and starts locked; `Lock` or disconnection relocks it. To unlock, a host polls `UnlockPoll` while the user holds the challenge keys that `LockStatus.key_positions` reports (`[host].unlock_keys`); the connection is unlocked once `locked` clears. With no `unlock_keys` configured the challenge is empty and the gated commands can never be unlocked; a firmware built with `[host] insecure = true` starts unlocked and ignores `Lock`. See [Rynk](../features/rynk#locking-dangerous-operations) for the user-facing side.\n\n\
              ## Endpoints\n\n\
              {endpoints}\n\
@@ -3379,6 +3387,12 @@ mod protocol_reference {
                     [
                         "`ClearBleProfile`",
                         "Closes the profile's connection; the selected profile then waits for a new host.",
+                        "Deleted, even if offline",
+                        "Yes"
+                    ],
+                    [
+                        "`ClearAllBleProfiles`",
+                        "Clears every host profile like `ClearBleProfile`; the dongle profile is untouched.",
                         "Deleted, even if offline",
                         "Yes"
                     ],
