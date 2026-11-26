@@ -783,6 +783,16 @@ impl<'a> KeyMap<'a> {
         self.inner.borrow().behavior.morse.default_profile
     }
 
+    /// The mode of a key whose own profile sets none. A default profile that
+    /// sets none either means PermissiveHold: it resolves on the other key's
+    /// release rather than only on the hold timeout, which is what ZMK's
+    /// `balanced` and QMK's permissive hold do.
+    pub(crate) fn morse_default_mode(&self) -> rmk_types::morse::MorseMode {
+        self.morse_default_profile()
+            .mode()
+            .unwrap_or(rmk_types::morse::MorseMode::PermissiveHold)
+    }
+
     /// Resolve a per-key morse profile by its table index: the table entry if
     /// present, otherwise the user-configured default profile. Fields left
     /// `None` by the resolved profile are still filled in per-field by the

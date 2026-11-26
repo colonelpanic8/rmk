@@ -412,7 +412,7 @@ impl<'a> Keyboard<'a> {
         }
 
         // If no per-key config, use the global default profile
-        keymap.morse_default_profile().mode().unwrap_or(MorseMode::Normal)
+        keymap.morse_default_mode()
     }
 
     /// Decides and returns the morse mode

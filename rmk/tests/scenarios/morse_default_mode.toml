@@ -1,0 +1,80 @@
+# The resolution mode a keyboard gets when it configures none: PermissiveHold.
+#
+# Deliberately has no `[behavior.morse]` at all — the mode is what this file is
+# about, so setting anything would hide the thing under test. Same fixture and
+# timelines as `morse_permissive_hold.toml`: MT(B, LShift)@(1,1) and A@(1,0) on
+# the shared split board's home row.
+#
+# `mt_1` separates the default from Normal (which resolves only on the hold
+# timeout) and `mt_2` separates it from HoldOnOtherPress (which resolves on the
+# other key's press rather than its release).
+
+keyboard = "boards/split.toml"
+
+[[test]]
+name = "mt_1"
+steps = [
+  { press = [1, 1] },  # Press MT(B, LShift)
+  { tap = { pos = [1, 0], duration = 10 } },
+  { release = [1, 1] },
+]
+expect = [["LShift"], ["LShift", "A"], ["LShift"], []]
+
+[[test]]
+name = "mt_2"
+steps = [
+  { press = [1, 1] },    # Press MT(B, LShift)
+  { press = [1, 0] },    # Press A
+  { release = [1, 1] },  # Release MT first -> tap
+  { release = [1, 0] },
+]
+expect = [["B"], ["B", "A"], ["A"], []]
+
+# Turning the default off has to leave it off. `permissive_hold = false` used
+# to be dropped as if the flag were absent, so the key still resolved as
+# PermissiveHold and sent ["LShift"], ["LShift", "A"], ["LShift"], [].
+[[test]]
+name = "permissive_hold_false_selects_normal"
+behavior.morse = { permissive_hold = false }
+steps = [
+  { press = [1, 1] },  # Press MT(B, LShift)
+  { tap = { pos = [1, 0], duration = 10 } },
+  { release = [1, 1] },
+]
+expect = [["A"], [], ["B"], []]
+
+# The same refusal in a per-key profile, which used to inherit the
+# PermissiveHold default. MT(B, LShift, p0)@(3,6).
+[[test]]
+name = "profile_permissive_hold_false_selects_normal"
+behavior.morse = { profiles = { p0 = { permissive_hold = false } } }
+steps = [
+  { press = [3, 6] },  # Press MT(B, LShift, p0)
+  { tap = { pos = [1, 0], duration = 10 } },
+  { release = [3, 6] },
+]
+expect = [["A"], [], ["B"], []]
+
+# Refusing PermissiveHold must not override the mode that is asked for.
+[[test]]
+name = "permissive_hold_false_keeps_hold_on_other_press"
+behavior.morse = { permissive_hold = false, hold_on_other_press = true }
+steps = [
+  { press = [1, 1] },  # Press MT(B, LShift)
+  { press = [1, 0] },  # Press A -> hold on other press
+  { release = [1, 1] },
+  { release = [1, 0] },
+]
+expect = [["LShift"], ["LShift", "A"], ["A"], []]
+
+# A profile that sets no mode still follows the default profile rather than
+# the PermissiveHold fallback.
+[[test]]
+name = "profile_without_a_mode_inherits_the_default"
+behavior.morse = { normal_mode = true, profiles = { p0 = { hold_timeout = "250ms" } } }
+steps = [
+  { press = [3, 6] },  # Press MT(B, LShift, p0)
+  { tap = { pos = [1, 0], duration = 10 } },
+  { release = [3, 6] },
+]
+expect = [["A"], [], ["B"], []]
