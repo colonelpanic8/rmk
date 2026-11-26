@@ -150,6 +150,16 @@ impl<'a> RynkService<'a> {
         self
     }
 
+    /// Attach one board-defined device-data namespace.
+    pub fn with_device_data(
+        mut self,
+        descriptor: DeviceDataDescriptor,
+        record: fn(u8) -> Option<DeviceDataRecord>,
+    ) -> Self {
+        self.device_data = Some((descriptor, record));
+        self
+    }
+
     /// Whether `cmd` needs a storage write to persist its effect.
     fn needs_storage_write(cmd: Cmd) -> bool {
         #[cfg(feature = "_ble")]
@@ -280,7 +290,9 @@ impl<'a> RynkService<'a> {
             | Cmd::GetLayerState
             | Cmd::GetModifierState
             | Cmd::GetPointingConfig
-            | Cmd::GetPointingCapabilities => Some(false),
+            | Cmd::GetPointingCapabilities
+            | Cmd::GetDeviceDataDescriptor
+            | Cmd::GetDeviceDataRecord => Some(false),
             #[cfg(all(feature = "_ble", feature = "split"))]
             Cmd::GetSplitCentralLatency => Some(false),
             #[cfg(feature = "lighting")]
