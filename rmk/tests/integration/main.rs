@@ -1,7 +1,8 @@
 //! rmk's only test target, named `integration` after this directory.
 //!
 //! [`simulator`] is the harness every case runs on. `run_tests!` expands each
-//! `scenarios/*.toml` into a `mod` of keyboard-behavior tests;
+//! `scenarios/*.toml` into a `mod` of keyboard-behavior tests, including the
+//! keyboard-controlled maintenance gate;
 //! `scenarios/README.md` documents their syntax. [`rynk`], [`vial`], and
 //! [`ble_profile`] hold what a scenario file cannot express: wire-protocol
 //! writes interleaved with matrix input, and what the BLE profile task received.

@@ -210,6 +210,7 @@ async fn main(spawner: Spawner) {
             insecure: false,
             write_requires_unlock: false,
             bootloader_requires_unlock: true,
+            ..Default::default()
         },
         storage_config,
         ..Default::default()
