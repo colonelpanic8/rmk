@@ -7,6 +7,7 @@ use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::*;
 
 use crate::ble::ExtAdvCmds;
+use crate::{BLE_ADVERTISING_FAST_INTERVAL_MS, BLE_ADVERTISING_SLOW_INTERVAL_MS};
 
 /// Company identifier marking an advertisement as RMK's own.
 const RMK_ADV_COMPANY_ID: u16 = 0x5253;
@@ -97,7 +98,8 @@ impl Adv<'_> {
     /// All variants use legacy PDUs, which require the 1M primary PHY.
     fn params(&self) -> AdvertisementParameters {
         let interval = match self {
-            Self::Host { fast: false, .. } => Duration::from_millis(200),
+            Self::Host { fast: true, .. } => Duration::from_millis(BLE_ADVERTISING_FAST_INTERVAL_MS.into()),
+            Self::Host { fast: false, .. } => Duration::from_millis(BLE_ADVERTISING_SLOW_INTERVAL_MS.into()),
             _ => Duration::from_millis(50),
         };
         AdvertisementParameters {
