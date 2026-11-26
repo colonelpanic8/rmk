@@ -214,6 +214,7 @@ cols = 2
 
 [split]
 connection = "ble"
+central_side = "right"
 
 [split.central]
 rows = 1
@@ -251,6 +252,10 @@ col_pins = ["P0_03"]
         assert_eq!(peripheral.battery_adc_pin.as_deref(), Some("vddh"));
         let constants = config.build_constants(&["split", "_ble"]).unwrap();
         assert_eq!(constants.split_battery_peripheral_ids, [0]);
+        assert_eq!(
+            constants.paired_battery_central_side,
+            Some(rmk_config::SplitSide::Right)
+        );
     }
 }
 
@@ -625,5 +630,22 @@ fn incomplete_or_ambiguous_battery_tables_are_rejected() {
         );
         assert!(KeyboardTomlConfig::new_from_toml_path(&path).hardware().is_err());
         std::fs::remove_file(path).ok();
+    }
+}
+
+#[test]
+fn layout_hand_aliases_resolve_keymap_and_geometry() {
+    for (aliases, hand) in [("L LH Left", 'L'), ("R RH Right", 'R'), ("* Bilateral", '*')] {
+        for alias in aliases.split_whitespace() {
+            for name in [alias.to_string(), alias.to_lowercase(), alias.to_uppercase()] {
+                let config: KeyboardTomlConfig = toml::from_str(&format!(
+                    "{MINIMAL_KEYBOARD_TOML}\nmap = \"(0,0,{name},@2u)\"\n[keymap]\nlayers = 1"
+                ))
+                .unwrap();
+                let keymap = config.keymap().unwrap_or_else(|e| panic!("{name}: {e}"));
+                assert_eq!(keymap.key_info[0][0].hand, hand, "{name}");
+                assert!(!config.layout().unwrap().blob.is_empty(), "{name}");
+            }
+        }
     }
 }

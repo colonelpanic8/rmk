@@ -329,6 +329,9 @@ pub(crate) struct RmkConstantsConfig {
     /// Default debounce time in ms
     #[serde_inline_default(20)]
     pub debounce_time: u16,
+    /// Delay between complete normal-matrix scans in microseconds; zero only yields.
+    #[serde_inline_default(1000)]
+    pub matrix_scan_interval_us: u32,
     /// Report channel size
     #[serde_inline_default(16)]
     pub report_channel_size: usize,
@@ -469,6 +472,7 @@ impl Default for RmkConstantsConfig {
             max_macros: 32,
             macro_space_size: 256,
             debounce_time: 20,
+            matrix_scan_interval_us: 1000,
             report_channel_size: 16,
             vial_channel_size: 4,
             flash_channel_size: 4,
@@ -1112,11 +1116,20 @@ pub enum SplitConnection {
     Auto,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitSide {
+    Left,
+    Right,
+}
+
 /// Configurations for split keyboards
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SplitConfig {
     pub connection: SplitConnection,
+    /// Physical side of the central for left/right BLE battery reporting.
+    pub central_side: Option<SplitSide>,
     pub central: SplitBoardConfig,
     pub peripheral: Vec<SplitBoardConfig>,
 }
