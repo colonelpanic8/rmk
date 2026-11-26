@@ -441,6 +441,12 @@ endpoints! {
     /// Disconnect every host profile and forget their bonds.
     #[cfg(feature = "_ble")]
     ClearAllBleProfiles = 0x070C: () => ();
+    #[cfg(feature = "_ble")]
+    /// Whether plugging or unplugging USB retargets the preferred transport.
+    GetAutoSwitchTransport = 0x070D: () => bool;
+    #[cfg(feature = "_ble")]
+    /// Persist the auto-switch policy; it applies from the next cable change.
+    SetAutoSwitchTransport = 0x070E: bool => ();
 
     // Status (0x08xx).
     GetCurrentLayer = 0x0801: () => u8;
