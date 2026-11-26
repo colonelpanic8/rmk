@@ -187,14 +187,14 @@ mod tests {
 
     #[test]
     fn storage_round_trips_legacy_and_position_combo_variants() {
-        let legacy = rmk_types::combo::Combo::new([KeyAction::No], KeyAction::No, Some(1));
-        let position = PositionCombo::new([MatrixPosition { row: 2, col: 3 }], KeyAction::No, Some(1));
+        let legacy = rmk_types::combo::Combo::new([KeyAction::No], KeyAction::No, 1 << 1);
+        let position = PositionCombo::new([MatrixPosition { row: 2, col: 3 }], KeyAction::No, 1 << 1);
 
         let mut legacy_buffer = [0u8; 128];
         let legacy_len = Value::serialize_into(&StorageValue::Combo(legacy.clone()), &mut legacy_buffer).unwrap();
         assert_eq!(
             &legacy_buffer[..legacy_len],
-            &[8, 0, 0, 1, 1],
+            &[8, 0, 0, 2],
             "the persisted legacy Combo discriminant and payload must remain unchanged"
         );
 

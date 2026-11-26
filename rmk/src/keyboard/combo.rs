@@ -66,8 +66,8 @@ impl Combo {
         }
     }
 
-    fn layer(&self) -> Option<u8> {
-        self.definition.layer()
+    fn layers(&self) -> u32 {
+        self.definition.layers()
     }
 
     pub(crate) fn output(&self) -> KeyAction {

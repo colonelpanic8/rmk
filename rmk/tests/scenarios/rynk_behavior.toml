@@ -63,11 +63,11 @@ steps = [
   { rynk = { cmd = "SetComboDefinition", payload = { index = 0, definition = { Positions = { positions = [
     { row = 0, col = 0 },
     { row = 0, col = 1 },
-  ], output = { Single = { Key = { Hid = "D" } } } } } } } },
+  ], output = { Single = { Key = { Hid = "D" } } }, layers = 0xFFFFFFFF } } } } },
   { rynk = { cmd = "GetComboDefinition", payload = 0, reply = { Positions = { positions = [
     { row = 0, col = 0 },
     { row = 0, col = 1 },
-  ], output = { Single = { Key = { Hid = "D" } } } } } } },
+  ], output = { Single = { Key = { Hid = "D" } } }, layers = 0xFFFFFFFF } } } },
   { rynk = { cmd = "GetCombo", payload = 0, error = "Invalid" } },
   { press = [0, 0] },
   { press = [0, 1] },
@@ -82,13 +82,13 @@ steps = [
   { rynk = { cmd = "SetComboDefinition", payload = { index = 0, definition = { Positions = { positions = [
     { row = 0, col = 0 },
     { row = 0, col = 0 },
-  ], output = { Single = { Key = { Hid = "D" } } } } } }, error = "Invalid" } },
+  ], output = { Single = { Key = { Hid = "D" } } }, layers = 0xFFFFFFFF } } }, error = "Invalid" } },
   { rynk = { cmd = "SetComboDefinition", payload = { index = 0, definition = { Positions = { positions = [
     { row = 1, col = 0 },
-  ], output = { Single = { Key = { Hid = "D" } } } } } }, error = "Invalid" } },
+  ], output = { Single = { Key = { Hid = "D" } } }, layers = 0xFFFFFFFF } } }, error = "Invalid" } },
   { rynk = { cmd = "SetComboDefinition", payload = { index = 0, definition = { Positions = { positions = [
     { row = 0, col = 0 },
-  ], output = { Single = { Key = { Hid = "D" } } }, layer = 3 } } }, error = "Invalid" } },
+  ], output = { Single = { Key = { Hid = "D" } } }, layers = 8 } } }, error = "Invalid" } },
 ]
 
 # Two different writes, each read back: the read follows the write instead of
@@ -338,12 +338,12 @@ steps = [
 name = "combo_definition_bulk_round_trips_both_trigger_modes"
 steps = [
   { rynk = { cmd = "SetComboDefinitionBulk", payload = { start_index = 6, definitions = [
-    { Actions = { actions = [{ Single = { Key = { Hid = "A" } } }], output = { Single = { Key = { Hid = "C" } } }, layer = 0 } },
-    { Positions = { positions = [{ row = 0, col = 1 }, { row = 0, col = 2 }], output = { Single = { Key = { Hid = "D" } } } } },
+    { Actions = { actions = [{ Single = { Key = { Hid = "A" } } }], output = { Single = { Key = { Hid = "C" } } }, layers = 1 } },
+    { Positions = { positions = [{ row = 0, col = 1 }, { row = 0, col = 2 }], output = { Single = { Key = { Hid = "D" } } }, layers = 0xFFFFFFFF } },
   ] } } },
   { rynk = { cmd = "GetComboDefinitionBulk", payload = { start_index = 6 }, reply = { definitions = [
-    { Actions = { actions = [{ Single = { Key = { Hid = "A" } } }], output = { Single = { Key = { Hid = "C" } } }, layer = 0 } },
-    { Positions = { positions = [{ row = 0, col = 1 }, { row = 0, col = 2 }], output = { Single = { Key = { Hid = "D" } } } } },
+    { Actions = { actions = [{ Single = { Key = { Hid = "A" } } }], output = { Single = { Key = { Hid = "C" } } }, layers = 1 } },
+    { Positions = { positions = [{ row = 0, col = 1 }, { row = 0, col = 2 }], output = { Single = { Key = { Hid = "D" } } }, layers = 0xFFFFFFFF } },
   ] } } },
 ]
 

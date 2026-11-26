@@ -390,7 +390,7 @@ fn exemplars() -> Exemplars {
     let combo_definition = ComboDefinition::Positions(PositionCombo::new(
         [MatrixPosition { row: 3, col: 4 }, MatrixPosition { row: 5, col: 6 }],
         KeyAction::Morse(1),
-        Some(2),
+        1 << 2,
     ));
     let fork = Fork::new(
         KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A))),
