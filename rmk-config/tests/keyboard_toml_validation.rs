@@ -259,6 +259,74 @@ col_pins = ["P0_03"]
     }
 }
 
+#[test]
+fn ble_name_accepts_slot_template() {
+    let path = write_temp_keyboard_toml(
+        "ble-name-slot-template",
+        &format!(
+            r#"{MINIMAL_KEYBOARD_TOML}
+[ble]
+enabled = true
+name = "Glove80 {{slot}}"
+"#
+        ),
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+    let result = config.hardware();
+    std::fs::remove_file(path).ok();
+
+    if let Err(message) = result {
+        panic!("slot-aware BLE name should resolve: {message}");
+    }
+}
+
+#[test]
+fn ble_name_rejects_empty_or_oversized_values() {
+    for (case, name) in [("empty", ""), ("oversized", "1234567890abcdefg")] {
+        let path = write_temp_keyboard_toml(
+            &format!("ble-name-{case}"),
+            &format!(
+                r#"{MINIMAL_KEYBOARD_TOML}
+[ble]
+enabled = true
+name = "{name}"
+"#
+            ),
+        );
+        let config = KeyboardTomlConfig::new_from_toml_path(&path);
+        let result = config.hardware();
+        std::fs::remove_file(path).ok();
+
+        let Err(message) = result else {
+            panic!("{case} BLE name must fail hardware resolution");
+        };
+        assert!(message.contains("[ble].name") && message.contains("1..=16"));
+    }
+}
+
+#[test]
+fn ble_name_rejects_profile_name_suffix() {
+    let path = write_temp_keyboard_toml(
+        "ble-name-profile-suffix",
+        &format!(
+            r#"{MINIMAL_KEYBOARD_TOML}
+[ble]
+enabled = true
+name = "Glove80"
+profile_name_suffix = true
+"#
+        ),
+    );
+    let config = KeyboardTomlConfig::new_from_toml_path(&path);
+    let result = config.hardware();
+    std::fs::remove_file(path).ok();
+
+    let Err(message) = result else {
+        panic!("a BLE name template with profile_name_suffix must fail hardware resolution");
+    };
+    assert!(message.contains("profile_name_suffix"));
+}
+
 /// Unknown keys in the sections users edit most must be rejected, not
 /// silently dropped (pre-fix they surfaced as a misleading "X is required"
 /// error that never named the typo).
