@@ -566,3 +566,47 @@ steps = [
   { release = [1, 1] },
 ]
 expect = [["B"], ["B", "A"], ["B"], []]
+
+# Two same-hand HRMs must still be able to chord: unilateral_tap is meant to
+# resolve a same-hand HRM as tap so a roll fires in the right order, but it
+# has no business firing when the "interrupting" key is itself a hold-a-
+# modifier tap-hold — that just makes same-hand Ctrl+Shift impossible.
+# MT(C, LGui)@(1,7) and MT(E, LAlt)@(1,9) are both on the right hand; held
+# past their timeout they chord into LGui+LAlt instead of C tapping.
+[[test]]
+name = "normal_mode_same_hand_mod_chord"
+behavior.morse = { enable_flow_tap = false, permissive_hold = false, normal_mode = true }
+steps = [
+  { press = [1, 7] },  # Press MT(C, LGui) — Right hand
+  { press = [1, 9] },  # Press MT(E, LAlt) — Right hand, hold is a modifier
+  { delay = 260 },
+  { release = [1, 7] },
+  { release = [1, 9] },
+]
+expect = [["LGui"], ["LGui", "LAlt"], ["LAlt"], []]
+
+# Control for the case above: a same-hand interrupt that is NOT a
+# modifier-hold (a plain key) still forces the held HRM to tap, unchanged.
+[[test]]
+name = "normal_mode_same_hand_mod_then_letter_still_taps"
+behavior.morse = { enable_flow_tap = false, permissive_hold = false, normal_mode = true }
+steps = [
+  { press = [1, 7] },  # Press MT(C, LGui) — Right hand
+  { tap = { pos = [1, 10], duration = 10 } },  # Press Y — Right hand, plain key
+  { release = [1, 7] },
+]
+expect = [["C"], ["C", "Y"], ["C"], []]
+
+# Opposite-hand HRM chording is unaffected either way: unilateral_tap only
+# ever applies same-hand, so the modifier-hold exemption is a no-op here.
+[[test]]
+name = "normal_mode_opposite_hand_mod_chord_unaffected"
+behavior.morse = { enable_flow_tap = false, permissive_hold = false, normal_mode = true }
+steps = [
+  { press = [1, 1] },  # Press MT(B, LShift) — Left hand
+  { press = [1, 7] },  # Press MT(C, LGui) — Right hand
+  { delay = 260 },
+  { release = [1, 1] },
+  { release = [1, 7] },
+]
+expect = [["LShift"], ["LShift", "LGui"], ["LGui"], []]
