@@ -6,6 +6,7 @@ mod connection;
 mod encoder;
 mod fork;
 mod keymap;
+mod layer;
 mod layout;
 #[cfg(feature = "lighting")]
 mod lighting;
@@ -22,6 +23,7 @@ pub use self::connection::*;
 pub use self::encoder::*;
 pub use self::fork::*;
 pub use self::keymap::*;
+pub use self::layer::*;
 pub use self::layout::*;
 #[cfg(feature = "lighting")]
 pub use self::lighting::*;
