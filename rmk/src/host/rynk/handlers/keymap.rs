@@ -1,6 +1,7 @@
 //! Keymap and encoder handlers (encoder is part of keymap's `0x01xx` Cmd group).
 
 use rmk_types::action::{EncoderAction, KeyAction};
+use rmk_types::constants::KEYMAP_SEGMENT_KEYS;
 use rmk_types::protocol::rynk::command::{
     GetDefaultLayer, GetEncoderAction, GetKeyAction, GetKeymapBulk, GetLayerMetadata, SetDefaultLayer,
     SetEncoderAction, SetKeyAction, SetKeymapBulk, SetLayerMetadata,
@@ -188,22 +189,18 @@ impl HandleBulk<SetKeymapBulk> for RynkService<'_> {
         let (rows, cols, num_layers) = self.ctx.keymap_dimensions();
         let count = bulk_count(cursor)?;
         let cells = take_bulk::<KeyAction>(&mut cursor, start, num_layers * rows * cols)?;
-        // Bulk order advances columns, then rows, then layers.
-        let apply = async {
-            for (offset, action) in cells {
-                let layer = (offset / (rows * cols)) as u8;
-                let row = (offset / cols % rows) as u8;
-                let col = (offset % cols) as u8;
-                self.ctx
-                    .set_action(layer, row, col, action)
-                    .await
-                    .or(Err(RynkError::StorageFault))?;
-            }
-            Ok::<_, RynkError>(())
-        };
+        // One flash item per row segment: a segment opens at the first cell and at every
+        // column that is a multiple of the segment width, which includes each new row.
+        let segments = (start..start + count)
+            .filter(|offset| *offset == start || offset % cols % KEYMAP_SEGMENT_KEYS == 0)
+            .count();
         // Answer `Busy` rather than park this session on a flash queue the
         // storage task may hold for a whole page migration.
-        self.ctx.persist_bounded(count, apply).await.ok_or(RynkError::Busy)??;
+        self.ctx
+            .persist_bounded(segments, self.ctx.set_actions(start, cells.map(|(_, action)| action)))
+            .await
+            .ok_or(RynkError::Busy)?
+            .or(Err(RynkError::StorageFault))?;
         msg.encode_response(&())
     }
 }
