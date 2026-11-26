@@ -6,9 +6,10 @@ use embedded_storage_async::nor_flash::NorFlash as AsyncNorFlash;
 use rmk_types::action::KeyAction;
 use rmk_types::constants::MACRO_CHUNK_SIZE;
 use rmk_types::morse::{MorseProfile, MorseProfileName};
+use sequential_storage::Error as SSError;
 
 use crate::keyboard::combo::Combo;
-use crate::storage::{Storage, StorageKey, StorageValue, print_storage_error};
+use crate::storage::{Storage, StorageKey, StorageValue};
 
 impl<F: AsyncNorFlash> Storage<F> {
     pub(crate) async fn read_layout<
@@ -21,13 +22,9 @@ impl<F: AsyncNorFlash> Storage<F> {
         &mut self,
         data: &mut crate::keymap::KeymapData<ROW, COL, NUM_LAYER, NUM_ENCODER, NUM_TOUCHPAD>,
         behavior: &mut crate::config::BehaviorConfig,
-    ) -> Result<(), ()> {
+    ) -> Result<(), SSError<F::Error>> {
         // Use fetch_all_items to speed up the keymap reading
-        let mut key_iterator = self
-            .flash
-            .fetch_all_items(&mut self.buffer)
-            .await
-            .map_err(|e| print_storage_error::<F>(e))?;
+        let mut key_iterator = self.flash.fetch_all_items(&mut self.buffer).await?;
 
         // Which profile slots storage spoke for, so a slot whose profile was stored without a
         // name gets a generated one below, while a stored empty name still means "vacant".
@@ -35,11 +32,7 @@ impl<F: AsyncNorFlash> Storage<F> {
         let mut stored_name = [false; crate::MAX_MORSE_PROFILES];
 
         let mut records_read = 0u32;
-        while let Some((key, value)) = key_iterator
-            .next::<StorageValue>(&mut self.buffer)
-            .await
-            .map_err(|e| print_storage_error::<F>(e))?
-        {
+        while let Some((key, value)) = key_iterator.next::<StorageValue>(&mut self.buffer).await? {
             match (key, value) {
                 (StorageKey::KeymapSegment { layer, row, col }, StorageValue::KeymapSegment(actions)) => {
                     // A store written for another geometry keeps what still fits.
