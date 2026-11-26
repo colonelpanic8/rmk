@@ -1504,6 +1504,7 @@ mod tests {
                     0 => publish_event(KeyboardEvent::key(0, 0, true)),
                     1 => publish_event(PointingEvent {
                         device_id: 0,
+                        buttons: 0,
                         axes: [
                             AxisEvent {
                                 typ: AxisValType::Rel,
