@@ -114,7 +114,7 @@ mod tests {
     use crate::constants::COMBO_SIZE;
     use crate::protocol::rynk::tests::{assert_max_size_bound, round_trip};
 
-    /// Build a `Combo` filled to `COMBO_SIZE` actions plus a `Some` layer —
+    /// Build a `Combo` filled to `COMBO_SIZE` actions plus an all-layers mask —
     /// the worst case for the manual `MaxSize` impl on `Combo`.
     fn full_combo() -> Combo {
         let actions = core::iter::repeat_n(
@@ -123,7 +123,7 @@ mod tests {
             ))),
             COMBO_SIZE,
         );
-        Combo::new(actions, KeyAction::No, Some(u8::MAX))
+        Combo::new(actions, KeyAction::No, u32::MAX)
     }
 
     fn full_position_definition() -> ComboDefinition {
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn round_trip_combo() {
-        round_trip(&Combo::new([KeyAction::No], KeyAction::No, Some(1)));
+        round_trip(&Combo::new([KeyAction::No], KeyAction::No, 1 << 1));
         round_trip(&Combo::empty());
     }
 
@@ -147,7 +147,7 @@ mod tests {
     fn round_trip_set_combo_request() {
         round_trip(&SetComboRequest {
             index: 3,
-            config: Combo::new([KeyAction::No], KeyAction::No, Some(1)),
+            config: Combo::new([KeyAction::No], KeyAction::No, 1 << 1),
         });
     }
 

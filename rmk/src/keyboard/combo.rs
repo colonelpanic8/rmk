@@ -120,8 +120,11 @@ impl Combo {
             return false;
         }
 
-        if let Some(layer) = self.layer()
-            && layer != active_layer
+        let layers = self.layers();
+        if layers != u32::MAX
+            && !1u32
+                .checked_shl(active_layer.into())
+                .is_some_and(|bit| layers & bit != 0)
         {
             return false;
         }
@@ -237,7 +240,7 @@ mod tests {
         let mut combo = Combo::new(ComboConfig::new(
             [hid(HidKeyCode::A), hid(HidKeyCode::B)],
             KeyAction::No,
-            None,
+            u32::MAX,
         ));
         let a = hid(HidKeyCode::A);
         let b = hid(HidKeyCode::B);
@@ -260,7 +263,7 @@ mod tests {
         let mut combo = Combo::new_positions(PositionComboConfig::new(
             [MatrixPosition { row: 0, col: 0 }, MatrixPosition { row: 0, col: 1 }],
             hid(HidKeyCode::B),
-            None,
+            u32::MAX,
         ));
 
         assert!(combo.update(&action, KeyboardEvent::key(0, 0, true), 0));
@@ -278,12 +281,23 @@ mod tests {
         let mut combo = Combo::new_positions(PositionComboConfig::new(
             [MatrixPosition { row: 0, col: 0 }],
             hid(HidKeyCode::B),
-            Some(0),
+            1 << 0,
         ));
 
         assert!(!combo.update(&action, KeyboardEvent::key(0, 0, true), 1));
         assert!(!combo.is_all_pressed());
         assert!(combo.update(&action, KeyboardEvent::key(0, 0, true), 0));
         assert!(combo.is_all_pressed());
+    }
+
+    #[test]
+    fn combo_only_records_on_its_layers() {
+        let a = hid(HidKeyCode::A);
+        let mut combo = Combo::new(ComboConfig::new([a, hid(HidKeyCode::B)], KeyAction::No, 0b101));
+
+        assert!(combo.update(&a, KeyboardEvent::key(0, 0, true), 0));
+        assert!(combo.update(&a, KeyboardEvent::key(0, 0, true), 2));
+        assert!(!combo.update(&a, KeyboardEvent::key(0, 0, true), 1));
+        assert!(!combo.update(&a, KeyboardEvent::key(0, 0, true), 32));
     }
 }
