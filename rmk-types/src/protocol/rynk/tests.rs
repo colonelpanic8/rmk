@@ -385,7 +385,7 @@ fn exemplars() -> Exemplars {
     let combo = Combo::new(
         [KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::A)))],
         KeyAction::Morse(1),
-        Some(2),
+        1 << 2,
     );
     let combo_definition = ComboDefinition::Positions(PositionCombo::new(
         [MatrixPosition { row: 3, col: 4 }, MatrixPosition { row: 5, col: 6 }],

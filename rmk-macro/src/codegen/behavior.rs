@@ -218,20 +218,17 @@ fn expand_combos(
 
             let combos_def = combos.combos.iter().map(|combo| {
                 let output = parse_key(combo.output.to_owned(), profiles);
-                let layer = match combo.layer {
-                    Some(layer) => quote! { ::core::option::Option::Some(#layer) },
-                    None => quote! { ::core::option::Option::None },
-                };
+                let layers = combo.layers;
                 match &combo.trigger {
                     ComboTrigger::Actions(actions) => {
                         let actions = actions.iter().map(|a| parse_key(a.to_owned(), profiles));
-                        quote! { ::rmk::keyboard::combo::Combo::new(::rmk::keyboard::combo::ComboConfig::new([#(#actions),*], #output, #layer)) }
+                        quote! { ::rmk::keyboard::combo::Combo::new(::rmk::keyboard::combo::ComboConfig::new([#(#actions),*], #output, #layers)) }
                     }
                     ComboTrigger::Positions(positions) => {
                         let positions = positions.iter().map(|[row, col]| {
                             quote! { ::rmk::types::combo::MatrixPosition { row: #row, col: #col } }
                         });
-                        quote! { ::rmk::keyboard::combo::Combo::new_positions(::rmk::keyboard::combo::PositionComboConfig::new([#(#positions),*], #output, #layer)) }
+                        quote! { ::rmk::keyboard::combo::Combo::new_positions(::rmk::keyboard::combo::PositionComboConfig::new([#(#positions),*], #output, #layers)) }
                     }
                 }
             });

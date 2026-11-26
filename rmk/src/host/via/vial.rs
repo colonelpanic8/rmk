@@ -375,7 +375,7 @@ pub(crate) async fn process_vial<'a>(
                     let config = ComboConfig {
                         actions,
                         output,
-                        layer: None,
+                        layers: u32::MAX,
                     };
                     let _ = ctx.set_combo(combo_idx, config).await;
                 }
@@ -447,7 +447,7 @@ mod tests {
         let combo_config = ComboConfig {
             actions,
             output: KeyAction::Single(Action::Key(KeyCode::Hid(HidKeyCode::Space))),
-            layer: None,
+            layers: u32::MAX,
         };
         let mut buffer = [0u8; 64];
         let storage_data = StorageValue::Combo(combo_config.clone());
