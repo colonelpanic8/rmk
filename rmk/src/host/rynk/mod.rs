@@ -1,7 +1,9 @@
 //! Rynk host service — RMK-native protocol server.
 //!
 //! `RynkService` dispatches requests against the keyboard state. Each connection
-//! owns its framing, authorization and topic subscriptions until disconnection.
+//! owns its framing and topic subscriptions until disconnection. Legacy lock
+//! endpoints remain as inert wire-compatibility shims; command authorization is
+//! controlled only by the keyboard's global maintenance mode.
 
 mod handlers;
 #[cfg(feature = "lighting")]
@@ -27,12 +29,8 @@ use rmk_types::protocol::rynk::{
 use self::handlers::{serve, serve_bulk};
 use self::topics::TopicSubscribers;
 use super::context::KeyboardContext;
-use super::lock::HostLock;
-use crate::config::{DeviceConfig, LockConfig, RmkConfig};
+use crate::config::{DeviceConfig, RmkConfig};
 use crate::keymap::KeyMap;
-
-/// Unlock attempts live long enough for BLE WebHID round trips.
-const RYNK_UNLOCK_WINDOW: embassy_time::Duration = embassy_time::Duration::from_millis(500);
 
 /// The `rmk` crate version baked into the firmware, so hosts can key
 /// version-specific behavior off the library release, not the user's app.
@@ -76,8 +74,6 @@ pub struct RynkService<'a> {
     ctx: KeyboardContext<'a>,
     /// Device identity served by `GetDeviceInfo`.
     device: DeviceConfig<'static>,
-    /// Policy copied into each connection's authorization gate.
-    lock_config: LockConfig,
     #[cfg(feature = "lighting")]
     lighting: Option<RynkLightingController<'a>>,
     /// Human-readable firmware identity served by `GetBuildInfo`.
@@ -106,13 +102,13 @@ impl RynkSession {
 
 impl<'a> RynkService<'a> {
     pub fn new(keymap: &'a KeyMap<'a>, config: &RmkConfig<'static>) -> Self {
+        crate::state::initialize_maintenance_mode(config.lock_config.maintenance_mode_default);
         let mut ctx = KeyboardContext::new(keymap);
         // Layout is fixed at macro expansion time, like Vial's keyboard-def.
         ctx.layout_blob = config.layout_blob;
         Self {
             ctx,
             device: config.device_config.clone(),
-            lock_config: config.lock_config,
             #[cfg(feature = "lighting")]
             lighting: None,
             build_info: BuildInfo {
@@ -170,20 +166,32 @@ impl<'a> RynkService<'a> {
         )
     }
 
-    /// Whether `cmd` needs an unlocked device.
-    fn requires_unlock(&self, cmd: Cmd) -> bool {
+    /// Whether the maintenance lock covers `cmd`. A command missing from both
+    /// lists in [`Self::maintenance_policy`] is treated as locked, so a new
+    /// endpoint cannot bypass the lock by omission.
+    fn requires_maintenance_mode(cmd: Cmd) -> bool {
+        Self::maintenance_policy(cmd).unwrap_or(true)
+    }
+
+    /// `Some(true)` for mutations and sensitive operations, `Some(false)` for
+    /// plain reads, `None` for a command nobody has classified yet (the
+    /// `every_endpoint_has_a_maintenance_policy` test keeps that set empty).
+    fn maintenance_policy(cmd: Cmd) -> Option<bool> {
         match cmd {
-            Cmd::BootloaderJump | Cmd::PeripheralBootloaderJump => self.lock_config.bootloader_requires_unlock,
+            Cmd::Reboot
+            | Cmd::BootloaderJump
+            | Cmd::PeripheralBootloaderJump
+            | Cmd::StorageReset
+            | Cmd::GetMatrixState => Some(true),
             // Reading raw LED colors can expose reactive per-key effects, and
             // therefore keystrokes, exactly like the matrix snapshot does.
             #[cfg(feature = "lighting")]
-            Cmd::GetLightingFrame => true,
-            Cmd::StorageReset | Cmd::GetMatrixState => true,
+            Cmd::GetLightingFrame => Some(true),
             // Deleting or hiding a bond opens a re-pair hijack window; BLE-only commands.
             #[cfg(feature = "_ble")]
-            Cmd::ClearBleProfile | Cmd::DisconnectBleProfile => true,
+            Cmd::ClearBleProfile | Cmd::DisconnectBleProfile => Some(true),
             #[cfg(all(feature = "_ble", feature = "split"))]
-            Cmd::SetSplitCentralLatency => self.lock_config.write_requires_unlock,
+            Cmd::SetSplitCentralLatency => Some(true),
             #[cfg(feature = "lighting")]
             Cmd::SetLightingState
             | Cmd::SetLightingOverlay
@@ -212,33 +220,66 @@ impl<'a> RynkService<'a> {
             | Cmd::BeginLightingExtendedRuntimeConditionalSceneReplace
             | Cmd::PutLightingExtendedRuntimeConditionalSceneChunk
             | Cmd::CommitLightingExtendedRuntimeConditionalSceneReplace
-            | Cmd::AbortLightingExtendedRuntimeConditionalSceneReplace => self.lock_config.write_requires_unlock,
-            _ => Self::needs_storage_write(cmd) && self.lock_config.write_requires_unlock,
+            | Cmd::AbortLightingExtendedRuntimeConditionalSceneReplace => Some(true),
+            cmd if Self::needs_storage_write(cmd) => Some(true),
+            Cmd::GetVersion
+            | Cmd::GetCapabilities
+            | Cmd::GetLockStatus
+            | Cmd::UnlockPoll
+            | Cmd::Lock
+            | Cmd::GetLayout
+            | Cmd::GetDeviceInfo
+            | Cmd::GetMaintenanceMode
+            | Cmd::GetKeyAction
+            | Cmd::GetDefaultLayer
+            | Cmd::GetEncoderAction
+            | Cmd::GetKeymapBulk
+            | Cmd::GetMacro
+            | Cmd::GetCombo
+            | Cmd::GetComboBulk
+            | Cmd::GetMorse
+            | Cmd::GetMorseBulk
+            | Cmd::GetFork
+            | Cmd::GetBehaviorConfig
+            | Cmd::GetConnectionType
+            | Cmd::GetConnectionStatus
+            | Cmd::GetCurrentLayer
+            | Cmd::GetWpm
+            | Cmd::GetSleepState
+            | Cmd::GetLedIndicator
+            | Cmd::GetBatteryStatus => Some(false),
+            #[cfg(feature = "_ble")]
+            Cmd::SwitchBleProfile => Some(false),
+            #[cfg(feature = "split")]
+            Cmd::GetPeripheralStatus => Some(false),
+            _ => None,
         }
     }
 
     /// Write one reply. A protocol rejection keeps the session open and returns `false`.
     async fn serve_request<W: Write>(
         &self,
-        locker: &HostLock<'_>,
         #[cfg_attr(not(feature = "lighting"), allow(unused_variables))] session: &RynkSession,
         msg: &mut RynkMessage<'_>,
         tx: &mut W,
     ) -> Result<bool, W::Error> {
         let cmd = msg.header().cmd;
         let result = match cmd {
-            _ if self.requires_unlock(cmd) && !locker.is_unlocked() => Err(RynkError::Locked),
+            _ if Self::requires_maintenance_mode(cmd) && !crate::state::maintenance_mode_enabled() => {
+                Err(RynkError::NotReady)
+            }
             Cmd::GetVersion => serve::<command::GetVersion, _>(self, msg).await,
             Cmd::GetCapabilities => serve::<command::GetCapabilities, _>(self, msg).await,
             Cmd::Reboot => serve::<command::Reboot, _>(self, msg).await,
             Cmd::BootloaderJump => serve::<command::BootloaderJump, _>(self, msg).await,
             Cmd::StorageReset => serve::<command::StorageReset, _>(self, msg).await,
-            Cmd::GetLockStatus => serve::<command::GetLockStatus, _>(locker, msg).await,
-            Cmd::UnlockPoll => serve::<command::UnlockPoll, _>(locker, msg).await,
-            Cmd::Lock => serve::<command::Lock, _>(locker, msg).await,
+            Cmd::GetLockStatus => serve::<command::GetLockStatus, _>(self, msg).await,
+            Cmd::UnlockPoll => serve::<command::UnlockPoll, _>(self, msg).await,
+            Cmd::Lock => serve::<command::Lock, _>(self, msg).await,
             Cmd::GetDeviceInfo => serve::<command::GetDeviceInfo, _>(self, msg).await,
             Cmd::GetBuildInfo => serve::<command::GetBuildInfo, _>(self, msg).await,
             Cmd::PeripheralBootloaderJump => serve::<command::PeripheralBootloaderJump, _>(self, msg).await,
+            Cmd::GetMaintenanceMode => serve::<command::GetMaintenanceMode, _>(self, msg).await,
 
             Cmd::GetKeyAction => serve::<command::GetKeyAction, _>(self, msg).await,
             Cmd::SetKeyAction => serve::<command::SetKeyAction, _>(self, msg).await,
@@ -475,12 +516,6 @@ impl<'a> RynkService<'a> {
     pub async fn run<R: Read, T: Write>(&self, rx: &mut R, tx: &mut T) {
         let mut buf = [0u8; RYNK_BUFFER_SIZE];
         let mut handshaked = false;
-        let locker = HostLock::new(
-            self.lock_config.unlock_keys,
-            self.ctx.keymap,
-            self.lock_config.insecure,
-            RYNK_UNLOCK_WINDOW,
-        );
         let mut topics = TopicSubscribers::new();
         let session = RynkSession::new();
         let mut df = Deframer::new();
@@ -499,7 +534,7 @@ impl<'a> RynkService<'a> {
                     // Hosts never send topic-range cmds; drop without a reply.
                     warn!("Rynk: dropping topic-range request {:?}", cmd);
                 } else {
-                    let Ok(served) = self.serve_request(&locker, &session, &mut msg, tx).await else {
+                    let Ok(served) = self.serve_request(&session, &mut msg, tx).await else {
                         return;
                     };
                     handshaked |= served && cmd == Cmd::GetCapabilities;
@@ -547,16 +582,12 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use embassy_futures::join::join;
     use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
     use rmk_types::action::KeyAction;
-    use rmk_types::protocol::rynk::{
-        DeviceInfo, LockStatus, MatrixState, ProtocolVersion, RYNK_HEADER_SIZE, RynkHeader, encode_frame,
-    };
+    use rmk_types::protocol::rynk::{DeviceInfo, ProtocolVersion, RYNK_HEADER_SIZE, RynkHeader, encode_frame};
 
     use super::*;
     use crate::config::{BehaviorConfig, LockConfig, PositionalConfig, RmkConfig, build_serial_number};
-    use crate::event::KeyboardEvent;
     use crate::keymap::{KeyMap, KeymapData};
     use crate::test_support::test_block_on as block_on;
 
@@ -714,142 +745,14 @@ mod tests {
         }
     }
 
-    /// A second session over the same service starts locked again. The gate
-    /// itself lives in `tests/scenarios/rynk_lock.toml`, which holds the
-    /// challenge with real matrix input; only the session boundary needs a
-    /// second `run`, which one timeline cannot express.
     #[test]
-    fn a_new_session_starts_locked_again() {
-        let mut behavior = BehaviorConfig::default();
-        let positional: PositionalConfig<2, 2> = PositionalConfig::default();
-        let mut data: KeymapData<2, 2, 1, 0> =
-            KeymapData::new([[[KeyAction::No, KeyAction::No], [KeyAction::No, KeyAction::No]]]);
-        let keymap = block_on(KeyMap::new(&mut data, &mut behavior, &positional));
-
-        const UNLOCK_KEYS: &[(u8, u8)] = &[(0, 0)];
-        let mut config = RmkConfig {
-            lock_config: LockConfig {
-                unlock_keys: UNLOCK_KEYS,
-                insecure: false,
-                write_requires_unlock: false,
-                bootloader_requires_unlock: true,
-            },
-            ..Default::default()
-        };
-        let service = RynkService::new(&keymap, &config);
-        assert!(service.requires_unlock(Cmd::BootloaderJump));
-        assert!(service.requires_unlock(Cmd::PeripheralBootloaderJump));
-
-        config.lock_config.bootloader_requires_unlock = false;
-        let deployment_service = RynkService::new(&keymap, &config);
-        assert!(!deployment_service.requires_unlock(Cmd::BootloaderJump));
-        assert!(!deployment_service.requires_unlock(Cmd::PeripheralBootloaderJump));
-        assert!(deployment_service.requires_unlock(Cmd::StorageReset));
-        assert!(deployment_service.requires_unlock(Cmd::GetMatrixState));
-
-        // Hold the challenge key throughout, so only the session boundary can
-        // account for the second session being locked.
-        keymap.update_matrix_state(&KeyboardEvent::key(0, 0, true));
-
-        let mut chunks = VecDeque::new();
-        chunks.push_back(req(Cmd::UnlockPoll.raw(), 0));
-        chunks.push_back(req(Cmd::GetMatrixState.raw(), 1));
-        let mut rx = ChunkRead { chunks };
-        let mut tx = VecWrite { captured: Vec::new() };
-        block_on(service.run(&mut rx, &mut tx));
-
-        let resp = decode_frames(&tx.captured);
-        assert!(
-            postcard::from_bytes::<Result<MatrixState, RynkError>>(&resp[1].2)
-                .unwrap()
-                .is_ok(),
-            "gated command served once unlocked"
-        );
-
-        let mut chunks2 = VecDeque::new();
-        chunks2.push_back(req(Cmd::GetMatrixState.raw(), 0));
-        let mut rx2 = ChunkRead { chunks: chunks2 };
-        let mut tx2 = VecWrite { captured: Vec::new() };
-        block_on(service.run(&mut rx2, &mut tx2));
-
-        let resp2 = decode_frames(&tx2.captured);
-        assert_eq!(resp2.len(), 1);
-        assert_eq!(
-            postcard::from_bytes::<Result<MatrixState, RynkError>>(&resp2[0].2).unwrap(),
-            Err(RynkError::Locked),
-            "a fresh session has independent locked state"
-        );
-    }
-
-    #[test]
-    fn sessions_authorize_independently() {
-        let mut behavior = BehaviorConfig::default();
-        let positional: PositionalConfig<2, 2> = PositionalConfig::default();
-        let mut data: KeymapData<2, 2, 1, 0> =
-            KeymapData::new([[[KeyAction::No, KeyAction::No], [KeyAction::No, KeyAction::No]]]);
-        let keymap = block_on(KeyMap::new(&mut data, &mut behavior, &positional));
-
-        const UNLOCK_KEYS: &[(u8, u8)] = &[(0, 0)];
-        let mut config = RmkConfig::default();
-        config.lock_config.unlock_keys = UNLOCK_KEYS;
-        let service = RynkService::new(&keymap, &config);
-        keymap.update_matrix_state(&KeyboardEvent::key(0, 0, true));
-
-        let mut chunks_a = VecDeque::new();
-        chunks_a.push_back(req(Cmd::UnlockPoll.raw(), 0x11));
-        chunks_a.push_back(req(Cmd::GetLockStatus.raw(), 0x12));
-        chunks_a.push_back(req(Cmd::Lock.raw(), 0x13));
-        chunks_a.push_back(req(Cmd::GetMatrixState.raw(), 0x14));
-        let mut rx_a = ChunkRead { chunks: chunks_a };
-        let mut tx_a = VecWrite { captured: Vec::new() };
-
-        let mut chunks_b = VecDeque::new();
-        chunks_b.push_back(req(Cmd::GetLockStatus.raw(), 0x21));
-        chunks_b.push_back(req(Cmd::UnlockPoll.raw(), 0x22));
-        chunks_b.push_back(req(Cmd::GetMatrixState.raw(), 0x23));
-        let mut rx_b = ChunkRead { chunks: chunks_b };
-        let mut tx_b = VecWrite { captured: Vec::new() };
-
-        block_on(join(
-            service.run(&mut rx_a, &mut tx_a),
-            service.run(&mut rx_b, &mut tx_b),
-        ));
-
-        let responses_a = decode_frames(&tx_a.captured);
-        assert_eq!(responses_a.len(), 4);
-        let unlocked_a = postcard::from_bytes::<Result<LockStatus, RynkError>>(&responses_a[0].2)
-            .unwrap()
-            .unwrap();
-        assert!(!unlocked_a.locked);
-        let status_a = postcard::from_bytes::<Result<LockStatus, RynkError>>(&responses_a[1].2)
-            .unwrap()
-            .unwrap();
-        assert!(!status_a.locked);
-        assert_eq!(
-            postcard::from_bytes::<Result<(), RynkError>>(&responses_a[2].2).unwrap(),
-            Ok(())
-        );
-        assert_eq!(
-            postcard::from_bytes::<Result<MatrixState, RynkError>>(&responses_a[3].2).unwrap(),
-            Err(RynkError::Locked),
-        );
-
-        let responses_b = decode_frames(&tx_b.captured);
-        assert_eq!(responses_b.len(), 3);
-        let locked_b = postcard::from_bytes::<Result<LockStatus, RynkError>>(&responses_b[0].2)
-            .unwrap()
-            .unwrap();
-        assert!(locked_b.locked, "session A does not unlock session B");
-        let unlocked_b = postcard::from_bytes::<Result<LockStatus, RynkError>>(&responses_b[1].2)
-            .unwrap()
-            .unwrap();
-        assert!(!unlocked_b.locked);
-        assert!(
-            postcard::from_bytes::<Result<MatrixState, RynkError>>(&responses_b[2].2)
-                .unwrap()
-                .is_ok(),
-            "locking session A does not relock session B"
-        );
+    fn every_endpoint_has_a_maintenance_policy() {
+        let unclassified: Vec<Cmd> = Cmd::ENDPOINTS
+            .iter()
+            .copied()
+            .filter(|cmd| RynkService::maintenance_policy(*cmd).is_none())
+            .collect();
+        assert!(unclassified.is_empty(), "unclassified commands: {unclassified:?}");
     }
 
     /// A read carrying more than one frame serves them all, in order: the
