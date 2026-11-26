@@ -239,6 +239,26 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                 super::update_layer_state(state);
                 publish_event(LayerChangeEvent::new(state.effective));
             }
+            SplitMessage::TransportOverride { generation, mode } => {
+                info!("Split transport force {} from central: {}", generation, mode);
+                // Applying the force may tear this link down, so
+                // the acknowledgement has to be on its way first.
+                let delivered = match self
+                    .split_driver
+                    .write(&SplitMessage::TransportOverrideAck(generation))
+                    .await
+                {
+                    Ok(_) => self.split_driver.flush().await,
+                    Err(e) => Err(e),
+                };
+                match delivered {
+                    Ok(()) => crate::split::selector::set_forced(mode),
+                    Err(e) => error!(
+                        "Transport force {} acknowledgement not delivered, not applying: {:?}",
+                        generation, e
+                    ),
+                }
+            }
             #[cfg(feature = "display")]
             SplitMessage::Wpm(wpm) => publish_event(WpmUpdateEvent::new(wpm)),
             #[cfg(feature = "display")]
