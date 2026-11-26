@@ -21,6 +21,7 @@
 //! - [`battery`] — `BatteryStatus`, `ChargeState`
 //! - [`ble`] — `BleStatus`, `BleState`
 //! - [`connection`] — `ConnectionType` (USB/BLE), `UsbState`, `ConnectionStatus`
+//! - [`unicode`] — `UnicodeMode`: which OS input method `Action::Unicode` types for
 //!
 //! ### Protocol
 //! - [`protocol::vial`] — Vial/Via protocol types
@@ -56,6 +57,7 @@ pub mod mouse_button;
 pub mod protocol;
 #[cfg(feature = "steno")]
 pub mod steno;
+pub mod unicode;
 
 /// Maximum device information string length in bytes, including serial number markers.
 pub const DEVICE_INFO_STRING_MAX_LEN: usize = 32;
