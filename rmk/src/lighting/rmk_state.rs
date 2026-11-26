@@ -1,6 +1,6 @@
 //! Adapters from authoritative RMK state to lighting snapshots.
 
-use super::{IndicatorState, LayerState, LightingContext, SnapshotProvider};
+use super::{IndicatorState, LayerState, LightingContext, SnapshotProvider, SplitTransportState};
 use crate::keymap::KeyMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,6 +65,8 @@ impl SnapshotProvider for KeymapLightingState<'_, '_> {
             local_powered: powered,
             connection: (&connection).into(),
             bonded_slots,
+            maintenance_unlocked: false,
+            split_transport: SplitTransportState::default(),
         }
     }
 }
