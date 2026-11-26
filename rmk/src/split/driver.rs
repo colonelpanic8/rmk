@@ -509,6 +509,8 @@ impl<T: SplitReader + SplitWriter> PeripheralManager<T> {
                         }
                     }
                     Ok(split_message) => self.process_peripheral_message(split_message).await,
+                    // The session is gone; the next one starts with a fresh sync.
+                    Err(SplitDriverError::Disconnected) => return,
                     Err(e) => error!("Peripheral message read error: {:?}", e),
                 },
                 #[cfg(feature = "dfu_split")]

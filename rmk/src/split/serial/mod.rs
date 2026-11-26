@@ -103,7 +103,11 @@ pub(crate) async fn run_half_duplex_peripheral_manager<S: Read + Write>(
         policy,
     );
     info!("Running half-duplex peripheral manager {}", id);
-    peripheral_manager.run().await;
+    // The manager returns when its session is lost; each run is a new one.
+    loop {
+        peripheral_manager.transceiver_mut().begin_session();
+        peripheral_manager.run().await;
+    }
 }
 
 /// Run one central-side manager only while automatic selection prefers wired.
@@ -169,8 +173,9 @@ pub(crate) async fn run_auto_half_duplex_peripheral_manager<S: Read + Write>(
 const LINK_HEADER: usize = 3;
 const SEQ_FLAG: u8 = 0x80;
 /// On an unsequenced frame: sequence-state reset. The central raises it on
-/// every fresh session (and whenever acknowledgements stop progressing); the
-/// peripheral zeroes its endpoint and echoes the flag on its terminator.
+/// every fresh session; the peripheral zeroes its endpoint and echoes the
+/// flag on its terminator. A peripheral whose own session restarted raises
+/// it instead of answering a plain poll, so the central starts a fresh one.
 /// Without this, one half rebooting mid-session deadlocks the link: each
 /// side discards the other's frames as out-of-order forever.
 const RESET_FLAG: u8 = 0x40;
@@ -533,8 +538,8 @@ const CONTROL_ACK_EXCHANGES: usize = 32;
 /// Wall-clock bound on a peripheral flushing a control message, for a
 /// central that has stopped polling.
 const CONTROL_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
-/// Consecutive exchanges without acknowledgement progress before the central
-/// assumes the peer rebooted and renegotiates the sequence session.
+/// Consecutive answered exchanges that leave the oldest frame unacknowledged
+/// before the central gives the session up as lost.
 const STUCK_ACK_EXCHANGES: u8 = 24;
 /// Consecutive unanswered exchanges before the central reports the wired
 /// peripheral gone and renegotiates the session once it answers again.
@@ -586,6 +591,7 @@ pub(crate) struct HalfDuplexCentralDriver<S> {
     id: usize,
     timing: HalfDuplexTiming,
     silent_exchanges: u8,
+    stuck_exchanges: u8,
     /// A poll may have reached the wire whose reply has not been listened
     /// out. Set for the whole transmit and receive phases, so an exchange
     /// dropped at any point makes the next one drain the bus before driving
@@ -604,6 +610,7 @@ impl<S> HalfDuplexCentralDriver<S> {
             id,
             timing,
             silent_exchanges: 0,
+            stuck_exchanges: 0,
             reply_pending: false,
             session_fresh: true,
         }
@@ -627,8 +634,10 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
     /// inbox. A corrupt frame is skipped, not treated as the end of the
     /// burst: the peripheral keeps the bus until its terminator regardless.
     /// A transport fault is reported only once the bus has gone quiet, so
-    /// the caller never transmits into the rest of a burst. Returns how many
-    /// frames, corrupt ones included, arrived.
+    /// the caller never transmits into the rest of a burst. A peripheral
+    /// asking for a handshake has lost the session: that is reported as
+    /// [`SplitDriverError::Disconnected`]. Returns how many frames, corrupt
+    /// ones included, arrived.
     async fn listen_reply(&mut self) -> Result<usize, SplitDriverError> {
         if !self.reply_pending {
             return Ok(0);
@@ -650,6 +659,13 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
                             set_peripheral_connected(self.id, true);
                             break;
                         }
+                    } else if ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0 {
+                        // The peripheral restarted alone and holds none of
+                        // this session; its header acknowledges nothing.
+                        self.session_fresh = true;
+                        set_peripheral_connected(self.id, false);
+                        fault = Some(SplitDriverError::Disconnected);
+                        break;
                     } else {
                         self.link.on_header(ack, credit);
                         if ctrl & SEQ_FLAG != 0 {
@@ -678,18 +694,15 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
 
     /// One full exchange: transmit queued and retransmitted frames plus a
     /// poll, then listen out the reply. Returns `true` if the peripheral
-    /// answered at all.
+    /// answered at all, and [`SplitDriverError::Disconnected`] once the
+    /// session is lost; the exchanges after that renegotiate it.
     async fn exchange(&mut self) -> Result<bool, SplitDriverError> {
         self.listen_reply().await?;
-        // A peer whose responses arrive but never acknowledge anything is
-        // running a different sequence session (it rebooted); renegotiate.
-        if self.link.exchanges_without_ack >= STUCK_ACK_EXCHANGES {
-            self.session_fresh = true;
-        }
         let mut burst: Deque<(u8, SplitMessage), FRAMES_PER_EXCHANGE> = Deque::new();
         if !self.session_fresh {
             self.link.fill_burst(&mut burst);
         }
+        let oldest_unacked = self.link.unacked.front().map(|(seq, _)| *seq);
         // Set BEFORE the writes: if this future is dropped mid-send the
         // poll may still reach the wire, and the next transmission must not
         // drive over the reply it provokes.
@@ -710,6 +723,19 @@ impl<S: Read + Write> HalfDuplexCentralDriver<S> {
         let answered = self.listen_reply().await? > 0;
         if answered {
             self.silent_exchanges = 0;
+            // The retransmit timer restarts on every resend, so it cannot
+            // tell a peer that answers without ever acknowledging — one in a
+            // different sequence session — from a lossy link.
+            let stuck = !self.session_fresh
+                && oldest_unacked.is_some()
+                && self.link.unacked.front().map(|(seq, _)| *seq) == oldest_unacked;
+            self.stuck_exchanges = if stuck { self.stuck_exchanges + 1 } else { 0 };
+            if self.stuck_exchanges >= STUCK_ACK_EXCHANGES {
+                self.stuck_exchanges = 0;
+                self.session_fresh = true;
+                set_peripheral_connected(self.id, false);
+                return Err(SplitDriverError::Disconnected);
+            }
         } else if self.silent_exchanges < PEER_LOST_EXCHANGES {
             self.silent_exchanges += 1;
             if self.silent_exchanges == PEER_LOST_EXCHANGES {
@@ -797,6 +823,10 @@ pub(crate) struct HalfDuplexPeripheralDriver<S> {
     /// Session handshakes served, so a flush can tell that its frame was
     /// dropped by a reset rather than acknowledged.
     resets: u32,
+    /// This side's session restarted and the central has not opened a new
+    /// one yet. Whatever it sends until then belongs to a session this side
+    /// no longer has, and its acknowledgements mean nothing here.
+    awaiting_handshake: bool,
 }
 
 impl<S> HalfDuplexPeripheralDriver<S> {
@@ -812,14 +842,16 @@ impl<S> HalfDuplexPeripheralDriver<S> {
             link: LinkEndpoint::new(),
             reply_gap,
             resets: 0,
+            awaiting_handshake: true,
         }
     }
 
-    /// Start a session: drop whatever the previous one left queued. The
-    /// sequence state follows the central's handshake.
+    /// Start a session: drop whatever the previous one left queued, and
+    /// exchange nothing until the central's handshake opens the new one.
     pub(crate) fn begin_session(&mut self) {
         self.link.clear_queues();
         self.link.reset();
+        self.awaiting_handshake = true;
     }
 }
 
@@ -837,19 +869,27 @@ impl<S: Read + Write> HalfDuplexPeripheralDriver<S> {
     /// the inbox, or answer a poll with a burst and the terminator.
     async fn serve(&mut self) -> Result<(), SplitDriverError> {
         let (ctrl, ack, credit, message) = self.serial.read_frame().await?;
-        if ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0 {
+        let reset = ctrl & SEQ_FLAG == 0 && ctrl & RESET_FLAG != 0;
+        if reset {
             // Fresh session: start from empty queues and zeroed sequence
-            // state, and echo the flag so the central knows it may start
-            // sending data.
+            // state.
             self.link.reset();
             self.link.clear_queues();
             self.resets = self.resets.wrapping_add(1);
-            if self.reply_gap.as_ticks() != 0 {
-                Timer::after(self.reply_gap).await;
+            self.awaiting_handshake = false;
+        }
+        if reset || self.awaiting_handshake {
+            // To a reset poll the flag is the echo that lets the central
+            // start sending data; to a plain poll it asks for the handshake
+            // this side has not had. Data frames go unanswered either way.
+            if ctrl & SEQ_FLAG == 0 {
+                if self.reply_gap.as_ticks() != 0 {
+                    Timer::after(self.reply_gap).await;
+                }
+                self.serial
+                    .write_frame(RESET_FLAG, 0, self.link.credit(), &SplitMessage::HalfDuplexIdle)
+                    .await?;
             }
-            self.serial
-                .write_frame(RESET_FLAG, 0, self.link.credit(), &SplitMessage::HalfDuplexIdle)
-                .await?;
             return Ok(());
         }
         self.link.on_header(ack, credit);
@@ -927,13 +967,20 @@ impl<S: Read + Write> SplitWriter for HalfDuplexPeripheralDriver<S> {
 
 #[cfg(test)]
 mod tests {
+    use core::cell::{Cell, RefCell};
+    use core::future::{Future, poll_fn};
+    use core::task::Poll;
     use std::collections::VecDeque;
     use std::convert::Infallible;
 
     use embassy_futures::block_on;
+    use embassy_futures::select::{Either, select, select3};
+    use embassy_time::with_timeout;
     use embedded_io_async::ErrorType;
 
     use super::*;
+    use crate::event::{KeyboardEvent, LayerChangeEvent, SubscribableEvent, publish_event};
+    use crate::split::selector;
 
     /// Fake `embedded_io_async::Read`: each `serial.read()` call returns the
     /// next scripted chunk, or a transport error for a `None` entry. Panics
@@ -1051,6 +1098,13 @@ mod tests {
         HalfDuplexCentralDriver::new(serial, 0, HalfDuplexTiming::from_baud(HALF_DUPLEX_DEFAULT_BAUD))
     }
 
+    /// A peripheral whose session the central has already opened.
+    fn peripheral<S>(serial: S) -> HalfDuplexPeripheralDriver<S> {
+        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(serial, Duration::from_ticks(0));
+        driver.awaiting_handshake = false;
+        driver
+    }
+
     fn encode_with(ctrl: u8, ack: u8, credit: u8, msg: &SplitMessage) -> Vec<u8> {
         let mut raw = [0u8; SPLIT_MESSAGE_MAX_SIZE];
         raw[0] = ctrl;
@@ -1131,7 +1185,7 @@ mod tests {
         let status = rmk_types::connection::ConnectionStatus::default();
         let data = seq_frame(0, 0, &SplitMessage::ConnectionStatus(status.clone()));
         let fake = FakeSerial::new([poll, data]);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
 
         block_on(driver.write(&SplitMessage::LedState(true))).unwrap();
         assert!(driver.serial.serial.writes.is_empty(), "no unprompted transmissions");
@@ -1156,7 +1210,7 @@ mod tests {
             &SplitMessage::ConnectionStatus(rmk_types::connection::ConnectionStatus::default()),
         );
         let fake = FakeSerial::new([poll(0), poll(0), poll(0), poll(0), stop]);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
 
         block_on(driver.write(&SplitMessage::LedState(true))).unwrap();
         let _ = block_on(driver.read()).unwrap();
@@ -1185,7 +1239,7 @@ mod tests {
             &SplitMessage::ConnectionStatus(rmk_types::connection::ConnectionStatus::default()),
         );
         let fake = FakeSerial::new([poll(0), poll(1), poll(1), poll(1), stop]);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
 
         block_on(driver.write(&SplitMessage::LedState(true))).unwrap();
         let _ = block_on(driver.read()).unwrap();
@@ -1208,7 +1262,7 @@ mod tests {
         let f0_dup = seq_frame(0, 0, &SplitMessage::LedState(true));
         let tail = seq_frame(1, 0, &SplitMessage::ConnectionStatus(status.clone()));
         let fake = FakeSerial::new([f1, f0, f0_dup, tail]);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
 
         let m1 = block_on(driver.read()).unwrap();
         assert!(matches!(m1, SplitMessage::LedState(true)));
@@ -1228,7 +1282,7 @@ mod tests {
             &SplitMessage::ConnectionStatus(rmk_types::connection::ConnectionStatus::default()),
         );
         let fake = FakeSerial::new([poll_no_credit, poll_credit, stop]);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
 
         block_on(driver.write(&SplitMessage::HalfDuplexIdle)).unwrap();
         let _ = block_on(driver.read()).unwrap();
@@ -1275,7 +1329,7 @@ mod tests {
         use core::sync::atomic::Ordering;
 
         let fake = FakeSerial::new([]);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
         let key = SplitMessage::Key(crate::event::KeyboardEvent::key(0, 0, true));
         for _ in 0..LANE_CAPACITY {
             block_on(driver.write(&key)).unwrap();
@@ -1352,7 +1406,7 @@ mod tests {
         chunks.push(reset);
         chunks.push(fresh);
         let fake = FakeSerial::new(chunks);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
 
         for _ in 0..3 {
             let m = block_on(driver.read()).unwrap();
@@ -1495,7 +1549,7 @@ mod tests {
     fn peripheral_flush_waits_for_the_control_frame_to_be_acked() {
         let poll = |ack: u8| encode_with(0, ack, 8, &SplitMessage::HalfDuplexPoll);
         let fake = FakeSerial::new([poll(0), poll(1)]);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
 
         block_on(driver.write(&SplitMessage::TransportOverrideAck(7))).unwrap();
         block_on(driver.flush()).expect("acked by the second poll");
@@ -1509,7 +1563,7 @@ mod tests {
     fn peripheral_flush_gives_up_on_a_central_that_never_acks() {
         let poll = encode_with(0, 0, 8, &SplitMessage::HalfDuplexPoll);
         let fake = FakeSerial::new(std::iter::repeat_n(poll, CONTROL_ACK_EXCHANGES));
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
 
         block_on(driver.write(&SplitMessage::TransportOverrideAck(7))).unwrap();
         block_on(driver.flush()).expect_err("never acknowledged");
@@ -1564,7 +1618,7 @@ mod tests {
         let key = SplitMessage::Key(crate::event::KeyboardEvent::key(0, 0, true));
         let reset = encode_with(RESET_FLAG, 0, 8, &SplitMessage::HalfDuplexPoll);
         let fake = FakeSerial::new([reset]);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
         block_on(driver.write(&key)).unwrap();
         driver.link.inbox.push_back(SplitMessage::LedState(true)).unwrap();
 
@@ -1581,9 +1635,251 @@ mod tests {
     fn peripheral_flush_fails_when_a_reset_drops_its_frame() {
         let reset = encode_with(RESET_FLAG, 0, 8, &SplitMessage::HalfDuplexPoll);
         let fake = FakeSerial::new([reset]);
-        let mut driver = HalfDuplexPeripheralDriver::with_reply_gap(fake, Duration::from_ticks(0));
+        let mut driver = peripheral(fake);
 
         block_on(driver.write(&SplitMessage::TransportOverrideAck(3))).unwrap();
         block_on(driver.flush()).expect_err("the ack was dropped, not acknowledged");
+    }
+
+    // -----------------------------------------------------------------
+    // Two-sided simulation: both link drivers joined by one wire, under the
+    // real central manager. The peripheral's application is a stand-in
+    // because `SplitPeripheral` shares the selector and event statics with
+    // the central running in the same process.
+    // -----------------------------------------------------------------
+
+    /// Byte time equal to the mock clock's step.
+    const SIM_BAUD: u32 = 100_000;
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Side {
+        Central,
+        Peripheral,
+    }
+
+    type Frame = (u8, u8, u8, SplitMessage);
+    type Lose = Box<dyn FnMut(Side, &Frame) -> bool>;
+
+    /// A wire with real byte times on the mock clock. A frame reaches the
+    /// other end byte by byte, so a write dropped mid-frame leaves a
+    /// truncated frame behind, as a cancelled UARTE transmission does.
+    /// `lose` picks frames that never arrive.
+    struct Wire {
+        to_central: RefCell<VecDeque<u8>>,
+        to_peripheral: RefCell<VecDeque<u8>>,
+        lose: RefCell<Lose>,
+    }
+
+    impl Wire {
+        fn new(lose: impl FnMut(Side, &Frame) -> bool + 'static) -> Self {
+            Self {
+                to_central: RefCell::new(VecDeque::new()),
+                to_peripheral: RefCell::new(VecDeque::new()),
+                lose: RefCell::new(Box::new(lose)),
+            }
+        }
+
+        fn end(&self, side: Side) -> WireEnd<'_> {
+            WireEnd { wire: self, side }
+        }
+    }
+
+    struct WireEnd<'a> {
+        wire: &'a Wire,
+        side: Side,
+    }
+
+    impl ErrorType for WireEnd<'_> {
+        type Error = Infallible;
+    }
+
+    impl Read for WireEnd<'_> {
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+            let rx = match self.side {
+                Side::Central => &self.wire.to_central,
+                Side::Peripheral => &self.wire.to_peripheral,
+            };
+            poll_fn(|_| {
+                let mut rx = rx.borrow_mut();
+                if rx.is_empty() {
+                    return Poll::Pending;
+                }
+                let n = rx.len().min(buf.len());
+                for (slot, byte) in buf.iter_mut().zip(rx.drain(..n)) {
+                    *slot = byte;
+                }
+                Poll::Ready(Ok(n))
+            })
+            .await
+        }
+    }
+
+    impl Write for WireEnd<'_> {
+        async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+            let lost = (self.wire.lose.borrow_mut())(self.side, &decode(buf));
+            let tx = match self.side {
+                Side::Central => &self.wire.to_peripheral,
+                Side::Peripheral => &self.wire.to_central,
+            };
+            for &byte in buf {
+                Timer::after(Duration::from_micros(10_000_000 / SIM_BAUD as u64)).await;
+                if !lost {
+                    tx.borrow_mut().push_back(byte);
+                }
+            }
+            Ok(buf.len())
+        }
+
+        async fn flush(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct PeripheralLog {
+        received: Vec<SplitMessage>,
+    }
+
+    /// The peripheral application: records what the central sends and
+    /// forwards `outgoing`.
+    async fn peripheral_app<S: Read + Write>(
+        driver: &mut HalfDuplexPeripheralDriver<S>,
+        outgoing: &RefCell<VecDeque<SplitMessage>>,
+        log: &RefCell<PeripheralLog>,
+    ) {
+        loop {
+            let queued = poll_fn(|_| match outgoing.borrow_mut().pop_front() {
+                Some(message) => Poll::Ready(message),
+                None => Poll::Pending,
+            });
+            match select(driver.read(), queued).await {
+                Either::First(Ok(message)) => log.borrow_mut().received.push(message),
+                Either::First(Err(_)) => {}
+                Either::Second(message) => {
+                    driver.write(&message).await.unwrap();
+                }
+            }
+        }
+    }
+
+    async fn settled(what: &str, mut condition: impl FnMut() -> bool) {
+        let wait = poll_fn(|_| if condition() { Poll::Ready(()) } else { Poll::Pending });
+        if with_timeout(Duration::from_secs(2), wait).await.is_err() {
+            panic!("timed out waiting until {what}");
+        }
+    }
+
+    fn auto_central(wire: &Wire) -> impl Future<Output = ()> + '_ {
+        run_auto_half_duplex_peripheral_manager(
+            0,
+            wire.end(Side::Central),
+            SIM_BAUD,
+            crate::split::PeripheralMatrixConfig {
+                rows: 1,
+                cols: 1,
+                row_offset: 0,
+                col_offset: 0,
+            },
+            #[cfg(feature = "dfu_split")]
+            crate::split::dfu::UpdatePolicy::MatchHash,
+        )
+    }
+
+    fn connection_syncs(log: &RefCell<PeripheralLog>) -> usize {
+        let log = log.borrow();
+        log.received
+            .iter()
+            .filter(|m| matches!(m, SplitMessage::ConnectionStatus(_)))
+            .count()
+    }
+
+    /// A peripheral that restarts alone — a reboot, or a cable-detect flap
+    /// only it saw — holds none of the session the central is still running.
+    /// The link must renegotiate at once, without waiting for the central to
+    /// send something, and the manager must sync its state again.
+    #[test]
+    fn peripheral_restart_is_renegotiated_and_resynced() {
+        selector::initialize(true);
+        let wire = Wire::new(|_, _| false);
+        let outgoing = RefCell::new(VecDeque::new());
+        let log = RefCell::new(PeripheralLog::default());
+        let restart: Cell<Option<bool>> = Cell::new(None);
+        let mut keys = KeyboardEvent::subscriber();
+
+        let peripheral = async {
+            let mut driver = HalfDuplexPeripheralDriver::new(wire.end(Side::Peripheral));
+            loop {
+                let restarted = poll_fn(|_| match restart.take() {
+                    Some(reboot) => Poll::Ready(reboot),
+                    None => Poll::Pending,
+                });
+                match select(peripheral_app(&mut driver, &outgoing, &log), restarted).await {
+                    Either::Second(true) => driver = HalfDuplexPeripheralDriver::new(wire.end(Side::Peripheral)),
+                    Either::Second(false) => driver.begin_session(),
+                    Either::First(()) => unreachable!(),
+                }
+            }
+        };
+        let script = async {
+            settled("the session is up", || connection_syncs(&log) == 1).await;
+            for (session, reboot) in [(1, None), (2, Some(true)), (3, Some(false))] {
+                if reboot.is_some() {
+                    // Idle first: a control write still awaiting its
+                    // acknowledgement would notice the restart by itself.
+                    Timer::after_millis(20).await;
+                    restart.set(reboot);
+                    let wait = poll_fn(|_| {
+                        if connection_syncs(&log) == session {
+                            Poll::Ready(())
+                        } else {
+                            Poll::Pending
+                        }
+                    });
+                    with_timeout(Duration::from_millis(100), wait)
+                        .await
+                        .expect("an idle central renegotiates with the restarted peripheral and syncs again");
+                }
+                for pressed in [true, false] {
+                    outgoing
+                        .borrow_mut()
+                        .push_back(SplitMessage::Key(KeyboardEvent::key(0, 0, pressed)));
+                    let key = with_timeout(Duration::from_secs(1), keys.next_message_pure())
+                        .await
+                        .expect("key events reach the central");
+                    assert_eq!(key, KeyboardEvent::key(0, 0, pressed));
+                }
+                let layer = session as u8;
+                publish_event(LayerChangeEvent::new(layer));
+                settled("the layer reaches the peripheral", || {
+                    log.borrow()
+                        .received
+                        .iter()
+                        .any(|m| matches!(m, SplitMessage::Layer(l) if *l == layer))
+                })
+                .await;
+            }
+        };
+        crate::test_support::test_block_on(select3(auto_central(&wire), peripheral, script));
+    }
+
+    /// A peripheral that keeps answering while the oldest frame stays
+    /// unacknowledged is not in this session. Retransmitting must not hide
+    /// that from the central.
+    #[test]
+    fn central_restarts_a_session_whose_replies_never_acknowledge() {
+        let never_acks = || encode_with(0, 0, 8, &SplitMessage::HalfDuplexIdle);
+        let replies = core::iter::once(reset_echo())
+            .chain(core::iter::repeat_with(never_acks).take(STUCK_ACK_EXCHANGES as usize))
+            .chain([reset_echo()]);
+        let mut driver = central(FakeSerial::new(replies));
+        block_on(driver.write(&SplitMessage::Key(KeyboardEvent::key(0, 0, true)))).unwrap();
+
+        let err = block_on(driver.read()).expect_err("the session is reported lost");
+        assert!(matches!(err, SplitDriverError::Disconnected));
+
+        block_on(driver.exchange()).unwrap();
+        let writes = decoded_writes(&driver.serial.serial.writes);
+        assert_eq!(writes.last().unwrap().0, RESET_FLAG, "the next exchange renegotiates");
+        assert!(!driver.session_fresh, "and the peripheral's echo opens the new session");
     }
 }
