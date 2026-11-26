@@ -23,6 +23,7 @@ embassy-futures = "0.1"
 embassy-sync.workspace = true
 js-sys = "0.3"
 log = "0.4"
+serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 
