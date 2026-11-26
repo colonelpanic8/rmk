@@ -78,20 +78,22 @@ pub async fn get() -> PointingConfig {
 ///
 /// The write is refused unless `next.revision` matches what the device
 /// holds, so a host editing a stale copy is told to re-read rather than
-/// silently discarding someone else's change.
-pub async fn replace(next: PointingConfig, layers: usize) -> Result<PointingConfig, RynkError> {
+/// silently discarding someone else's change. A write that cannot be
+/// persisted changes nothing, so the host may send it again.
+pub async fn replace(mut next: PointingConfig, layers: usize) -> Result<PointingConfig, RynkError> {
     validate(&next, layers)?;
     {
         let mut state = STATE.lock().await;
         if next.revision != state.config.revision {
             return Err(RynkError::Invalid);
         }
-        state.config = next;
-        state.config.revision = next.revision.wrapping_add(1);
+        next.revision = next.revision.wrapping_add(1);
+        // Flash first: a write that fails leaves the revision the host retries against.
         #[cfg(feature = "storage")]
-        store(StorageItem::PointingConfig(state.config))
+        store(StorageItem::PointingConfig(next))
             .await
             .or(Err(RynkError::StorageFault))?;
+        state.config = next;
     }
     publish_event(PointingConfigChangeEvent);
     Ok(get().await)
@@ -242,6 +244,123 @@ mod tests {
             config.devices[1].device_id = 0;
             assert_eq!(replace(config, 2).await, Err(RynkError::Invalid));
             assert_eq!(get().await.revision, before.revision);
+        });
+    }
+
+    #[cfg(feature = "storage")]
+    type Flash = crate::test_support::InMemoryFlash<16_384, 4_096, 1>;
+
+    /// Run `body` against a live storage task over `flash`.
+    #[cfg(feature = "storage")]
+    fn with_storage_task<T>(flash: Flash, body: impl Future<Output = T>) -> T {
+        use embassy_futures::select::{Either, select};
+
+        use crate::core_traits::Runnable;
+        use crate::storage::{Storage, async_flash_wrapper};
+
+        crate::test_support::clear_flash_channel();
+        crate::test_support::test_block_on(async {
+            let mut storage = Box::pin(Storage::new(async_flash_wrapper(flash), &Default::default())).await;
+            match select(storage.run(), body).await {
+                Either::First(never) => never,
+                Either::Second(out) => out,
+            }
+        })
+    }
+
+    /// The largest configuration a host may send goes through the live write
+    /// path and comes back at the next boot.
+    #[cfg(feature = "storage")]
+    #[test]
+    fn largest_configuration_survives_a_reboot() {
+        use postcard::experimental::max_size::MaxSize;
+        use rmk_types::action::KeyAction;
+        use rmk_types::keycode::HidKeyCode;
+        use rmk_types::pointing::KeypadConfig;
+
+        use crate::keymap::{KeyMap, KeymapData};
+        use crate::storage::{Storage, async_flash_wrapper};
+
+        // Every field at its longest encoding, the revision included once it is bumped.
+        let mode = PointingMode::Keypad(KeypadConfig {
+            threshold_x: i16::MAX,
+            threshold_y: i16::MAX,
+            keycode_up: HidKeyCode::RGui,
+            keycode_down: HidKeyCode::RGui,
+            keycode_left: HidKeyCode::RGui,
+            keycode_right: HidKeyCode::RGui,
+            keycode_tap: HidKeyCode::RGui,
+            ..Default::default()
+        });
+        let largest = PointingConfig {
+            revision: u16::MAX - 1,
+            device_count: POINTING_DEVICE_CAPACITY as u8,
+            devices: core::array::from_fn(|i| PointingDeviceConfig {
+                device_id: i as u8,
+                mode,
+            }),
+            override_count: POINTING_LAYER_OVERRIDE_CAPACITY as u8,
+            overrides: core::array::from_fn(|i| PointingLayerOverride {
+                layer: (i / POINTING_DEVICE_CAPACITY) as u8,
+                device_id: (i % POINTING_DEVICE_CAPACITY) as u8,
+                mode,
+            }),
+        };
+
+        let flash = Flash::new();
+        let stored = with_storage_task(flash.clone(), async {
+            init(Some(PointingConfig {
+                revision: largest.revision,
+                ..Default::default()
+            }))
+            .await;
+            replace(largest, 4).await.unwrap()
+        });
+        assert_eq!(
+            postcard::experimental::serialized_size(&stored).unwrap(),
+            PointingConfig::POSTCARD_MAX_SIZE
+        );
+
+        crate::test_support::test_block_on(async {
+            init(Some(PointingConfig::default())).await;
+            let mut storage = Box::pin(Storage::new(async_flash_wrapper(flash), &Default::default())).await;
+            let mut data = KeymapData::new([[[KeyAction::No]]]);
+            let mut behavior = crate::config::BehaviorConfig::default();
+            let positional = crate::config::PositionalConfig::<1, 1>::default();
+            let _keymap = KeyMap::new_from_storage(&mut data, Some(&mut storage), &mut behavior, &positional).await;
+            assert_eq!(get().await, stored);
+        });
+    }
+
+    /// A configuration that never reached flash is not the live one: nothing
+    /// is announced, and the host's retry at the same revision lands.
+    #[cfg(feature = "storage")]
+    #[test]
+    fn failed_save_changes_nothing_and_can_be_retried() {
+        use crate::event::SubscribableEvent;
+        use crate::storage::{StorageKey, StorageValue, read};
+
+        let flash = Flash::new();
+        with_storage_task(flash.clone(), async {
+            let before = get().await;
+            let next = PointingConfig {
+                device_count: 1,
+                ..before
+            };
+            let mut changes = PointingConfigChangeEvent::subscriber();
+
+            flash.fail_writes(true);
+            assert_eq!(replace(next, 1).await, Err(RynkError::StorageFault));
+            assert_eq!(get().await, before);
+            assert!(changes.try_next_message_pure().is_none());
+
+            flash.fail_writes(false);
+            let stored = replace(next, 1).await.unwrap();
+            assert_eq!(stored.revision, before.revision.wrapping_add(1));
+            assert!(matches!(
+                read(StorageKey::PointingConfig).await,
+                Ok(Some(StorageValue::PointingConfig(config))) if config == stored
+            ));
         });
     }
 }

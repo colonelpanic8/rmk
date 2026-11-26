@@ -603,7 +603,17 @@ pub(crate) fn print_storage_error<F: AsyncNorFlash>(e: SSError<F::Error>) {
 
 /// Holds any one item with its key and framing; a multiple of 32 because
 /// `sequential-storage` wants that alignment on some flashes.
-const BUFFER_SIZE: usize = 256;
+const BUFFER_SIZE: usize = {
+    let size = 256;
+    #[cfg(feature = "rynk")]
+    let size = {
+        use postcard::experimental::max_size::MaxSize;
+        // A full pointing configuration, plus its key and value tags.
+        let pointing = PointingConfig::POSTCARD_MAX_SIZE + 2;
+        if pointing > size { pointing } else { size }
+    };
+    (size + 31) & !31
+};
 
 /// Test-only: forget queued requests and any pending reply, so a test starts clean.
 #[cfg(any(test, feature = "std"))]
