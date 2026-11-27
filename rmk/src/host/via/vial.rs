@@ -138,9 +138,7 @@ pub(crate) async fn process_vial<'a>(
                     LittleEndian::write_u16(&mut report.input_data[1..3], tap_capslock_interval);
                 }
                 SettingKey::PermissiveHold => {
-                    if let Some(m) = ctx.morse_default_profile().mode()
-                        && m == MorseMode::PermissiveHold
-                    {
+                    if ctx.keymap.morse_default_mode() == MorseMode::PermissiveHold {
                         report.input_data[1] = 1
                     } else {
                         report.input_data[1] = 0
@@ -212,7 +210,7 @@ pub(crate) async fn process_vial<'a>(
                         }
                     } else {
                         // Disable: Only set to Normal if currently PermissiveHold
-                        if old.mode() == Some(MorseMode::PermissiveHold) {
+                        if ctx.keymap.morse_default_mode() == MorseMode::PermissiveHold {
                             Some(MorseMode::Normal)
                         } else {
                             old.mode() // Keep current mode unchanged

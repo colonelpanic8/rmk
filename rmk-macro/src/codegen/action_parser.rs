@@ -173,6 +173,10 @@ pub(crate) fn expand_profile(profile: &MorseProfile) -> proc_macro2::TokenStream
         && enable
     {
         quote! { ::core::option::Option::Some(rmk::types::morse::MorseMode::Normal) }
+    } else if profile.permissive_hold == Some(false) {
+        // An unset mode resolves to PermissiveHold, so turning it off has to
+        // name the mode that is left.
+        quote! { ::core::option::Option::Some(rmk::types::morse::MorseMode::Normal) }
     } else {
         quote! { ::core::option::Option::None }
     };

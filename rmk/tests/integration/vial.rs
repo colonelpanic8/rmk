@@ -173,6 +173,47 @@ fn tap_capslock_interval_reads_back_its_own_value() {
     });
 }
 
+/// A `[behavior.morse]` that sets no mode flag compiles to a default profile
+/// without a mode, which the keyboard resolves as PermissiveHold. Vial used to
+/// read that as off, and its write to turn it off left the profile unset, so
+/// the checkbox could neither show nor disable what the keys were doing.
+#[test]
+fn permissive_hold_setting_follows_the_unset_default_mode() {
+    test_block_on(async {
+        let shift = rmk::types::modifier::ModifierCombination::LSHIFT;
+        let mut keyboard = SimKeyboard::builder([[[k!(A), rmk::mt!(B, shift)]]])
+            .behavior_config(BehaviorConfig {
+                morse: rmk::config::MorsesConfig {
+                    default_profile: rmk::types::morse::MorseProfile::new(None, None, Some(250), Some(250)),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .build()
+            .await;
+        let mut request = vial(VialCommand::GetBehaviorSetting);
+        request[2..4].copy_from_slice(&(SettingKey::PermissiveHold as u16).to_le_bytes());
+        let mut on = [0xFF; REPORT];
+        on[0..2].copy_from_slice(&[0, 1]);
+        let mut off = on;
+        off[1] = 0;
+        keyboard.host_exchange(request, on);
+        keyboard.set_behavior(SettingKey::PermissiveHold, 0);
+        keyboard.host_exchange(request, off);
+        // Normal mode: the nested tap goes out unmodified and the hold never fires.
+        keyboard
+            .press(0, 1)
+            .tap(0, 0, 10)
+            .expect_keys([HidKeyCode::A])
+            .expect_keys([])
+            .release(0, 1)
+            .expect_keys([HidKeyCode::B])
+            .expect_keys([])
+            .run()
+            .await;
+    });
+}
+
 #[test]
 fn morse_write_changes_the_tap() {
     test_block_on(async {
