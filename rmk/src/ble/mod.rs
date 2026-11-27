@@ -413,6 +413,7 @@ async fn run_ble_keyboard<
 
     // Restore the persisted state from storage
     crate::state::restore_preferred_connection().await;
+    crate::state::load_auto_switch_transport().await;
     let profile_manager: ProfileManager<TOTAL_BLE_PROFILES> = ProfileManager::new().await;
 
     let mut peripheral = stack.peripheral();
