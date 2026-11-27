@@ -6,7 +6,7 @@ use quote::{format_ident, quote};
 use rmk_config::resolved::Behavior;
 use rmk_config::resolved::behavior::{
     AutoMouseLayer, Combos, Forks, MacroOperation, Macros, Morse, MorseActionPair, MorseKey,
-    MorseProfile, MouseLayerScale, OneShot,
+    MorseProfile, MouseLayerScale, OneShot, Unicode, UnicodeMode,
 };
 
 use super::action_parser::{
@@ -526,6 +526,26 @@ fn expand_mouse_layer_scale(mouse_layer_scale: &[MouseLayerScale]) -> proc_macro
     }
 }
 
+/// The codepoint table is a `&'static [u32]`, so it lands in flash rather than
+/// taking 4 bytes of RAM per entry the way a macro sequence would.
+fn expand_unicode(unicode: &Option<Unicode>) -> proc_macro2::TokenStream {
+    let Some(unicode) = unicode else {
+        return quote! { ::rmk::config::UnicodeConfig::default() };
+    };
+    let codepoints = unicode.codepoints.iter();
+    let mode = match unicode.default_mode {
+        UnicodeMode::Linux => quote! { Linux },
+        UnicodeMode::Macos => quote! { MacOs },
+        UnicodeMode::Windows => quote! { Windows },
+    };
+    quote! {
+        ::rmk::config::UnicodeConfig {
+            codepoints: &[#(#codepoints),*],
+            mode: ::rmk::types::unicode::UnicodeMode::#mode,
+        }
+    }
+}
+
 pub(crate) fn expand_behavior_config(behavior: &Behavior) -> proc_macro2::TokenStream {
     let profiles = behavior
         .morse
@@ -542,6 +562,7 @@ pub(crate) fn expand_behavior_config(behavior: &Behavior) -> proc_macro2::TokenS
     let morse = expand_morse(&behavior.morse);
     let auto_mouse_layer = expand_auto_mouse_layer(&behavior.auto_mouse_layer);
     let mouse_layer_scale = expand_mouse_layer_scale(&behavior.mouse_layer_scale);
+    let unicode = expand_unicode(&behavior.unicode);
 
     // Filled in place: a struct literal with `..Default::default()` builds the whole
     // config, combo table included, as stack temporaries in the main task's poll frame.
@@ -553,6 +574,7 @@ pub(crate) fn expand_behavior_config(behavior: &Behavior) -> proc_macro2::TokenS
         behavior_config.keyboard_macros = #macros;
         behavior_config.auto_mouse_layer = #auto_mouse_layer;
         behavior_config.mouse_layer_scale = #mouse_layer_scale;
+        behavior_config.unicode = #unicode;
         #combos
         #forks
         #morse
