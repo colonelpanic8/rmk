@@ -2798,7 +2798,7 @@ mod tests {
             StorageValue::PositionCombo(rmk_types::combo::PositionCombo::new(
                 core::iter::empty(),
                 rmk_types::action::KeyAction::No,
-                None,
+                u32::MAX,
             )),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageValue::LightingWakeLayers(0),

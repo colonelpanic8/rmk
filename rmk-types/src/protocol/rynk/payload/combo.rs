@@ -133,7 +133,7 @@ mod tests {
                 col: i as u8,
             }),
             KeyAction::No,
-            Some(u8::MAX),
+            u32::MAX,
         ))
     }
 
