@@ -352,6 +352,7 @@ fn expand_main(
             quote! {
                 lock_config: LOCK_CONFIG,
                 layout_blob: LAYOUT_BLOB,
+                layer_names: LAYER_NAMES,
             },
         )
     } else {
