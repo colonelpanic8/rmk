@@ -131,16 +131,21 @@ impl<W: AsyncHidWrite> Write for UsbWriter<W> {
             .position(|byte| *byte == 0)
             .map_or(buf.len(), |index| index + 1)
             .min(remaining);
-        self.pending[1 + self.len..1 + self.len + n].copy_from_slice(&buf[..n]);
-        self.len += n;
-        if self.len == RYNK_HID_REPORT_SIZE || buf[n - 1] == 0 {
+        let end = self.len + n;
+        self.pending[1 + self.len..1 + end].copy_from_slice(&buf[..n]);
+        if end == RYNK_HID_REPORT_SIZE || buf[n - 1] == 0 {
             // Byte zero is the report ID; padding is added only at frame boundaries.
+            self.pending[1 + end..].fill(0);
+            // `len` moves only once the report is out, so a cancelled write commits
+            // nothing and its retry rewrites the same bytes.
             self.writer
                 .write_output_report(&self.pending)
                 .await
                 .map_err(std::io::Error::other)?;
             self.pending.fill(0);
             self.len = 0;
+        } else {
+            self.len = end;
         }
         Ok(n)
     }
