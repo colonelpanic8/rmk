@@ -2013,12 +2013,14 @@ mod tests {
                     assert_eq!(key, KeyboardEvent::key(0, 0, pressed));
                 }
                 let layer = session as u8;
+                let state = crate::split::SplitLayerState::new(layer, 0, 1 | (1 << layer));
+                crate::split::update_layer_state(state);
                 publish_event(LayerChangeEvent::new(layer));
                 settled("the layer reaches the peripheral", || {
                     log.borrow()
                         .received
                         .iter()
-                        .any(|m| matches!(m, SplitMessage::Layer(l) if *l == layer))
+                        .any(|m| matches!(m, SplitMessage::LayerState(actual) if *actual == state))
                 })
                 .await;
             }

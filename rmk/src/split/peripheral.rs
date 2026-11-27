@@ -239,6 +239,36 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                 super::update_layer_state(state);
                 publish_event(LayerChangeEvent::new(state.effective));
             }
+            SplitMessage::TransportOverride { generation, mode } => {
+                info!("Split transport force {} from central: {}", generation, mode);
+                // The central applies the force as soon as it
+                // reads the acknowledgement, so queueing one
+                // commits this half: the flush only gives it
+                // time to leave before the force tears the link
+                // down. An acknowledgement the central can never
+                // read — refused, or discarded by a session
+                // restart — commits nothing.
+                let lost = match self
+                    .split_driver
+                    .write(&SplitMessage::TransportOverrideAck(generation))
+                    .await
+                {
+                    Ok(_) => self
+                        .split_driver
+                        .flush()
+                        .await
+                        .err()
+                        .filter(|e| matches!(e, SplitDriverError::Disconnected)),
+                    Err(e) => Some(e),
+                };
+                match lost {
+                    None => crate::split::selector::set_forced(mode),
+                    Some(e) => error!(
+                        "Transport force {} acknowledgement lost, not applying: {:?}",
+                        generation, e
+                    ),
+                }
+            }
             #[cfg(feature = "display")]
             SplitMessage::Wpm(wpm) => publish_event(WpmUpdateEvent::new(wpm)),
             #[cfg(feature = "display")]
