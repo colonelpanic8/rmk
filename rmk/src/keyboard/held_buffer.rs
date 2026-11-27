@@ -119,6 +119,17 @@ pub enum KeyState {
     /// but the release HID report is not sent yet (will be sent only when the corresponding
     /// key is really released).
     ProcessedButReleaseNotReportedYet(Action),
+
+    /// Like [`Self::ProcessedButReleaseNotReportedYet`], but the hold was resolved purely by
+    /// timeout on a retro-tap key and no other key has been pressed since. If the key is
+    /// released while still in this state, the hold is undone and the tap is sent instead.
+    /// Any other key press downgrades this to [`Self::ProcessedButReleaseNotReportedYet`].
+    ///
+    /// Carries the hold that was already reported, exactly as
+    /// [`Self::ProcessedButReleaseNotReportedYet`] does; the tap is re-derived from the key
+    /// action on release. Holding both would widen this enum past `Action`, which costs
+    /// `HeldBuffer` 128 bytes for a state most keys never enter.
+    RetroTapCandidate(Action),
     // The Idle state is represented by the removal from the HeldBuffer
 }
 
@@ -133,6 +144,7 @@ pub struct HeldKey {
     pub press_time: Instant,
     /// The timeout time for the key
     pub timeout_time: Instant,
+    pub retro_tap_interrupted: bool,
 }
 
 impl HeldKey {
@@ -149,6 +161,7 @@ impl HeldKey {
             state,
             press_time,
             timeout_time,
+            retro_tap_interrupted: false,
         }
     }
 }
