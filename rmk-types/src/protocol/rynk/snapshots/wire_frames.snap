@@ -81,6 +81,8 @@ GetPointingCapabilities reply Ok(PointingCapabilities{Keypad})                  
 GetPointingCapabilities request ()                                              04 03 0a 01 00
 GetSleepState reply Ok(true)                                                    04 06 08 01 02 01 00
 GetSleepState request ()                                                        04 06 08 01 00
+GetSplitTransport reply Ok(state)                                               04 0a 07 01 04 01 02 01 01 00
+GetSplitTransport request ()                                                    04 0a 07 01 00
 GetVersion reply Ok(CURRENT)                                                    02 01 02 01 01 02 03 00
 GetVersion request ()                                                           02 01 02 01 00
 GetWpm reply Ok(42)                                                             04 05 08 01 02 2a 00
@@ -124,6 +126,8 @@ SetMorseProfile reply Ok(())                                                    
 SetMorseProfile request SetMorseProfileRequest{3,profile}                       0a 07 04 01 03 c8 81 b0 89 0c 00
 SetMorseProfileEntry reply Ok(())                                               04 0d 04 01 01 00
 SetMorseProfileEntry request {entry}                                            17 0d 04 01 03 0c 68 6f 6d 65 2d 72 6f 77 2d 6d 6f 64 c8 81 b0 89 0c 00
+SetSplitTransportForce reply Ok(state)                                          04 0b 07 01 05 01 01 01 01 00
+SetSplitTransportForce request Wired                                            05 0b 07 01 01 00
 SleepState topic true                                                           03 04 80 02 01 00
 StorageReset reply Ok(())                                                       02 05 02 01 01 00
 StorageReset request StorageResetMode::Full                                     02 05 02 01 01 00

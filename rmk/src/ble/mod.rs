@@ -242,7 +242,7 @@ where
     battery_config: BleBatteryConfig,
     /// One matrix region per split peripheral.
     #[cfg(feature = "split")]
-    peripheral_matrices: [PeripheralMatrixConfig; crate::NUM_SPLIT_PERIPHERALS],
+    peripheral_matrices: Option<[PeripheralMatrixConfig; crate::NUM_SPLIT_PERIPHERALS]>,
     #[cfg(feature = "host")]
     host_service: Option<&'a crate::host::HostService<'a>>,
     // Keeps `'a` in the type's parameter list across all feature configurations.
@@ -258,7 +258,7 @@ where
         controller: C,
         address: [u8; 6],
         rmk_config: RmkConfig<'static>,
-        #[cfg(feature = "split")] peripheral_matrices: [PeripheralMatrixConfig; crate::NUM_SPLIT_PERIPHERALS],
+        #[cfg(feature = "split")] peripheral_matrices: Option<[PeripheralMatrixConfig; crate::NUM_SPLIT_PERIPHERALS]>,
     ) -> Self {
         Self {
             controller: Some(controller),
@@ -321,6 +321,9 @@ where
         }
         #[cfg(feature = "split")]
         {
+            let Some(peripheral_matrices) = self.peripheral_matrices else {
+                keyboard.await
+            };
             // Sessions receive a connection per slot and send the slot ID back for reconnection.
             let conn_channels = core::array::from_fn(|_| Channel::new());
             let ended = Channel::new();
@@ -328,7 +331,7 @@ where
                 &conn_channels,
                 &ended,
                 &stack,
-                &self.peripheral_matrices
+                &peripheral_matrices
             ));
 
             join3(
