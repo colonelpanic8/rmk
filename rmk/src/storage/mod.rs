@@ -99,7 +99,7 @@ pub(crate) enum FlashOperationMessage {
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingWakeLayers(u64),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
-    LightingOutputMode(rmk_types::protocol::rynk::LightingOutputMode),
+    LightingOutputMode(LightingOutputRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingExtensionParams(LightingExtensionParamsRecord),
 }
@@ -409,7 +409,7 @@ pub(crate) enum StorageItem {
         metadata: LayerMetadata,
     },
     #[cfg(all(feature = "lighting", feature = "rynk"))]
-    LightingOutputMode(rmk_types::protocol::rynk::LightingOutputMode),
+    LightingOutputMode(LightingOutputRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingExtensionParams(LightingExtensionParamsRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -665,7 +665,7 @@ pub(crate) enum StorageValue {
         heapless::Vec<LightingAdvancedConditionalSceneCell, LIGHTING_ADVANCED_CONDITIONAL_SCENE_CHUNK_SIZE>,
     ),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
-    LightingOutputMode(rmk_types::protocol::rynk::LightingOutputMode),
+    LightingOutputMode(LightingOutputRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
     LightingExtensionParams(LightingExtensionParamsRecord),
     #[cfg(all(feature = "lighting", feature = "rynk"))]
@@ -675,6 +675,28 @@ pub(crate) enum StorageValue {
 }
 
 impl<'a> PostcardValue<'a> for StorageValue {}
+
+/// The lights' output mode, and with `lighting_persist_brightness` their output
+/// brightness, as a host or a lighting key last left them.
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct LightingOutputRecord {
+    pub mode: rmk_types::protocol::rynk::LightingOutputMode,
+    #[cfg(feature = "lighting_persist_brightness")]
+    pub brightness: u8,
+}
+
+#[cfg(all(feature = "lighting", feature = "rynk"))]
+impl LightingOutputRecord {
+    /// The stored brightness, `None` when this build does not persist it.
+    pub const fn brightness(&self) -> Option<u8> {
+        #[cfg(feature = "lighting_persist_brightness")]
+        return Some(self.brightness);
+        #[cfg(not(feature = "lighting_persist_brightness"))]
+        None
+    }
+}
 
 /// Persisted animated-extension selection, plus the parameter values of the
 /// effect it names. Only the selected effect's parameters are kept: they are
@@ -1267,9 +1289,9 @@ impl<F: AsyncNorFlash> Storage<F> {
     }
 
     #[cfg(all(feature = "lighting", feature = "rynk"))]
-    pub async fn read_lighting_output_mode(&mut self) -> Option<rmk_types::protocol::rynk::LightingOutputMode> {
+    pub async fn read_lighting_output(&mut self) -> Option<LightingOutputRecord> {
         match self.fetch(StorageKey::LightingOutputMode).await {
-            Ok(Some(StorageValue::LightingOutputMode(mode))) => Some(mode),
+            Ok(Some(StorageValue::LightingOutputMode(record))) => Some(record),
             _ => None,
         }
     }
@@ -2787,7 +2809,11 @@ mod tests {
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageValue::LightingRuntimeConditionalSceneShardV3(heapless::Vec::new()),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
-            StorageValue::LightingOutputMode(rmk_types::protocol::rynk::LightingOutputMode::PoweredOnly),
+            StorageValue::LightingOutputMode(LightingOutputRecord {
+                mode: rmk_types::protocol::rynk::LightingOutputMode::PoweredOnly,
+                #[cfg(feature = "lighting_persist_brightness")]
+                brightness: 0,
+            }),
             #[cfg(all(feature = "lighting", feature = "rynk"))]
             StorageValue::LightingExtensionParams(LightingExtensionParamsRecord {
                 effect: 0,
@@ -3081,7 +3107,11 @@ mod tests {
     fn lighting_preferences_survive_storage_reopen_without_selection() {
         block_on(async {
             let mut storage = new_storage(async_flash_wrapper(Part::new())).await;
-            let mode = rmk_types::protocol::rynk::LightingOutputMode::PoweredOnly;
+            let mode = LightingOutputRecord {
+                mode: rmk_types::protocol::rynk::LightingOutputMode::PoweredOnly,
+                #[cfg(feature = "lighting_persist_brightness")]
+                brightness: 77,
+            };
             let record = LightingExtensionParamsRecord {
                 effect: 7,
                 offset: 0,
@@ -3092,7 +3122,7 @@ mod tests {
             storage.put(StorageItem::LightingExtensionParams(record)).await.unwrap();
             let (flash, _) = storage.flash.destroy();
             let mut reopened = new_storage(flash).await;
-            assert_eq!(reopened.read_lighting_output_mode().await, Some(mode));
+            assert_eq!(reopened.read_lighting_output().await, Some(mode));
             assert_eq!(reopened.read_lighting_extension_params(7, 0).await, Some(record));
             assert_eq!(reopened.read_lighting_extension_params(6, 0).await, None);
             assert_eq!(reopened.read_lighting_extension_params(7, 8).await, None);
