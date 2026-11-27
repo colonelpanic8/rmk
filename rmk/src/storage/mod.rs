@@ -2437,11 +2437,11 @@ mod tests {
         block_on(async {
             let mut storage = new_storage(async_flash_wrapper(part.clone())).await;
             storage
-                .put(StorageItem::Keymap {
+                .put(StorageItem::KeymapSegment {
                     layer: 0,
                     row: 0,
                     col: 0,
-                    action: a,
+                    actions: heapless::Vec::from_slice(&[a]).unwrap(),
                 })
                 .await
                 .unwrap();
