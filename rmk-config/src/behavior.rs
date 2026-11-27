@@ -120,6 +120,42 @@ impl crate::KeyboardTomlConfig {
                         seen_device_ids.push(entry.device_id);
                     }
                 }
+                if let Some(entries) = &behavior.mouse_layer_scale {
+                    let max_mouse_layer_scales = self
+                        .rmk
+                        .max_mouse_layer_scales
+                        .unwrap_or(crate::resolved::behavior::DEFAULT_MAX_MOUSE_LAYER_SCALES);
+                    if entries.len() > max_mouse_layer_scales {
+                        return Err(format!(
+                            "keyboard.toml: number of [[behavior.mouse_layer_scale]] entries ({}) exceeds max_mouse_layer_scales ({}) configured under [rmk] section",
+                            entries.len(),
+                            max_mouse_layer_scales
+                        ));
+                    }
+                    let mut seen_layers = Vec::new();
+                    for entry in entries {
+                        if entry.layer >= num_layers {
+                            return Err(format!(
+                                "keyboard.toml: [[behavior.mouse_layer_scale]].layer must be a valid layer index (< [keymap].layers = {}), got {}",
+                                num_layers, entry.layer
+                            ));
+                        }
+                        if seen_layers.contains(&entry.layer) {
+                            return Err(format!(
+                                "keyboard.toml: duplicate [[behavior.mouse_layer_scale]] entries for layer = {}",
+                                entry.layer
+                            ));
+                        }
+                        for (name, scale) in [("move", entry.r#move), ("scroll", entry.scroll)] {
+                            if scale.is_some_and(|[_, denominator]| denominator == 0) {
+                                return Err(format!(
+                                    "keyboard.toml: [[behavior.mouse_layer_scale]].{name} denominator must be at least 1"
+                                ));
+                            }
+                        }
+                        seen_layers.push(entry.layer);
+                    }
+                }
                 if let Some(morse) = &behavior.morse
                     && let Some(morses) = &morse.morses
                     && morses.len() > self.rmk.max_morses

@@ -1656,6 +1656,8 @@ impl<'a> Keyboard<'a> {
         };
 
         if let Some(report) = report {
+            let scale = self.keymap.mouse_layer_scale();
+            let report = self.mouse.scale_report(report, scale);
             self.keymap.set_mouse_buttons(self.mouse.report.buttons);
             self.send_report(Report::MouseReport(report)).await;
             yield_now().await;
@@ -1839,7 +1841,10 @@ impl<'a> Keyboard<'a> {
     /// Send mouse report. Rate is implicitly bounded by the repeat interval
     /// for movement/wheel, but button events are sent immediately.
     pub(crate) async fn send_mouse_report(&mut self) {
-        self.send_report(Report::MouseReport(self.mouse.get_report())).await;
+        let report = self.mouse.get_report();
+        let scale = self.keymap.mouse_layer_scale();
+        let report = self.mouse.scale_report(report, scale);
+        self.send_report(Report::MouseReport(report)).await;
         yield_now().await;
     }
 
