@@ -599,19 +599,7 @@ impl<'a> Keyboard<'a> {
                         }
                         debug!("Processing current key before releasing: {:?}", held_key.event);
                         if !key_action.is_morse() {
-                            match key_action {
-                                KeyAction::Single(action) => {
-                                    self.process_key_action_normal(action, held_key.event).await;
-                                }
-                                KeyAction::Tap(action) => {
-                                    self.process_key_action_tap(action, held_key.event).await;
-                                }
-                                KeyAction::No => {
-                                    self.process_key_action_tap(key_action.to_action(), held_key.event)
-                                        .await;
-                                }
-                                _ => unreachable!(),
-                            }
+                            self.process_key_action_non_morse(key_action, held_key.event).await;
                             resolved = true;
                         } else {
                             match held_key.state {
@@ -847,21 +835,40 @@ impl<'a> Keyboard<'a> {
         }
 
         if !key_action.is_morse() {
-            match key_action {
-                KeyAction::No | KeyAction::Transparent => (),
-                KeyAction::Single(action) => {
-                    debug!("Process Single key action: {:?}, {:?}", action, event);
-                    self.process_key_action_normal(action, event).await;
-                }
-                KeyAction::Tap(action) => self.process_key_action_tap(action, event).await,
-                _ => unreachable!(),
-            }
+            self.process_key_action_non_morse(key_action, event).await;
         } else {
             self.process_key_action_morse(&key_action, event, event_time).await;
         }
         // Restore the modifiers the fork suppressed
         if self.try_finish_forks(event) {
             self.send_keyboard_report_with_resolved_modifiers(false).await;
+        }
+    }
+
+    /// Dispatches a key action that resolves without the morse state machine.
+    async fn process_key_action_non_morse(&mut self, key_action: KeyAction, event: KeyboardEvent) {
+        match key_action {
+            KeyAction::No | KeyAction::Transparent => (),
+            KeyAction::Single(action) => {
+                debug!("Process Single key action: {:?}, {:?}", action, event);
+                self.process_key_action_normal(action, event).await;
+            }
+            KeyAction::Tap(action) => self.process_key_action_tap(action, event).await,
+            KeyAction::LayerModTap(layer, modifier, tap) => {
+                let modifiers = ModifierCombination::from_bits(1 << modifier as u8);
+                self.process_key_action_normal(Action::LayerOnWithModifier(layer, modifiers), event)
+                    .await;
+                if event.pressed {
+                    // Under the macro identity, so the tap doesn't replace the held modifier.
+                    let tap_event = KeyboardEvent {
+                        source: KeyboardEventSource::Macro,
+                        pressed: true,
+                    };
+                    self.process_key_action_tap(Action::Key(KeyCode::Hid(tap)), tap_event)
+                        .await;
+                }
+            }
+            _ => unreachable!(),
         }
     }
 
